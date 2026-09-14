@@ -163,7 +163,9 @@
       "gain": "+{pct}% required coverage"
     },
     "baseline": {
-      "toggle": "Compare with a keyword matcher"
+      "toggle": "Compare with a keyword matcher",
+      "score": "Keyword matcher",
+      "caption": "A plain word-overlap matcher scored against the same requirements. It compares wording only — it cannot read evidence — so treat its number as a floor, not a second opinion. Its verdicts are the muted labels in the rows below."
     },
     "empty": "No requirements were found in this job post. Check the text you pasted and try again."
   },

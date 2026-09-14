@@ -194,7 +194,9 @@ function RequirementRow({
  * Client component because the rail's "jump to requirement" links must open
  * the target's `<details>` and scroll to it. Carries the keyword-baseline
  * comparison toggle when a `baseline` is supplied (Phase 2); the
- * hidden-strengths section is still Phase 4 scope.
+ * hidden-strengths section is still Phase 4 scope. Switching that toggle on
+ * reveals the matcher's aggregate coverage score beside the real one, and its
+ * per-requirement verdict as a muted badge on each row.
  */
 export function ResultsInteractive({ match, baseline }: ResultsInteractiveProps) {
   const t = useTranslations("results");
@@ -267,6 +269,37 @@ export function ResultsInteractive({ match, baseline }: ResultsInteractiveProps)
         ) : (
           <h2 className="mb-2 font-serif text-2xl text-ink">{t("title")}</h2>
         )}
+        {baseline && showBaseline ? (
+          <div className="mb-6 grid gap-3 border-y border-dashed border-rule py-4 sm:grid-cols-[auto_1fr] sm:items-center sm:gap-8">
+            <div className="flex items-baseline gap-8">
+              <p className="grid gap-1">
+                <span className="font-mono text-[11px] uppercase tracking-wide text-ink-3">
+                  {t("coverage.all")}
+                </span>
+                <span className="font-serif text-3xl leading-none tracking-tight text-ink">
+                  {Math.round(match.coverage_score)}
+                  <span className="ml-0.5 font-mono text-xs uppercase tracking-wide text-ink-3">
+                    %
+                  </span>
+                </span>
+              </p>
+              <p className="grid gap-1">
+                <span className="font-mono text-[11px] uppercase tracking-wide text-ink-3">
+                  {t("baseline.score")}
+                </span>
+                <span className="font-serif text-3xl leading-none tracking-tight text-ink-3">
+                  {Math.round(baseline.coverage_score)}
+                  <span className="ml-0.5 font-mono text-xs uppercase tracking-wide text-ink-3">
+                    %
+                  </span>
+                </span>
+              </p>
+            </div>
+            <p className="max-w-[52ch] text-sm leading-[1.6] text-ink-3">
+              {t("baseline.caption")}
+            </p>
+          </div>
+        ) : null}
         {groups.map((group) => (
           <div key={group.verdict} className="mb-8">
             <div className="mb-1 flex items-baseline justify-between border-b border-ink pb-2">
