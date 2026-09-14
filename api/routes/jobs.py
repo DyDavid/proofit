@@ -24,7 +24,13 @@ class JobIn(BaseModel):
 
 @router.post("/jobs")
 async def submit_job(payload: JobIn) -> dict:
-    if bool(payload.text and payload.text.strip()) == bool(payload.url and payload.url.strip()):
+    # Stripped once, up front: a blank or whitespace-only field counts as "not
+    # provided" everywhere below, so `{"text": "", "url": "https://..."}` is a
+    # valid url submission rather than a XOR violation.
+    text = payload.text.strip() if payload.text else ""
+    url = payload.url.strip() if payload.url else ""
+
+    if bool(text) == bool(url):
         # docs/errors.md JOB_EMPTY: covers blank text, neither given, and both given.
         raise ApiError(
             status_code=422,
@@ -32,16 +38,15 @@ async def submit_job(payload: JobIn) -> dict:
             message="Provide exactly one of a non-blank text or url.",
         )
 
-    if payload.text is not None:
-        if len(payload.text.strip()) < 40:
+    if text:
+        if len(text) < 40:
             raise ApiError(
                 status_code=422,
                 code="JOB_EMPTY",
                 message="Job text is present but too short to be a real job post.",
             )
-        record, cached = store.add_job(payload.text, source="text")
+        record, cached = store.add_job(text, source="text")
     else:
-        assert payload.url is not None
-        record, cached = store.add_job(payload.url, source="url")
+        record, cached = store.add_job(url, source="url")
 
     return {"job_id": record.id, "cached": cached}
