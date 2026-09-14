@@ -27,6 +27,20 @@ const COUNTRY_KEYS = [
 ] as const;
 
 /**
+ * The only server error codes this form renders a code-specific message for.
+ * Every other code — `RESUME_NOT_FOUND`, `JOB_NOT_FOUND`, anything added
+ * later — falls back to `common.error.generic`. An `ApiError.message` is
+ * developer-facing English for logs only and is never rendered to a user
+ * (docs/errors.md §1, api/errors.py).
+ */
+const LOCALIZED_CODES = ["RESUME_BAD_TYPE", "RESUME_TOO_LARGE", "JOB_EMPTY"] as const;
+type LocalizedCode = (typeof LOCALIZED_CODES)[number];
+
+function isLocalizedCode(code: string | undefined): code is LocalizedCode {
+  return (LOCALIZED_CODES as readonly string[]).includes(code ?? "");
+}
+
+/**
  * Orchestrates the Analyze form (PERSON_B_PLAN_v2.md §5 Phase 1 task 5):
  * resume dropzone + JD tabs + country select, gated submit. Submitting
  * uploads the resume, submits the job post, and creates an analysis against
@@ -99,15 +113,7 @@ export function AnalyzeForm() {
         setRememberedResume(null);
       }
       const code = err instanceof ApiError ? err.code : undefined;
-      const message =
-        code &&
-        (["RESUME_BAD_TYPE", "RESUME_TOO_LARGE", "JOB_EMPTY"] as const).includes(
-          code as "RESUME_BAD_TYPE" | "RESUME_TOO_LARGE" | "JOB_EMPTY",
-        )
-          ? te(code as "RESUME_BAD_TYPE" | "RESUME_TOO_LARGE" | "JOB_EMPTY")
-          : err instanceof ApiError
-            ? err.message
-            : tc("error.generic");
+      const message = isLocalizedCode(code) ? te(code) : tc("error.generic");
       if (code === "RESUME_BAD_TYPE" || code === "RESUME_TOO_LARGE") {
         setResumeError(message);
       } else if (code === "JOB_EMPTY") {
@@ -152,6 +158,9 @@ export function AnalyzeForm() {
               onChange={(f) => {
                 setFile(f);
                 setResumeError(null);
+                // Any edit also clears a stale whole-form message — e.g. the
+                // one left behind when a remembered resume_id was dropped.
+                setFormError(null);
               }}
               serverError={resumeError}
             />
@@ -165,6 +174,7 @@ export function AnalyzeForm() {
             onChange={(v) => {
               setJobPost(v);
               setJobError(null);
+              setFormError(null);
             }}
             error={jobError}
           />
