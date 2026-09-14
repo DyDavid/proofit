@@ -92,12 +92,26 @@ export function AnalyzeForm() {
         <Card padding="lg">
           <h2 className="mb-1 font-serif text-xl text-ink">{t("resume.label")}</h2>
           <p className="mb-4 text-sm text-ink-3">{t("resume.dropzoneHint")}</p>
-          <ResumeDropzone file={file} onChange={setFile} serverError={resumeError} />
+          <ResumeDropzone
+            file={file}
+            onChange={(f) => {
+              setFile(f);
+              setResumeError(null);
+            }}
+            serverError={resumeError}
+          />
         </Card>
 
         <Card padding="lg">
           <h2 className="mb-4 font-serif text-xl text-ink">{t("jd.label")}</h2>
-          <JobPostPanel value={jobPost} onChange={setJobPost} error={jobError} />
+          <JobPostPanel
+            value={jobPost}
+            onChange={(v) => {
+              setJobPost(v);
+              setJobError(null);
+            }}
+            error={jobError}
+          />
         </Card>
       </div>
 
