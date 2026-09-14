@@ -173,7 +173,20 @@
       "checking_realism": "Checking how realistic the fit is"
     },
     "timeout": "This is taking longer than expected. The analysis may still be running in the background.",
-    "timeoutAction": "Run the analysis again"
+    "timeoutAction": "Keep waiting",
+    "timeoutRetry": "Run the analysis again"
+  },
+  "errors": {
+    "RESUME_BAD_TYPE": "This file type isn't supported. Please upload a PDF or DOCX file.",
+    "RESUME_TOO_LARGE": "This file is larger than 5 MB. Try exporting your resume again at a smaller size.",
+    "RESUME_UNREADABLE": "We couldn't read any text in this file. If it's a scan or a photo, upload a version where the text can be selected — export to PDF from Word or Google Docs.",
+    "JOB_EMPTY": "We need the job post itself. Paste the job description text, or a link to it.",
+    "JOB_URL_BLOCKED": "We can't open LinkedIn or Facebook links. Copy the job description text and paste it here instead — that works exactly the same.",
+    "JOB_FETCH_FAILED": "We couldn't open that link. Copy the job description text and paste it here instead.",
+    "ANALYSIS_NOT_FOUND": "We couldn't find this analysis. Results aren't saved permanently yet — start a new analysis to see fresh results.",
+    "ENGINE_FAILED": "The analysis didn't finish. Try again — if it keeps failing, send us this error id.",
+    "RATE_LIMITED": "Too many requests right now. Wait about a minute and try again.",
+    "INTERNAL": "Something went wrong on our side. Try again — if it keeps happening, send us this error id."
   },
   "about": {
     "eyebrow": "About",
