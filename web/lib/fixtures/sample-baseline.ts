@@ -7,22 +7,27 @@ import type { BaselineMatch } from "@/lib/types";
  *
  * Per requirement: lowercase-token overlap between the requirement's `text`
  * and the *cited* evidence only — the `source_line` of every evidence id the
- * real `sampleMatch.results` entry lists (plus that evidence's `skills` tags,
- * since a naive keyword matcher indexes an explicit skill tag at least as
- * readily as free prose), or `resume.education` for the education/language
- * rows (r6, r11) that carry no cited evidence id. The matcher never sees the
- * real verdict or reasoning — only what's literally spelled out in that text.
+ * real `sampleMatch.results` entry lists, or `resume.education` for the
+ * education row (r6) that carries no cited evidence id. Structured fields
+ * like an evidence record's `skills` tag are deliberately out of scope, same
+ * as the backend `data/fixtures/*.baseline.json` precedent (see e.g.
+ * `fresh_grad_stretch.baseline.json`'s r6, scored `missing` even though its
+ * cited evidence's `skills` array names "Git" — only literal prose counts).
+ * The matcher never sees the real verdict or reasoning, and never sees
+ * anything but that one field's literal text.
  *
  * coverage_score = weighted (proven=1, partial=0.5, missing=0; required
  * weight 1, preferred weight 0.5) as a % of total weight:
- *   required (r1,r2,r4,r5,r8,r9): 0+0+0.5+0.5+1+1 = 3.0 / 6
- *   preferred (r3,r6,r7,r10,r11,r12): 0+0+0+0+0.5+0.5 = 1.0 / 3 (weighted)
- *   (3.0 + 1.0) / 9 * 100 = 44.4
- * sampleMatch.coverage_score is 68 → a 23.6-point gap (within the 10–35
- * credible-comparison range Task 3's fixture test enforces on the backend).
+ *   required (r1,r2,r4,r5,r8,r9): 0+0+0.5+0.5+0.5+0 = 1.5 / 6
+ *   preferred (r3,r6,r7,r10,r11,r12): 0+0+0+0+1+0 = 1.0 / 6 (raw) → 0.5 / 3 (weighted)
+ *   (1.5 + 0.5) / 9 * 100 = 22.2
+ * sampleMatch.coverage_score is 68 → a 45.8-point gap. There is no test
+ * enforcing any particular gap for this file (unlike the backend fixtures'
+ * `tests/test_baseline_fixtures.py`); this number is whatever the rule,
+ * applied honestly and consistently, produces.
  */
 export const sampleBaseline: BaselineMatch = {
-  coverage_score: 44.4,
+  coverage_score: 22.2,
   method: "tfidf",
   results: [
     {
@@ -69,15 +74,15 @@ export const sampleBaseline: BaselineMatch = {
     },
     {
       requirement_id: "r8",
-      verdict: "proven",
-      score: 0.68,
-      matched_terms: ["git", "team"],
+      verdict: "partial",
+      score: 0.3,
+      matched_terms: ["team"],
     },
     {
       requirement_id: "r9",
-      verdict: "proven",
-      score: 0.6,
-      matched_terms: ["python"],
+      verdict: "missing",
+      score: 0.0,
+      matched_terms: [],
     },
     {
       requirement_id: "r10",
@@ -93,9 +98,9 @@ export const sampleBaseline: BaselineMatch = {
     },
     {
       requirement_id: "r12",
-      verdict: "proven",
-      score: 0.6,
-      matched_terms: ["sql"],
+      verdict: "missing",
+      score: 0.0,
+      matched_terms: [],
     },
   ],
 };
