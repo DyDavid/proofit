@@ -8,9 +8,10 @@ stored as-is, not retrieved.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, model_validator
+from fastapi import APIRouter
+from pydantic import BaseModel
 
+from api.errors import ApiError
 from api.store import store
 
 router = APIRouter()
@@ -20,23 +21,23 @@ class JobIn(BaseModel):
     text: str | None = None
     url: str | None = None
 
-    @model_validator(mode="after")
-    def _exactly_one_source(self) -> JobIn:
-        if bool(self.text) == bool(self.url):
-            raise ValueError("Provide exactly one of text or url.")
-        return self
-
 
 @router.post("/jobs")
 async def submit_job(payload: JobIn) -> dict:
+    if bool(payload.text and payload.text.strip()) == bool(payload.url and payload.url.strip()):
+        # docs/errors.md JOB_EMPTY: covers blank text, neither given, and both given.
+        raise ApiError(
+            status_code=422,
+            code="JOB_EMPTY",
+            message="Provide exactly one of a non-blank text or url.",
+        )
+
     if payload.text is not None:
         if len(payload.text.strip()) < 40:
-            raise HTTPException(
+            raise ApiError(
                 status_code=422,
-                detail={
-                    "code": "JOB_TEXT_TOO_SHORT",
-                    "message": "Paste the full job post, including the requirements section.",
-                },
+                code="JOB_EMPTY",
+                message="Job text is present but too short to be a real job post.",
             )
         record, cached = store.add_job(payload.text, source="text")
     else:

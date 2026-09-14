@@ -11,10 +11,11 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel
 
 from api.config import settings
+from api.errors import ApiError
 from api.store import STAGE_ORDER, store
 
 router = APIRouter()
@@ -41,14 +42,16 @@ async def _run_mock_analysis(analysis_id: str) -> None:
 @router.post("/analyses", status_code=202)
 async def create_analysis(payload: AnalysisIn, background_tasks: BackgroundTasks) -> dict:
     if payload.resume_id not in store.resumes:
-        raise HTTPException(
+        raise ApiError(
             status_code=404,
-            detail={"code": "RESUME_NOT_FOUND", "message": "Unknown resume_id."},
+            code="RESUME_NOT_FOUND",
+            message="Unknown resume_id.",
         )
     if payload.job_id not in store.jobs:
-        raise HTTPException(
+        raise ApiError(
             status_code=404,
-            detail={"code": "JOB_NOT_FOUND", "message": "Unknown job_id."},
+            code="JOB_NOT_FOUND",
+            message="Unknown job_id.",
         )
 
     record = store.create_analysis(payload.resume_id, payload.job_id, payload.country)
@@ -60,9 +63,10 @@ async def create_analysis(payload: AnalysisIn, background_tasks: BackgroundTasks
 async def get_analysis(analysis_id: str) -> dict:
     record = store.analyses.get(analysis_id)
     if record is None:
-        raise HTTPException(
+        raise ApiError(
             status_code=404,
-            detail={"code": "ANALYSIS_NOT_FOUND", "message": "Unknown analysis_id."},
+            code="ANALYSIS_NOT_FOUND",
+            message="Unknown analysis_id.",
         )
 
     return {

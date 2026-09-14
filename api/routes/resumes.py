@@ -7,9 +7,10 @@ A's, wired in when `ENGINE_MODE=live` (Phase 2 CP2).
 
 from __future__ import annotations
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, UploadFile
 
 from api.config import settings
+from api.errors import ApiError
 from api.store import store
 
 router = APIRouter()
@@ -23,22 +24,18 @@ ACCEPTED_CONTENT_TYPES = {
 @router.post("/resumes")
 async def upload_resume(file: UploadFile = File(...)) -> dict:  # noqa: B008 (FastAPI DI convention)
     if file.content_type not in ACCEPTED_CONTENT_TYPES:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "code": "RESUME_TYPE_UNSUPPORTED",
-                "message": "Upload a PDF or a DOCX file.",
-            },
+        raise ApiError(
+            status_code=415,
+            code="RESUME_BAD_TYPE",
+            message=f"Unsupported content type: {file.content_type!r}",
         )
 
     body = await file.read()
     if len(body) > settings.max_upload_bytes:
-        raise HTTPException(
+        raise ApiError(
             status_code=413,
-            detail={
-                "code": "RESUME_TOO_LARGE",
-                "message": "That file is larger than 5 MB. Upload a smaller file.",
-            },
+            code="RESUME_TOO_LARGE",
+            message=f"Upload exceeds {settings.max_upload_bytes} bytes.",
         )
 
     record = store.add_resume(
