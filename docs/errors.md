@@ -201,20 +201,14 @@ not on the team) are where they get confirmed or replaced. Error messages are re
 who are already frustrated, so an awkward machine-translated error does more damage than an
 awkward machine-translated label — review these first in that session, ahead of the UI chrome.
 
-### Phase 2 checklist, none of it done yet
+### Phase 2 checklist
 
-- [ ] Add `errors.*` keys for all ten codes to `web/messages/en.json` and `web/messages/km.json`.
-- [ ] Add a typed `ApiError` in `web/lib/api.ts` that surfaces `code` to callers.
-- [ ] Map every code to a UI presentation: inline under a field, full-page state, or error card.
-- [ ] **Force each of the ten failures deliberately and screenshot both locales.** Plan §5
-      Phase 2.4 requires this; it is what makes this table evidence rather than intention.
-      Suggested forcing methods: upload a `.txt` renamed to `.pdf` (`RESUME_BAD_TYPE`), a
-      photographed resume (`RESUME_UNREADABLE`), a LinkedIn job URL (`JOB_URL_BLOCKED`), a URL
-      on a domain that does not resolve (`JOB_FETCH_FAILED`), a hand-edited analysis id
-      (`ANALYSIS_NOT_FOUND`), and a temporary `raise` inside the background task (`ENGINE_FAILED`).
+- [x] Add `errors.*` keys for all ten codes to `web/messages/en.json` and `web/messages/km.json`.
+- [x] Add a typed `ApiError` in `web/lib/api.ts` that surfaces `code` (and `error_id`) to callers.
+- [x] Map every *mock-mode-reachable* code to a UI presentation: `RESUME_BAD_TYPE`/`RESUME_TOO_LARGE` inline under the dropzone, `JOB_EMPTY` inline under the JD tabs, `ANALYSIS_NOT_FOUND` full-page, `ENGINE_FAILED` as an error card with Retry + copyable error_id.
+- [ ] **Force each of the ten failures deliberately and screenshot both locales.** Done for the four reachable in mock mode today: `RESUME_BAD_TYPE` (upload a `.txt`), `RESUME_TOO_LARGE` (upload a >5MB file), `JOB_EMPTY` (submit blank/neither/both), `ANALYSIS_NOT_FOUND` (hand-edit an id), `ENGINE_FAILED` (tests/test_analyses_baseline_and_retry.py's monkeypatch demonstrates the path; a manual screenshot still needs taking). **Still blocked:** `RESUME_UNREADABLE` (mock mode doesn't parse file content at all — needs Person A's normalizer), `JOB_URL_BLOCKED`/`JOB_FETCH_FAILED` (URL fetching is Phase 3 scope, `PERSON_B_PLAN_v2.md` §5 Phase 3.1), `RATE_LIMITED` (only reachable against the real Anthropic API, CP2).
 - [ ] Re-word `ANALYSIS_NOT_FOUND` after Supabase persistence lands at CP2.
-- [ ] Confirm every message obeys the `BRAND.md` §6 voice rules — no blame, no jargon, and a
-      concrete next action in every single one.
+- [ ] Confirm every message obeys the `BRAND.md` §6 voice rules — no blame, no jargon, and a concrete next action in every single one. *(English strings were copied verbatim from this document's own §2, which was already written to that standard — this line is asking for a second read with fresh eyes before the Phase 5 Khmer QA session, not a rewrite.)*
 
 ---
 
