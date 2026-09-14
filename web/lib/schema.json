@@ -1,0 +1,714 @@
+{
+  "$defs": {
+    "BaselineMatch": {
+      "additionalProperties": false,
+      "description": "The keyword matcher, run on the same pair.\n\nThis exists to be beaten. It is the comparison column in the evaluation chapter\nand the 'Compare with keyword baseline' toggle on the results screen — the one\ncontrol that makes the argument visible instead of narrated.",
+      "properties": {
+        "coverage_score": {
+          "maximum": 100.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "method": {
+          "const": "tfidf",
+          "default": "tfidf",
+          "type": "string"
+        },
+        "results": {
+          "items": {
+            "$ref": "#/$defs/BaselineResult"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "coverage_score"
+      ],
+      "title": "BaselineMatch",
+      "type": "object"
+    },
+    "BaselineResult": {
+      "additionalProperties": false,
+      "description": "One TF-IDF keyword-overlap verdict, for the comparison column.",
+      "properties": {
+        "matched_terms": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "requirement_id": {
+          "pattern": "^r\\d+$",
+          "type": "string"
+        },
+        "score": {
+          "description": "Cosine similarity of the TF-IDF vectors.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "verdict": {
+          "enum": [
+            "proven",
+            "partial",
+            "missing"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "requirement_id",
+        "verdict",
+        "score"
+      ],
+      "title": "BaselineResult",
+      "type": "object"
+    },
+    "Education": {
+      "additionalProperties": false,
+      "properties": {
+        "degree": {
+          "type": "string"
+        },
+        "gpa": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Free text on purpose — '3.5+', '2:1', 'First Class' are all real."
+        },
+        "institution": {
+          "type": "string"
+        },
+        "year": {
+          "anyOf": [
+            {
+              "maximum": 2100,
+              "minimum": 1950,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "degree",
+        "institution"
+      ],
+      "title": "Education",
+      "type": "object"
+    },
+    "Evidence": {
+      "additionalProperties": false,
+      "description": "One thing the candidate has actually done.\n\nF4 is the whole project: a fresh graduate has no employment bullet points, so\ncoursework, projects and part-time work must be first-class evidence records\nrather than second-class text.",
+      "properties": {
+        "duration_months": {
+          "anyOf": [
+            {
+              "maximum": 600,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "evidence_type": {
+          "enum": [
+            "employment",
+            "internship",
+            "part_time",
+            "coursework",
+            "project",
+            "volunteer",
+            "certification",
+            "competition"
+          ],
+          "type": "string"
+        },
+        "id": {
+          "description": "Stable within one resume: e1, e2, … Cited by MatchResult.evidence_ids and facts_used.",
+          "examples": [
+            "e1"
+          ],
+          "pattern": "^e\\d+$",
+          "type": "string"
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "skills": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "source_line": {
+          "description": "Verbatim line from the resume. The results screen highlights this exact string, and the F5 rewrite validator checks generated claims against it.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "team_size": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "source_line",
+        "evidence_type"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    },
+    "HiddenStrength": {
+      "additionalProperties": false,
+      "description": "F5 — a requirement the resume already satisfies but phrases badly.\n\nProduced by ``engine.rewrite`` (Person B, Phase 3). ``suggested_phrasing`` is\ngenerated from the evidence records *only* — never from the raw resume and\nnever from the JD — and every claim in it must trace to ``facts_used``.",
+      "properties": {
+        "changed_words": {
+          "description": "Words in suggested_phrasing absent from current_phrasing. Highlighted in the UI.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "current_phrasing": {
+          "description": "Verbatim from the resume.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "evidence_id": {
+          "pattern": "^e\\d+$",
+          "type": "string"
+        },
+        "facts_used": {
+          "description": "Evidence.id values every claim in suggested_phrasing traces to.",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "requirement_id": {
+          "pattern": "^r\\d+$",
+          "type": "string"
+        },
+        "suggested_phrasing": {
+          "description": "Rewritten. No new facts.",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "requirement_id",
+        "evidence_id",
+        "current_phrasing",
+        "suggested_phrasing",
+        "facts_used"
+      ],
+      "title": "HiddenStrength",
+      "type": "object"
+    },
+    "Job": {
+      "additionalProperties": false,
+      "description": "A normalized job description, from any source: paste, URL or scraper.",
+      "properties": {
+        "company": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "content_hash": {
+          "description": "Hash of the raw JD text. PROJECT_SPEC.md §9 rule 4: never re-normalize the same JD — LLM cost scales with users otherwise.",
+          "minLength": 8,
+          "type": "string"
+        },
+        "country": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ISO 3166-1 alpha-2 where known (KH, SG, JP, AU), or 'REMOTE'."
+        },
+        "education_required": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "industry": {
+          "type": "string"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "requirements": {
+          "items": {
+            "$ref": "#/$defs/Requirement"
+          },
+          "type": "array"
+        },
+        "salary_range": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "seniority": {
+          "enum": [
+            "intern",
+            "entry",
+            "junior",
+            "mid",
+            "senior"
+          ],
+          "type": "string"
+        },
+        "source_type": {
+          "enum": [
+            "scraped",
+            "pasted"
+          ],
+          "type": "string"
+        },
+        "source_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sponsors_visa": {
+          "default": "unstated",
+          "description": "F6 visa signal. 'unstated' is the honest default — silence is not a 'no'.",
+          "enum": [
+            "yes",
+            "no",
+            "unstated"
+          ],
+          "type": "string"
+        },
+        "sponsors_visa_source_line": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Verbatim JD sentence the sponsors_visa value was read from. None when unstated."
+        },
+        "title": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "years_exp_required": {
+          "anyOf": [
+            {
+              "maximum": 50,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "source_type",
+        "content_hash",
+        "title",
+        "industry",
+        "seniority"
+      ],
+      "title": "Job",
+      "type": "object"
+    },
+    "Match": {
+      "additionalProperties": false,
+      "description": "The full analysis of one resume against one job.\n\n``job`` and ``resume`` are embedded so a stored match is self-contained: the\nresults screen, the golden fixtures and the Phase 6 evaluation export all need\nthe requirement text and the evidence lines beside the verdicts, and re-joining\nthem from three tables at render time buys nothing.",
+      "properties": {
+        "coverage_required_only": {
+          "description": "Required requirements only. The honest headline number.",
+          "maximum": 100.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "coverage_score": {
+          "description": "All requirements, weighted required-over-preferred. Weighting lives in engine/match/.",
+          "maximum": 100.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "engine_version": {
+          "default": "0.1.0-provisional",
+          "description": "Engine version that produced this match. Recorded in eval/system_outputs.json.",
+          "type": "string"
+        },
+        "generated_at": {
+          "description": "UTC, timezone-aware.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "hidden_strengths": {
+          "items": {
+            "$ref": "#/$defs/HiddenStrength"
+          },
+          "type": "array"
+        },
+        "job": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Job"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The job this match was computed against."
+        },
+        "priority_actions": {
+          "items": {
+            "$ref": "#/$defs/PriorityAction"
+          },
+          "type": "array"
+        },
+        "realism_explanation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "One plain-language line under the realism badge. English; km translation is Phase 5.7."
+        },
+        "realism_verdict": {
+          "enum": [
+            "strong_fit",
+            "stretch",
+            "unrealistic"
+          ],
+          "type": "string"
+        },
+        "results": {
+          "items": {
+            "$ref": "#/$defs/MatchResult"
+          },
+          "type": "array"
+        },
+        "resume": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Resume"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The resume this match was computed for."
+        }
+      },
+      "required": [
+        "coverage_score",
+        "coverage_required_only",
+        "realism_verdict"
+      ],
+      "title": "Match",
+      "type": "object"
+    },
+    "MatchResult": {
+      "additionalProperties": false,
+      "description": "One verdict, for one requirement.\n\nNot a score — a verdict, with its receipt. PROJECT_SPEC.md §9 rule 3 is\nenforced by ``_traceable`` below: no verdict may exist without either cited\nevidence or a stated reason for its absence.",
+      "properties": {
+        "confidence": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "evidence_ids": {
+          "description": "Evidence.id values supporting this verdict. Must be empty when verdict is 'missing'.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "missing_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Required when verdict is 'missing'. Rendered as the explicit 'why not' line."
+        },
+        "reasoning": {
+          "description": "One sentence, English. Displayed under the expanded requirement row.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "requirement_id": {
+          "pattern": "^r\\d+$",
+          "type": "string"
+        },
+        "verdict": {
+          "enum": [
+            "proven",
+            "partial",
+            "missing"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "requirement_id",
+        "verdict",
+        "reasoning",
+        "confidence"
+      ],
+      "title": "MatchResult",
+      "type": "object"
+    },
+    "PriorityAction": {
+      "additionalProperties": false,
+      "description": "One entry in the 'what to fix first' rail.\n\nPROJECT_SPEC.md §8 types ``priority_actions`` as a list of plain strings.\nPERSON_B_PLAN_v2.md Phase 2.1 and 4.6 need each action to link to the\nrequirement row it addresses and to show its coverage gain. Both are satisfied:\na bare string still parses (see ``_accept_bare_string``), so Person A's engine\nmay keep emitting strings and the UI degrades to a plain ordered list.",
+      "properties": {
+        "coverage_gain": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Estimated percentage-point gain in coverage_required_only. Rendered as '+8%'."
+        },
+        "requirement_id": {
+          "anyOf": [
+            {
+              "pattern": "^r\\d+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Anchor for the 'jump to requirement' link. None when the action is general."
+        },
+        "text": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "PriorityAction",
+      "type": "object"
+    },
+    "Requirement": {
+      "additionalProperties": false,
+      "description": "One requirement, extracted verbatim from the job post.\n\nOne record per requirement — never a bundled sentence. ``text`` is quoted back\nto the user on the results screen, so it must be the JD's own words.",
+      "properties": {
+        "category": {
+          "enum": [
+            "hard_skill",
+            "soft_skill",
+            "education",
+            "certification",
+            "experience",
+            "language",
+            "other"
+          ],
+          "type": "string"
+        },
+        "display_order": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Zero-based position in the original JD. None if the normalizer did not record it."
+        },
+        "id": {
+          "description": "Stable within one job: r1, r2, … Referenced by MatchResult.requirement_id.",
+          "examples": [
+            "r1"
+          ],
+          "pattern": "^r\\d+$",
+          "type": "string"
+        },
+        "normalized_skill": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical skill name, e.g. 'React'. None when the requirement names no single skill."
+        },
+        "priority": {
+          "description": "From JD wording: 'must have' → required, 'nice to have' → preferred.",
+          "enum": [
+            "required",
+            "preferred"
+          ],
+          "type": "string"
+        },
+        "text": {
+          "description": "Verbatim requirement from the JD. Shown in English regardless of UI locale.",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "text",
+        "category",
+        "priority"
+      ],
+      "title": "Requirement",
+      "type": "object"
+    },
+    "Resume": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_summary": {
+          "default": "",
+          "description": "One paragraph. May be empty.",
+          "type": "string"
+        },
+        "education": {
+          "items": {
+            "$ref": "#/$defs/Education"
+          },
+          "type": "array"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "type": "array"
+        },
+        "total_years_work": {
+          "default": 0.0,
+          "description": "Paid employment only. A fresh graduate is 0.0 and that is fine.",
+          "maximum": 60,
+          "minimum": 0,
+          "type": "number"
+        }
+      },
+      "title": "Resume",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Every top-level model in one object, so one JSON Schema export covers all.\n\nNot used at runtime. ``scripts/export_schema.py`` calls\n``SchemaBundle.model_json_schema()`` and hands the ``$defs`` to\njson-schema-to-typescript, which is how ``web/lib/types.ts`` stays honest.",
+  "properties": {
+    "baseline": {
+      "$ref": "#/$defs/BaselineMatch"
+    },
+    "job": {
+      "$ref": "#/$defs/Job"
+    },
+    "match": {
+      "$ref": "#/$defs/Match"
+    },
+    "resume": {
+      "$ref": "#/$defs/Resume"
+    }
+  },
+  "required": [
+    "job",
+    "resume",
+    "match",
+    "baseline"
+  ],
+  "title": "SchemaBundle",
+  "type": "object",
+  "x-generated-by": "scripts/export_schema.py from engine/normalize/schema.py",
+  "x-schema-version": "0.1.0-provisional"
+}

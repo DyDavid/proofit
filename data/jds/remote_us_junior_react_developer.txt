@@ -1,0 +1,42 @@
+Junior React Developer (Remote, US)
+Northwind Labs, Inc.
+Remote - United States | Full-time | Engineering
+Salary: USD 70,000 - 90,000 per year
+Posted 2 September 2026
+
+ABOUT NORTHWIND LABS
+Northwind Labs builds observability tooling for platform engineering teams. We are 42 people, fully distributed across the United States, and we have been remote-first since we were founded in 2019. We write our decisions down, we review asynchronously, and we keep meetings to two fixed blocks a week.
+
+ABOUT THE ROLE
+You will join the Product Frontend team of five engineers and own features in our dashboard from ticket to production. This is a junior title but it is not a training role: we expect you to have shipped React to real users already and to be comfortable owning a feature end to end with review support.
+
+WHAT YOU WILL DO
+- Own dashboard features from ticket through design review, implementation, testing and release
+- Profile and fix rendering performance problems in data-heavy React views
+- Extend our component library and its Storybook documentation
+- Take part in the weekly release rotation, including a production smoke check
+- Write the customer-facing release note for the features you ship
+
+REQUIREMENTS
+- Bachelor's degree in Computer Science or equivalent practical experience
+- 2+ years of professional experience building and shipping production React applications
+- Expert-level React, including hooks, context and performance profiling
+- Strong TypeScript skills
+- Experience consuming and designing REST and GraphQL APIs
+- Experience with automated testing using Jest, React Testing Library and Cypress
+- Experience with CI/CD pipelines and deploying to AWS or Vercel
+- Demonstrated ownership of features in an Agile team, from ticket to production
+- Must be legally authorized to work in the United States without sponsorship
+- Excellent written English for an asynchronous, remote-first team
+
+NICE TO HAVE
+- Familiarity with Next.js or Remix
+- Experience with state management libraries such as Redux or Zustand
+- Open-source contributions or a public portfolio
+- Comfortable with at least 4 hours of daily overlap with US Pacific time
+
+WORK AUTHORIZATION
+Northwind Labs is unable to provide visa sponsorship or employ candidates located outside the United States.
+
+HOW TO APPLY
+Apply with your resume and a link to production React work you have shipped. We reply to every applicant within ten business days.

@@ -1,0 +1,76 @@
+{
+  "coverage_score": 25.0,
+  "coverage_required_only": 25.0,
+  "realism_verdict": "unrealistic",
+  "realism_explanation": "You cover almost none of the required professional-experience bar this posting sets, and the company explicitly cannot sponsor work authorization outside the United States. This one is a long-term target, not this cycle's application.",
+  "engine_version": "0.1.0-provisional",
+  "generated_at": "2026-09-02T09:00:00Z",
+  "job": {
+    "source_type": "scraped",
+    "content_hash": "us-northwind-junior-react-remote",
+    "title": "Junior React Developer (Remote, US)",
+    "company": "Northwind Labs, Inc.",
+    "location": "Remote - United States",
+    "country": "REMOTE",
+    "industry": "Observability / platform engineering tooling",
+    "seniority": "junior",
+    "years_exp_required": 2.0,
+    "education_required": "Bachelor's degree in Computer Science or equivalent practical experience",
+    "sponsors_visa": "no",
+    "sponsors_visa_source_line": "Northwind Labs is unable to provide visa sponsorship or employ candidates located outside the United States.",
+    "salary_range": "USD 70,000 - 90,000 per year",
+    "requirements": [
+      { "id": "r1", "text": "Bachelor's degree in Computer Science or equivalent practical experience", "category": "education", "priority": "required", "display_order": 0 },
+      { "id": "r2", "text": "2+ years of professional experience building and shipping production React applications", "category": "experience", "priority": "required", "display_order": 1 },
+      { "id": "r3", "text": "Expert-level React, including hooks, context and performance profiling", "category": "hard_skill", "priority": "required", "normalized_skill": "React", "display_order": 2 },
+      { "id": "r4", "text": "Strong TypeScript skills", "category": "hard_skill", "priority": "required", "normalized_skill": "TypeScript", "display_order": 3 },
+      { "id": "r5", "text": "Experience consuming and designing REST and GraphQL APIs", "category": "hard_skill", "priority": "required", "display_order": 4 },
+      { "id": "r6", "text": "Experience with automated testing using Jest, React Testing Library and Cypress", "category": "hard_skill", "priority": "required", "display_order": 5 },
+      { "id": "r7", "text": "Experience with CI/CD pipelines and deploying to AWS or Vercel", "category": "hard_skill", "priority": "required", "display_order": 6 },
+      { "id": "r8", "text": "Demonstrated ownership of features in an Agile team, from ticket to production", "category": "experience", "priority": "required", "display_order": 7 },
+      { "id": "r9", "text": "Must be legally authorized to work in the United States without sponsorship", "category": "other", "priority": "required", "display_order": 8 },
+      { "id": "r10", "text": "Excellent written English for an asynchronous, remote-first team", "category": "language", "priority": "required", "display_order": 9 },
+      { "id": "r11", "text": "Familiarity with Next.js or Remix", "category": "hard_skill", "priority": "preferred", "display_order": 10 },
+      { "id": "r12", "text": "Experience with state management libraries such as Redux or Zustand", "category": "hard_skill", "priority": "preferred", "display_order": 11 },
+      { "id": "r13", "text": "Open-source contributions or a public portfolio", "category": "hard_skill", "priority": "preferred", "display_order": 12 },
+      { "id": "r14", "text": "Comfortable with at least 4 hours of daily overlap with US Pacific time", "category": "other", "priority": "preferred", "display_order": 13 }
+    ]
+  },
+  "resume": {
+    "candidate_summary": "Junior ICT undergraduate at the American University of Phnom Penh (GPA 3.5+) with basic hands-on experience in Java and web development through academic projects. Eager to learn, take direction, and grow in a professional frontend and backend environment. Looking for an internship opportunity.",
+    "total_years_work": 0.0,
+    "education": [
+      { "degree": "Bachelor in Information and Communication Technologies (Software Development & Project Management)", "institution": "American University of Phnom Penh", "year": 2028, "gpa": "3.5+" }
+    ],
+    "evidence": [
+      { "id": "e1", "source_line": "Password Encryption System (Python): implemented a Python-based encryption system for secure storage and validation of user credentials.", "evidence_type": "project", "skills": ["Python"] },
+      { "id": "e2", "source_line": "Student Tracking System (Java): built a full-stack Java application with a frontend interface, using object-oriented programming and automated CSV export to streamline attendance record-keeping.", "evidence_type": "project", "skills": ["Java", "OOP"] },
+      { "id": "e3", "source_line": "Personal Portfolio Website (HTML, CSS, JavaScript): delivered a fully responsive, mobile-friendly portfolio showcasing projects across all screen sizes. (sole developer)", "evidence_type": "project", "skills": ["HTML", "CSS", "JavaScript"] },
+      { "id": "e4", "source_line": "MovieFlix - Movie Search Web App (Vite + React): built a real-time movie discovery platform with dynamic search, integrating a live movie API with React state management and a Vite build pipeline.", "evidence_type": "project", "skills": ["React", "Vite", "JavaScript", "Git"] },
+      { "id": "e5", "source_line": "Sudoku Solver - Backtracking & MRV Heuristic (Java): implemented two Java Sudoku solvers and compared their performance, showing how the MRV heuristic reduces recursion depth.", "evidence_type": "project", "skills": ["Java"] },
+      { "id": "e6", "source_line": "Bachelor in Information and Communication Technologies, American University of Phnom Penh, expected 2028, GPA 3.5+ (Junior standing). Specialization in Software Development and Project Management.", "evidence_type": "coursework" },
+      { "id": "e7", "source_line": "English (proficient), Khmer (native).", "evidence_type": "coursework" }
+    ]
+  },
+  "results": [
+    { "requirement_id": "r1", "verdict": "partial", "evidence_ids": ["e6"], "reasoning": "A related degree is in progress but not completed, and 'or equivalent practical experience' is not met by unpaid project work at this scale.", "confidence": 0.5 },
+    { "requirement_id": "r2", "verdict": "missing", "evidence_ids": [], "missing_reason": "No paid or professional work is recorded at all; total years of work experience is 0. All React work is a personal, unpaid project.", "reasoning": "Zero professional experience of any kind.", "confidence": 0.95 },
+    { "requirement_id": "r3", "verdict": "partial", "evidence_ids": ["e4"], "reasoning": "React is used in one personal project, far short of the 'expert-level, including hooks, context and performance profiling' bar this posting sets.", "confidence": 0.3 },
+    { "requirement_id": "r4", "verdict": "missing", "evidence_ids": [], "missing_reason": "No evidence record or skill mentions TypeScript; the candidate's JavaScript work does not use it.", "reasoning": "TypeScript is entirely absent from the resume.", "confidence": 0.9 },
+    { "requirement_id": "r5", "verdict": "partial", "evidence_ids": ["e4"], "reasoning": "MovieFlix integrates a live third-party movie API, which is API consumption, but the resume does not say REST or GraphQL specifically, and there is no evidence of designing an API.", "confidence": 0.35 },
+    { "requirement_id": "r6", "verdict": "missing", "evidence_ids": [], "missing_reason": "No evidence record mentions Jest, React Testing Library, Cypress, or any automated testing.", "reasoning": "No testing evidence anywhere in the resume.", "confidence": 0.9 },
+    { "requirement_id": "r7", "verdict": "missing", "evidence_ids": [], "missing_reason": "No evidence record mentions CI/CD, AWS, or Vercel deployment.", "reasoning": "No deployment or CI/CD evidence.", "confidence": 0.9 },
+    { "requirement_id": "r8", "verdict": "missing", "evidence_ids": [], "missing_reason": "No evidence record describes owning a feature through an Agile ticket-to-production process.", "reasoning": "No Agile or production-ownership evidence.", "confidence": 0.9 },
+    { "requirement_id": "r9", "verdict": "missing", "evidence_ids": [], "missing_reason": "The candidate is based in Phnom Penh, Cambodia; nothing indicates US work authorization, and the post states no sponsorship is available.", "reasoning": "No US work authorization is evidenced, and the company does not sponsor.", "confidence": 0.95 },
+    { "requirement_id": "r10", "verdict": "proven", "evidence_ids": ["e7"], "reasoning": "The resume itself is written in clear, fluent English.", "confidence": 0.7 },
+    { "requirement_id": "r11", "verdict": "missing", "evidence_ids": [], "missing_reason": "No evidence record mentions Next.js or Remix.", "reasoning": "Only Vite is named, not Next.js or Remix.", "confidence": 0.85 },
+    { "requirement_id": "r12", "verdict": "missing", "evidence_ids": [], "missing_reason": "MovieFlix uses React state management generically; no specific library like Redux or Zustand is named.", "reasoning": "No named state-management library.", "confidence": 0.7 },
+    { "requirement_id": "r13", "verdict": "proven", "evidence_ids": ["e3"], "reasoning": "The personal portfolio website is a public showcase of the candidate's project work.", "confidence": 0.85 },
+    { "requirement_id": "r14", "verdict": "missing", "evidence_ids": [], "missing_reason": "No information about availability or timezone overlap is present in the resume.", "reasoning": "No timezone or availability information.", "confidence": 0.9 }
+  ],
+  "hidden_strengths": [],
+  "priority_actions": [
+    { "text": "This posting requires 2+ years of professional production React experience and US work authorization — neither is close yet. Treat it as a long-term target, not this cycle's application." },
+    { "text": "MovieFlix is the right direction for roles like this — the real gap is professional, paid experience with tests and CI/CD, not raw ability.", "requirement_id": "r2" }
+  ]
+}

@@ -1,0 +1,158 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Proofit — keep-alive pings
+#
+# Two free tiers go to sleep, and both failures land on the morning of a demo:
+#
+#   Render free      sleeps after ~15 min idle; the next request pays a
+#                    30-60 s cold start.
+#   Supabase free    PAUSES the whole project after ~1 week of inactivity, and
+#                    restoring it is a manual click plus a wait.
+#
+# So: a frequent ping for Render, a weekly ping for Supabase.
+#
+# ── ⚠ THIS IS BEST-EFFORT, NOT A GUARANTEE ────────────────────────────────
+# GitHub deliberately THROTTLES scheduled workflows on low-activity
+# repositories. A `*/10` cron routinely degrades to every 30-60 minutes, runs
+# late during peak load, and is disabled entirely after 60 days with no commits.
+# It also does not run at all on a fork.
+# Therefore, per PERSON_B_PLAN_v2.md §8.4, set up a SECOND pinger as backup:
+#   → https://cron-job.org  (free, no account limits that matter here)
+#   → GET the same health URL, every 10 minutes
+# Two independent pingers is the actual mitigation. This file is one of them.
+# The other real mitigations are the pre-demo warm-up and demo mode
+# (deploy/runbook.md §7 and §8).
+#
+# ── Configuration ─────────────────────────────────────────────────────────
+# Repository VARIABLES (not secrets — a health URL is public and putting it in
+# a secret only makes the logs unreadable when it breaks):
+#   Settings → Secrets and variables → Actions → Variables
+#     KEEPALIVE_URL      https://proofit-api.onrender.com/api/health   (required)
+#     SUPABASE_PING_URL  a DB-touching endpoint, once one exists       (optional;
+#                        falls back to KEEPALIVE_URL)
+# ═══════════════════════════════════════════════════════════════════════════
+
+name: Keep-alive
+
+on:
+  schedule:
+    # All cron expressions are UTC. GitHub does not honour repository timezones.
+    #
+    # Every 10 minutes — shorter than Render's ~15 min idle window, so the
+    # instance should never actually reach sleep. See the throttling note above.
+    - cron: "*/10 * * * *"
+    # Weekly, Monday 02:23 UTC (= 09:23 Phnom Penh, ICT is UTC+7).
+    # An off-the-hour minute on purpose: GitHub queues an enormous number of
+    # jobs at :00, and jobs scheduled on the hour are the first to be dropped.
+    - cron: "23 2 * * 1"
+  # Lets you wake everything by hand from the Actions tab before a demo, without
+  # waiting for the next scheduled tick. Runs BOTH jobs.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never pile up. If a ping is still running when the next one fires, skip the
+# new one rather than queueing a backlog.
+concurrency:
+  group: keepalive
+  cancel-in-progress: false
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  # Render: frequent ping so the free web service stays warm.
+  # ─────────────────────────────────────────────────────────────────────────
+  ping-render:
+    name: Ping Render API (/api/health)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Both crons trigger this whole workflow file, so each job has to identify
+    # which schedule woke it. Anything that is not the weekly cron — the 10-minute
+    # cron, or a manual dispatch where github.event.schedule is empty — is us.
+    if: github.event.schedule != '23 2 * * 1'
+    steps:
+      - name: Ping the health endpoint
+        env:
+          KEEPALIVE_URL: ${{ vars.KEEPALIVE_URL }}
+        # FAIL SOFTLY, on purpose. A red ✗ every ten minutes because the API is
+        # briefly down trains the whole team to ignore the CI badge — and then a
+        # real CI failure goes unnoticed too. An unreachable API is surfaced as a
+        # ::warning:: annotation and the step still exits 0.
+        run: |
+          set -u
+          if [ -z "${KEEPALIVE_URL:-}" ]; then
+            echo "::notice title=Keep-alive not configured::Set the repository variable KEEPALIVE_URL (Settings → Secrets and variables → Actions → Variables) to e.g. https://proofit-api.onrender.com/api/health"
+            exit 0
+          fi
+
+          echo "Pinging ${KEEPALIVE_URL}"
+          # --max-time 90: a cold Render instance takes 30-60 s to wake, and the
+          #   whole point of this request is to be the one that pays that cost.
+          # --retry 2 with a backoff: absorbs a transient 502 mid-boot.
+          # No --fail: we want to see and report the status code, not have curl
+          #   swallow it into a generic exit 22.
+          HTTP_CODE=$(curl --silent --show-error --location \
+                           --max-time 90 --retry 2 --retry-delay 10 --retry-all-errors \
+                           --write-out '%{http_code}' \
+                           --output /tmp/keepalive-body.txt \
+                           "${KEEPALIVE_URL}" 2>/tmp/keepalive-err.txt) || HTTP_CODE="000"
+
+          BODY=$(head -c 400 /tmp/keepalive-body.txt 2>/dev/null || true)
+
+          if [ "${HTTP_CODE}" = "200" ]; then
+            echo "✅ ${HTTP_CODE} — API is awake."
+            echo "${BODY}"
+          elif [ "${HTTP_CODE}" = "000" ]; then
+            echo "::warning title=Keep-alive ping failed::No HTTP response from ${KEEPALIVE_URL}. $(head -c 200 /tmp/keepalive-err.txt 2>/dev/null)"
+          else
+            echo "::warning title=Keep-alive got HTTP ${HTTP_CODE}::${KEEPALIVE_URL} responded ${HTTP_CODE}. Body: ${BODY}"
+          fi
+
+          # Always green. See the comment above — this is deliberate.
+          exit 0
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Supabase: weekly ping so the free project never pauses.
+  # PERSON_B_PLAN_v2.md §8.5 / PROJECT_SPEC.md §7 "Supabase caveats".
+  # ─────────────────────────────────────────────────────────────────────────
+  ping-supabase:
+    name: Weekly Supabase touch (keeps the free project unpaused)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event.schedule == '23 2 * * 1' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Touch the database through the API
+        env:
+          # Prefer an endpoint that actually issues a query. Until one exists,
+          # fall back to /api/health — which at least wakes Render, and which
+          # touches Supabase as soon as the health check reports DB status.
+          # A ping that does not reach PostgreSQL does NOT reset the pause timer,
+          # so point SUPABASE_PING_URL at a real DB-backed route the moment there
+          # is one (e.g. GET /api/analyses?resume_id=… from Phase 3).
+          SUPABASE_PING_URL: ${{ vars.SUPABASE_PING_URL || vars.KEEPALIVE_URL }}
+        run: |
+          set -u
+          if [ -z "${SUPABASE_PING_URL:-}" ]; then
+            echo "::notice title=Supabase ping not configured::Set the repository variable SUPABASE_PING_URL (or KEEPALIVE_URL) to a DB-backed API endpoint."
+            exit 0
+          fi
+
+          echo "Pinging ${SUPABASE_PING_URL}"
+          HTTP_CODE=$(curl --silent --show-error --location \
+                           --max-time 120 --retry 3 --retry-delay 15 --retry-all-errors \
+                           --write-out '%{http_code}' \
+                           --output /tmp/supabase-body.txt \
+                           "${SUPABASE_PING_URL}" 2>/tmp/supabase-err.txt) || HTTP_CODE="000"
+
+          BODY=$(head -c 400 /tmp/supabase-body.txt 2>/dev/null || true)
+
+          if [ "${HTTP_CODE}" = "200" ]; then
+            echo "✅ ${HTTP_CODE} — reached the API; Supabase inactivity timer reset."
+            echo "${BODY}"
+          else
+            # Louder than the Render job: a missed weekly ping can mean a PAUSED
+            # project, which is a manual restore and a bad morning. Still soft —
+            # go and look at the Supabase dashboard.
+            echo "::warning title=Weekly Supabase ping failed (HTTP ${HTTP_CODE})::Check https://supabase.com/dashboard — if the project shows Paused, restore it now, not on demo day. $(head -c 200 /tmp/supabase-err.txt 2>/dev/null)"
+          fi
+
+          exit 0

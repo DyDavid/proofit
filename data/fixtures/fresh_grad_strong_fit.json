@@ -1,0 +1,79 @@
+{
+  "coverage_score": 72.0,
+  "coverage_required_only": 78.6,
+  "realism_verdict": "strong_fit",
+  "realism_explanation": "You meet every required line at least partially, and none of them are missing. The in-progress degree and unpaid-project experience are the only real gaps, and both are common for a fresh-graduate hire at this level.",
+  "engine_version": "0.1.0-provisional",
+  "generated_at": "2026-09-10T09:00:00Z",
+  "job": {
+    "source_type": "pasted",
+    "content_hash": "kh-camhr-junior-web-dev-001",
+    "title": "Junior Web Developer",
+    "company": "Angkor Digital Co., Ltd.",
+    "location": "Phnom Penh, Cambodia",
+    "country": "KH",
+    "industry": "Digital agency / web development",
+    "seniority": "junior",
+    "years_exp_required": 1.0,
+    "education_required": "Bachelor's degree in IT, CS or a related field; final-year students may apply",
+    "sponsors_visa": "unstated",
+    "salary_range": "Negotiable",
+    "requirements": [
+      { "id": "r1", "text": "Bachelor's degree in Information Technology, Computer Science or a related field; final-year students may apply", "category": "education", "priority": "required", "display_order": 0 },
+      { "id": "r2", "text": "Solid understanding of HTML5 and CSS3", "category": "hard_skill", "priority": "required", "normalized_skill": "HTML/CSS", "display_order": 1 },
+      { "id": "r3", "text": "Able to write clean JavaScript (ES6)", "category": "hard_skill", "priority": "required", "normalized_skill": "JavaScript", "display_order": 2 },
+      { "id": "r4", "text": "At least 1 year of experience building websites; internship or freelance projects accepted", "category": "experience", "priority": "required", "display_order": 3 },
+      { "id": "r5", "text": "Good command of written and spoken English, and Khmer", "category": "language", "priority": "required", "display_order": 4 },
+      { "id": "r6", "text": "Willing to learn, honest, and able to work in a team", "category": "soft_skill", "priority": "required", "display_order": 5 },
+      { "id": "r7", "text": "Basic understanding of object-oriented programming", "category": "hard_skill", "priority": "required", "normalized_skill": "OOP", "display_order": 6 },
+      { "id": "r8", "text": "Experience with React or Vue is an advantage", "category": "hard_skill", "priority": "preferred", "normalized_skill": "React", "display_order": 7 },
+      { "id": "r9", "text": "Familiar with Git and GitHub", "category": "hard_skill", "priority": "preferred", "normalized_skill": "Git", "display_order": 8 },
+      { "id": "r10", "text": "Knowledge of PHP or Laravel", "category": "hard_skill", "priority": "preferred", "display_order": 9 },
+      { "id": "r11", "text": "Experience with responsive, mobile-first layouts", "category": "hard_skill", "priority": "preferred", "display_order": 10 }
+    ]
+  },
+  "resume": {
+    "candidate_summary": "Junior ICT undergraduate at the American University of Phnom Penh (GPA 3.5+) with basic hands-on experience in Java and web development through academic projects. Eager to learn, take direction, and grow in a professional frontend and backend environment. Looking for an internship opportunity.",
+    "total_years_work": 0.0,
+    "education": [
+      { "degree": "Bachelor in Information and Communication Technologies (Software Development & Project Management)", "institution": "American University of Phnom Penh", "year": 2028, "gpa": "3.5+" }
+    ],
+    "evidence": [
+      { "id": "e1", "source_line": "Password Encryption System (Python): implemented a Python-based encryption system for secure storage and validation of user credentials.", "evidence_type": "project", "skills": ["Python"] },
+      { "id": "e2", "source_line": "Student Tracking System (Java): built a full-stack Java application with a frontend interface, using object-oriented programming and automated CSV export to streamline attendance record-keeping.", "evidence_type": "project", "skills": ["Java", "OOP"] },
+      { "id": "e3", "source_line": "Personal Portfolio Website (HTML, CSS, JavaScript): delivered a fully responsive, mobile-friendly portfolio showcasing projects across all screen sizes. (sole developer)", "evidence_type": "project", "skills": ["HTML", "CSS", "JavaScript"] },
+      { "id": "e4", "source_line": "MovieFlix - Movie Search Web App (Vite + React): built a real-time movie discovery platform with dynamic search, integrating a live movie API with React state management and a Vite build pipeline.", "evidence_type": "project", "skills": ["React", "Vite", "JavaScript", "Git"] },
+      { "id": "e5", "source_line": "Sudoku Solver - Backtracking & MRV Heuristic (Java): implemented two Java Sudoku solvers and compared their performance, showing how the MRV heuristic reduces recursion depth.", "evidence_type": "project", "skills": ["Java"] },
+      { "id": "e6", "source_line": "Bachelor in Information and Communication Technologies, American University of Phnom Penh, expected 2028, GPA 3.5+ (Junior standing). Specialization in Software Development and Project Management.", "evidence_type": "coursework" },
+      { "id": "e7", "source_line": "English (proficient), Khmer (native).", "evidence_type": "coursework" }
+    ]
+  },
+  "results": [
+    { "requirement_id": "r1", "verdict": "partial", "evidence_ids": ["e6"], "reasoning": "The degree is in progress, not final-year: the candidate is currently junior standing, one year short of the final-year eligibility the post names.", "confidence": 0.6 },
+    { "requirement_id": "r2", "verdict": "proven", "evidence_ids": ["e3"], "reasoning": "The portfolio project is built directly with HTML and CSS and is explicitly responsive.", "confidence": 0.95 },
+    { "requirement_id": "r3", "verdict": "proven", "evidence_ids": ["e4"], "reasoning": "MovieFlix is a working JavaScript application with dynamic search and state management.", "confidence": 0.85 },
+    { "requirement_id": "r4", "verdict": "partial", "evidence_ids": ["e3", "e4"], "reasoning": "The post explicitly accepts freelance or internship projects for this line, and two personal projects (the portfolio site, MovieFlix) plausibly qualify in spirit — but neither is paid or internship work, so this stays partial rather than proven.", "confidence": 0.55 },
+    { "requirement_id": "r5", "verdict": "proven", "evidence_ids": ["e7"], "reasoning": "Khmer is native and English is self-rated proficient; the resume itself is written in fluent English.", "confidence": 0.8 },
+    { "requirement_id": "r6", "verdict": "partial", "evidence_ids": ["e6"], "reasoning": "No evidence record directly shows teamwork, but consistent academic performance (GPA 3.5+, junior standing) and five completed personal projects suggest follow-through.", "confidence": 0.5 },
+    { "requirement_id": "r7", "verdict": "proven", "evidence_ids": ["e2"], "reasoning": "The Student Tracking System explicitly names object-oriented programming as its approach.", "confidence": 0.93 },
+    { "requirement_id": "r8", "verdict": "proven", "evidence_ids": ["e4"], "reasoning": "MovieFlix is built with React and Vite.", "confidence": 0.9 },
+    { "requirement_id": "r9", "verdict": "missing", "evidence_ids": [], "missing_reason": "Git/GitHub is listed among the candidate's skills but no evidence record describes an actual Git workflow — a bare skill mention is not evidence.", "reasoning": "No demonstrated Git usage, only a skills-list mention.", "confidence": 0.6 },
+    { "requirement_id": "r10", "verdict": "missing", "evidence_ids": [], "missing_reason": "No evidence record mentions PHP or Laravel; the candidate's projects use Python, Java, and JavaScript/React.", "reasoning": "No PHP or Laravel evidence anywhere in the resume.", "confidence": 0.9 },
+    { "requirement_id": "r11", "verdict": "proven", "evidence_ids": ["e3"], "reasoning": "The portfolio is explicitly described as fully responsive and mobile-friendly across all screen sizes.", "confidence": 0.92 }
+  ],
+  "hidden_strengths": [
+    {
+      "requirement_id": "r4",
+      "evidence_id": "e4",
+      "current_phrasing": "MovieFlix - Movie Search Web App (Vite + React): built a real-time movie discovery platform with dynamic search, integrating a live movie API with React state management and a Vite build pipeline.",
+      "suggested_phrasing": "Independently built and shipped a real-time movie discovery web app (Vite + React) end-to-end, integrating a live third-party API — hands-on website-building experience matching the post's freelance/project allowance.",
+      "facts_used": ["e4"],
+      "changed_words": ["Independently", "shipped", "end-to-end", "website-building"]
+    }
+  ],
+  "priority_actions": [
+    { "text": "Add a specific Git/GitHub workflow example — a branch or pull-request habit from any project would move this from missing to proven.", "requirement_id": "r9", "coverage_gain": 5.0 },
+    { "text": "If you've done any paid or unpaid freelance web work, however small, add it — the post explicitly accepts freelance and internship experience.", "requirement_id": "r4", "coverage_gain": 7.0 },
+    { "text": "Mention team-based coursework or a group project explicitly, if you have one.", "requirement_id": "r6" }
+  ]
+}

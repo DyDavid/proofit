@@ -1,0 +1,98 @@
+# Build context for api/Dockerfile.
+#
+# The context is the REPOSITORY ROOT, not ./api — the image runs
+# `pip install .`, and that needs /pyproject.toml plus /engine/, neither of which
+# is reachable from an ./api context. Both consumers use the same pairing:
+#   deploy/docker-compose.yml   context: ..   dockerfile: api/Dockerfile
+#   deploy/render.yaml          dockerContext: .   dockerfilePath: ./api/Dockerfile
+#
+# So this file has one job: keep the root context small and clean. Excluding
+# web/ and .venv/ alone takes it from ~1 GB to a few megabytes, which on Render's
+# free tier is the difference between a two-minute and a fifteen-minute build.
+#
+# ── WHAT MUST NOT BE EXCLUDED (the image breaks without them) ──
+#   pyproject.toml   packaging metadata
+#   README.md        pyproject declares `readme = "README.md"`; setuptools errors
+#                    out with "readme file not found" if it is missing
+#   engine/          the package being installed
+#   api/             the FastAPI application
+#   data/fixtures/   ENGINE_MODE=mock reads these at request time
+
+# ─── The other half of the monorepo — the API image never imports it ───────
+web/
+
+# ─── Python virtualenv: host-specific paths and binaries, never portable ───
+.venv/
+venv/
+ENV/
+env/
+
+# ─── Python build / cache artefacts ────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+build/
+dist/
+sdist/
+wheels/
+*.egg-info/
+*.egg
+.eggs/
+.Python
+
+# ─── Test / lint / type caches ─────────────────────────────────────────────
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+tests/
+
+# ─── Secrets — MUST NOT reach any image layer. `docker history` reads layers ─
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+secrets/
+
+# ─── PRIVATE RESEARCH DATA (PII) ───────────────────────────────────────────
+# Raw student resumes carry names, phone numbers and emails until anonymized,
+# and eval/ holds signed consent forms. These must never be baked into an image
+# that gets pushed to a registry. data/fixtures/, data/jds/ and
+# data/resumes/anonymized/ stay in — mock mode needs them.
+data/resumes/raw/
+eval/
+
+# ─── VCS, CI and deployment config: read by GitHub and Render, not by the image ─
+.git/
+.gitignore
+.gitattributes
+.github/
+deploy/
+.dockerignore
+
+# ─── Documentation and planning ────────────────────────────────────────────
+docs/
+*.md
+!README.md
+
+# ─── Editors / OS noise ────────────────────────────────────────────────────
+.claude/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# ─── Local scratch ─────────────────────────────────────────────────────────
+scratch/
+tmp/
+*.log

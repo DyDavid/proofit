@@ -1,0 +1,24 @@
+CANDIDATE A - Junior Software Developer (aspiring)
+Location: Phnom Penh, Cambodia
+Contact: [redacted]
+
+SUMMARY
+Junior ICT undergraduate at the American University of Phnom Penh (GPA 3.5+) with basic hands-on experience in Java and web development through academic projects. Eager to learn, take direction, and grow in a professional frontend and backend environment. Looking for an internship opportunity.
+
+EDUCATION
+Bachelor in Information and Communication Technologies, American University of Phnom Penh, expected 2028, GPA 3.5+ (Junior standing). Specialization in Software Development and Project Management.
+
+ACADEMIC PROJECTS (2024-2028)
+- Password Encryption System (Python): implemented a Python-based encryption system for secure storage and validation of user credentials.
+- Student Tracking System (Java): built a full-stack Java application with a frontend interface, using object-oriented programming and automated CSV export to streamline attendance record-keeping.
+
+WEB DEVELOPMENT
+- Personal Portfolio Website (HTML, CSS, JavaScript): delivered a fully responsive, mobile-friendly portfolio showcasing projects across all screen sizes. (sole developer)
+- MovieFlix - Movie Search Web App (Vite + React): built a real-time movie discovery platform with dynamic search, integrating a live movie API with React state management and a Vite build pipeline.
+- Sudoku Solver - Backtracking & MRV Heuristic (Java): implemented two Java Sudoku solvers and compared their performance, showing how the MRV heuristic reduces recursion depth.
+
+SKILLS
+Java (basic), Python (basic), JavaScript (basic), HTML, CSS; Object-Oriented Programming, Basic Algorithms, CSV Data Handling, Encryption Basics; React, Vite, Git/GitHub; Teamwork, Communication, Time Management.
+
+LANGUAGES
+English (proficient), Khmer (native).

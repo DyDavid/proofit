@@ -1,0 +1,81 @@
+{
+  "coverage_score": 45.0,
+  "coverage_required_only": 43.75,
+  "realism_verdict": "stretch",
+  "realism_explanation": "You cover React and its build tooling well, and two preferred lines — a public portfolio and Khmer — are strong matches. The graduation-year mismatch, and the missing internship and testing experience, are the main risks.",
+  "engine_version": "0.1.0-provisional",
+  "generated_at": "2026-09-08T09:00:00Z",
+  "job": {
+    "source_type": "pasted",
+    "content_hash": "sg-meridian-frontend-grad-2027",
+    "title": "Frontend Engineer - Graduate Programme 2027",
+    "company": "Meridian Systems Pte. Ltd.",
+    "location": "Singapore (Tanjong Pagar)",
+    "country": "SG",
+    "industry": "Financial software / treasury and payments",
+    "seniority": "entry",
+    "education_required": "Bachelor's in Computer Science, Software Engineering or closely related, graduating 2026 or 2027",
+    "sponsors_visa": "yes",
+    "sponsors_visa_source_line": "Successful international candidates are sponsored for a Singapore Employment Pass under Meridian's graduate mobility scheme, subject to Ministry of Manpower approval.",
+    "salary_range": "SGD 4,800 - 5,600 per month",
+    "requirements": [
+      { "id": "r1", "text": "Bachelor's degree in Computer Science, Software Engineering or a closely related discipline, graduating in 2026 or 2027", "category": "education", "priority": "required", "display_order": 0 },
+      { "id": "r2", "text": "Proficiency in JavaScript (ES2020+) and TypeScript", "category": "hard_skill", "priority": "required", "display_order": 1 },
+      { "id": "r3", "text": "Hands-on experience with React and its ecosystem", "category": "hard_skill", "priority": "required", "normalized_skill": "React", "display_order": 2 },
+      { "id": "r4", "text": "Experience with modern build tooling such as Vite or Webpack", "category": "hard_skill", "priority": "required", "display_order": 3 },
+      { "id": "r5", "text": "Working knowledge of automated testing with Jest, Vitest or React Testing Library", "category": "hard_skill", "priority": "required", "display_order": 4 },
+      { "id": "r6", "text": "Familiarity with version control workflows in Git", "category": "hard_skill", "priority": "required", "normalized_skill": "Git", "display_order": 5 },
+      { "id": "r7", "text": "At least one internship or industrial attachment in a software engineering team", "category": "experience", "priority": "required", "display_order": 6 },
+      { "id": "r8", "text": "Professional working proficiency in English", "category": "language", "priority": "required", "display_order": 7 },
+      { "id": "r9", "text": "Exposure to CSS-in-JS or utility-first CSS frameworks such as Tailwind", "category": "hard_skill", "priority": "preferred", "display_order": 8 },
+      { "id": "r10", "text": "Demonstrated interest in accessibility and performance engineering", "category": "soft_skill", "priority": "preferred", "display_order": 9 },
+      { "id": "r11", "text": "Contributions to open-source projects or a public portfolio", "category": "hard_skill", "priority": "preferred", "display_order": 10 },
+      { "id": "r12", "text": "An additional language relevant to our regional customers, such as Khmer, Thai or Bahasa Indonesia", "category": "language", "priority": "preferred", "display_order": 11 }
+    ]
+  },
+  "resume": {
+    "candidate_summary": "Junior ICT undergraduate at the American University of Phnom Penh (GPA 3.5+) with basic hands-on experience in Java and web development through academic projects. Eager to learn, take direction, and grow in a professional frontend and backend environment. Looking for an internship opportunity.",
+    "total_years_work": 0.0,
+    "education": [
+      { "degree": "Bachelor in Information and Communication Technologies (Software Development & Project Management)", "institution": "American University of Phnom Penh", "year": 2028, "gpa": "3.5+" }
+    ],
+    "evidence": [
+      { "id": "e1", "source_line": "Password Encryption System (Python): implemented a Python-based encryption system for secure storage and validation of user credentials.", "evidence_type": "project", "skills": ["Python"] },
+      { "id": "e2", "source_line": "Student Tracking System (Java): built a full-stack Java application with a frontend interface, using object-oriented programming and automated CSV export to streamline attendance record-keeping.", "evidence_type": "project", "skills": ["Java", "OOP"] },
+      { "id": "e3", "source_line": "Personal Portfolio Website (HTML, CSS, JavaScript): delivered a fully responsive, mobile-friendly portfolio showcasing projects across all screen sizes. (sole developer)", "evidence_type": "project", "skills": ["HTML", "CSS", "JavaScript"] },
+      { "id": "e4", "source_line": "MovieFlix - Movie Search Web App (Vite + React): built a real-time movie discovery platform with dynamic search, integrating a live movie API with React state management and a Vite build pipeline.", "evidence_type": "project", "skills": ["React", "Vite", "JavaScript", "Git"] },
+      { "id": "e5", "source_line": "Sudoku Solver - Backtracking & MRV Heuristic (Java): implemented two Java Sudoku solvers and compared their performance, showing how the MRV heuristic reduces recursion depth.", "evidence_type": "project", "skills": ["Java"] },
+      { "id": "e6", "source_line": "Bachelor in Information and Communication Technologies, American University of Phnom Penh, expected 2028, GPA 3.5+ (Junior standing). Specialization in Software Development and Project Management.", "evidence_type": "coursework" },
+      { "id": "e7", "source_line": "English (proficient), Khmer (native).", "evidence_type": "coursework" }
+    ]
+  },
+  "results": [
+    { "requirement_id": "r1", "verdict": "missing", "evidence_ids": [], "missing_reason": "Expected graduation is 2028 (currently junior standing); the post requires graduating in 2026 or 2027.", "reasoning": "Graduation timeline does not match the programme's intake requirement.", "confidence": 0.9 },
+    { "requirement_id": "r2", "verdict": "partial", "evidence_ids": ["e4"], "reasoning": "JavaScript is demonstrated through two web projects, but nothing in the resume mentions TypeScript specifically.", "confidence": 0.45 },
+    { "requirement_id": "r3", "verdict": "proven", "evidence_ids": ["e4"], "reasoning": "MovieFlix is built on React with state management.", "confidence": 0.85 },
+    { "requirement_id": "r4", "verdict": "proven", "evidence_ids": ["e4"], "reasoning": "MovieFlix explicitly names a Vite build pipeline.", "confidence": 0.9 },
+    { "requirement_id": "r5", "verdict": "missing", "evidence_ids": [], "missing_reason": "No evidence record mentions any testing framework or automated tests.", "reasoning": "No testing evidence anywhere in the resume.", "confidence": 0.9 },
+    { "requirement_id": "r6", "verdict": "partial", "evidence_ids": ["e4"], "reasoning": "Git/GitHub appears among the candidate's listed skills and is plausible given a Vite/React project, but no evidence line explicitly describes a Git workflow.", "confidence": 0.4 },
+    { "requirement_id": "r7", "verdict": "missing", "evidence_ids": [], "missing_reason": "No internship or industrial placement is recorded; the candidate's own summary states they are seeking a first internship.", "reasoning": "No internship experience anywhere in the resume.", "confidence": 0.9 },
+    { "requirement_id": "r8", "verdict": "partial", "evidence_ids": ["e7"], "reasoning": "The resume states English (proficient) and is itself written in fluent English, but there is no test score or other stronger evidence of professional working proficiency specifically.", "confidence": 0.6 },
+    { "requirement_id": "r9", "verdict": "missing", "evidence_ids": [], "missing_reason": "No evidence record mentions Tailwind or any CSS-in-JS approach.", "reasoning": "No CSS framework evidence beyond plain CSS.", "confidence": 0.85 },
+    { "requirement_id": "r10", "verdict": "missing", "evidence_ids": [], "missing_reason": "No evidence record mentions accessibility or performance work.", "reasoning": "No accessibility or performance evidence.", "confidence": 0.85 },
+    { "requirement_id": "r11", "verdict": "proven", "evidence_ids": ["e3"], "reasoning": "The personal portfolio website is exactly this: a public, live showcase of the candidate's project work.", "confidence": 0.85 },
+    { "requirement_id": "r12", "verdict": "proven", "evidence_ids": ["e7"], "reasoning": "Khmer is named directly as one of the regionally relevant languages the post wants, and it is the candidate's native language.", "confidence": 0.97 }
+  ],
+  "hidden_strengths": [
+    {
+      "requirement_id": "r11",
+      "evidence_id": "e3",
+      "current_phrasing": "Personal Portfolio Website (HTML, CSS, JavaScript): delivered a fully responsive, mobile-friendly portfolio showcasing projects across all screen sizes. (sole developer)",
+      "suggested_phrasing": "Independently designed, built and published a fully responsive personal portfolio site (HTML, CSS, JavaScript) as a public showcase of my project work.",
+      "facts_used": ["e3"],
+      "changed_words": ["Independently", "designed", "published", "public", "showcase"]
+    }
+  ],
+  "priority_actions": [
+    { "text": "Get any internship, even a short one, before applying — this listing explicitly requires it and it is currently your biggest gap.", "requirement_id": "r7", "coverage_gain": 6.0 },
+    { "text": "Learn the basics of one testing library (Jest or Vitest) and add a line about it — even a small test suite on an existing project would help.", "requirement_id": "r5", "coverage_gain": 6.0 },
+    { "text": "Confirm the programme's graduation-year requirement directly with Meridian — some graduate schemes flex by a year for strong candidates.", "requirement_id": "r1" }
+  ]
+}

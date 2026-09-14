@@ -1,0 +1,94 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Proofit — Render Blueprint for the FastAPI service.
+#
+# One free web service. The Next.js half is NOT here: it deploys to Vercel with
+# root directory `web` (PERSON_B_PLAN_v2.md §8 setup step 1). Step-by-step import
+# instructions live in deploy/runbook.md.
+#
+# ⚠ NO SECRET VALUE MAY EVER APPEAR IN THIS FILE. It is committed to git.
+#   Every secret below is declared with `sync: false`, which tells Render:
+#   "this key exists, prompt the operator for its value in the dashboard, and
+#   never read it from the repo." Values live only in Render → Environment.
+# ═══════════════════════════════════════════════════════════════════════════
+
+services:
+  - type: web
+    name: proofit-api
+
+    # Docker runtime: Render builds the image itself, so the Python version, the
+    # engine package and the parsers are pinned by our Dockerfile rather than by
+    # Render's native Python buildpack.
+    # (Render renamed this key to `runtime:` and keeps `env:` as an accepted
+    # alias; `env: docker` is the spelling PERSON_B_PLAN_v2.md §8 specifies.)
+    env: docker
+
+    # Free tier. Its two costs, designed around in §8 and mitigated in
+    # .github/workflows/keepalive.yml:
+    #   • sleeps after ~15 min idle, 30-60 s cold start
+    #   • ~512 MB RAM — no local embedding models, embeddings go through an API
+    plan: free
+
+    # Singapore is Render's closest region to Phnom Penh; the alternatives
+    # (Oregon, Frankfurt, Ohio) add 150-250 ms per round trip for our users and
+    # for the demo laptop in the examination room.
+    # NOTE: region is fixed at service creation and cannot be changed later.
+    region: singapore
+
+    branch: main
+    autoDeploy: true
+
+    # Paths are relative to the repository root.
+    # The context is the ROOT, not ./api, because the image installs the `engine`
+    # package and therefore needs /pyproject.toml and /engine/. This is the exact
+    # pairing deploy/docker-compose.yml uses locally, so a build that succeeds on
+    # your laptop succeeds here.
+    dockerfilePath: ./api/Dockerfile
+    dockerContext: .
+
+    # Render probes this path and will not route traffic to an instance that does
+    # not answer 200. Matches the API contract:
+    #   GET /api/health → {"status","engine_mode","version","uptime_seconds"}
+    # The keep-alive workflow pings this same URL every 10 minutes.
+    healthCheckPath: /api/health
+
+    envVars:
+      # ── Engine ───────────────────────────────────────────────────────────
+      # Phase 1 ships mock mode: analyses return data/fixtures/*.json after an
+      # artificial delay. Flip to "live" in the Render dashboard at CP2
+      # (PERSON_B_PLAN_v2.md §5 Phase 2 task 7) — not by editing this file, so a
+      # rollback is a dashboard toggle rather than a redeploy.
+      - key: ENGINE_MODE
+        value: mock
+
+      # ── Secrets — prompted in the dashboard, never stored in git ──────────
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      # Service-role key: full database access. It is safe here ONLY because it
+      # never leaves the API process — the browser talks to Next.js, Next.js
+      # talks to this service, and only this service talks to Supabase.
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+
+      # ── HTTP ─────────────────────────────────────────────────────────────
+      # Comma-separated allowed browser origins. Replace the first entry with the
+      # real production domain once it is pointed at Vercel. The wildcard entry
+      # covers Vercel preview deployments, which get a new subdomain per commit.
+      # Direct browser→API calls are rare (Next.js rewrites proxy /api/* server-
+      # side) but this must be right or every fallback fetch fails opaquely.
+      - key: CORS_ORIGINS
+        value: "https://proofit.vercel.app,https://*.vercel.app,http://localhost:3000"
+
+      # ── Tunables (kept identical to .env.example and docker-compose.yml) ──
+      - key: APP_VERSION
+        value: "0.1.0"
+      # 5 MB upload ceiling, mirrored by the client-side dropzone check.
+      - key: MAX_UPLOAD_BYTES
+        value: "5242880"
+      - key: MOCK_DELAY_SECONDS
+        value: "1.5"
+
+      # PORT is injected by Render and MUST NOT be declared here — uvicorn binds
+      # 0.0.0.0:$PORT in api/Dockerfile. Hardcoding it makes the health check
+      # fail with "no open ports detected".

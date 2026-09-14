@@ -1,0 +1,142 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Proofit — LOCAL DEVELOPMENT ONLY
+#
+#   docker compose -f deploy/docker-compose.yml up --build
+#     → http://localhost:3000        Next.js (bilingual en/km shell)
+#     → http://localhost:8000/api/health   FastAPI  {"status":"ok",...}
+#
+# This file is NOT the production topology. In production the two halves live on
+# two different platforms and never share a network:
+#   web → Vercel   (root directory `web`, env NEXT_PUBLIC_API_URL=https://<svc>.onrender.com)
+#   api → Render   (Docker, free plan, see deploy/render.yaml)
+# See deploy/runbook.md.
+#
+# PERSON_B_PLAN_v2.md §5 Phase 0 task 3: "`docker compose up` (services `web`,
+# `api`) must serve http://localhost:3000 → Next.js and
+# http://localhost:8000/api/health → FastAPI. This is your first 'done' artifact."
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Fixes the Compose project name. Without this, Compose derives the name from the
+# parent directory — which is `deploy`, not `proofit` — and every container,
+# network and volume would be prefixed `deploy-`.
+name: proofit
+
+services:
+  # ─────────────────────────────────────────────────────────────────────────
+  # api — FastAPI. Owns the engine, the LLM key and the database.
+  # ─────────────────────────────────────────────────────────────────────────
+  api:
+    container_name: proofit-api
+    build:
+      # Context is the repo ROOT, not ./api. The image has to `pip install` the
+      # `engine` package, and that needs BOTH /pyproject.toml and /engine/ —
+      # neither of which is reachable from an ./api context. The root
+      # .dockerignore keeps this context small (it drops web/, .venv/, .git/).
+      # Same pairing as deploy/render.yaml: dockerContext "." + dockerfilePath
+      # "./api/Dockerfile", so what you build locally is what Render builds.
+      context: ..
+      dockerfile: api/Dockerfile
+    ports:
+      # Published so the HOST browser (and curl, and the Vercel-less local web
+      # container's client-side code) can reach the API directly. See the long
+      # note on the `web` service below for why two hostnames exist.
+      - "8000:8000"
+    environment:
+      # Local dev is mock-only by design: no Anthropic key is burned and no
+      # Supabase row is written while you build screens. Every analysis returns a
+      # fixture from data/fixtures/ after MOCK_DELAY_SECONDS so the loading states
+      # are honest (PERSON_B_PLAN_v2.md §5 Phase 1 task 4).
+      # Live mode is NOT implemented in Phase 1 and is exercised on Render only.
+      ENGINE_MODE: mock
+      APP_VERSION: 0.1.0-dev
+      MOCK_DELAY_SECONDS: "1.5"
+      # 5 MB, matching the client-side dropzone validation in web/.
+      MAX_UPLOAD_BYTES: "5242880"
+      # Both spellings of localhost: some browsers normalise one to the other,
+      # and a mismatch here surfaces as an opaque CORS failure.
+      CORS_ORIGINS: "http://localhost:3000,http://127.0.0.1:3000"
+      # api/Dockerfile binds uvicorn to 0.0.0.0:$PORT — Render injects PORT, so
+      # locally we inject it too and the CMD stays identical on both platforms.
+      PORT: "8000"
+      # Unbuffered stdout, or uvicorn's logs sit in a pipe buffer and
+      # `docker compose logs -f api` looks frozen.
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      # Read-only bind mount of the repo's data/ directory so ENGINE_MODE=mock
+      # resolves data/fixtures/*.json without a rebuild every time a fixture is
+      # edited. Read-only because the API must never write into the researcher's
+      # collected JDs, resumes or golden fixtures.
+      - ../data:/app/data:ro
+    healthcheck:
+      # Hits the real contract endpoint, GET /api/health. Uses the interpreter
+      # that is already in the image instead of curl — python:3.12-slim ships no
+      # curl and no wget, and installing one just to health-check would grow the
+      # image on a 512 MB Render instance.
+      # 127.0.0.1, not localhost: inside the container `localhost` may resolve to
+      # ::1 first while uvicorn is bound to the IPv4 wildcard.
+      test:
+        - CMD
+        - python
+        - -c
+        - "import sys, urllib.request as u; sys.exit(0 if u.urlopen('http://127.0.0.1:8000/api/health', timeout=3).status == 200 else 1)"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      # Cold `pip install`-ed images and a first import of pydantic take a few
+      # seconds; failures inside start_period do not count toward `retries`.
+      start_period: 20s
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # web — Next.js 15 (App Router, standalone output).
+  # ─────────────────────────────────────────────────────────────────────────
+  web:
+    container_name: proofit-web
+    build:
+      context: ../web
+      dockerfile: Dockerfile
+      args:
+        # ── THE TWO-HOSTNAME PROBLEM, AND WHY THIS IS DELIBERATELY EMPTY ──
+        #
+        # There are two different observers of the API and they disagree about
+        # its address:
+        #   • the web CONTAINER, on the Compose network, reaches it at
+        #     http://api:8000   ("api" is the service name, resolved by Docker's
+        #     embedded DNS — it means nothing outside this network)
+        #   • the BROWSER, on the host, reaches it at
+        #     http://localhost:8000   (via the api service's published port)
+        # A browser that is handed "http://api:8000" gets DNS_PROBE_FINISHED_NXDOMAIN.
+        #
+        # Next.js resolves that split with a server-side rewrite: next.config.ts
+        # maps /api/:path* → ${NEXT_PUBLIC_API_URL}/api/:path*. The browser only
+        # ever calls its OWN origin (http://localhost:3000/api/...); the Next
+        # server — which IS on the Compose network — forwards to http://api:8000.
+        # One code path, no CORS, no second origin, identical on Vercel.
+        #
+        # But NEXT_PUBLIC_* is INLINED INTO THE CLIENT BUNDLE AT BUILD TIME.
+        # Baking http://api:8000 in here would ship an unreachable hostname to
+        # every browser. So the build arg stays empty: client code that reads
+        # process.env.NEXT_PUBLIC_API_URL sees "" and falls back to the relative
+        # path /api/..., which is exactly what we want. The runtime value below
+        # is read by next.config.ts on the server, where "api" does resolve.
+        NEXT_PUBLIC_API_URL: ""
+    ports:
+      - "3000:3000"
+    environment:
+      # RUNTIME value, read server-side by next.config.ts's rewrite destination.
+      # Safe to be a Docker-network hostname precisely because it never leaves
+      # the server — see the build-arg comment above.
+      NEXT_PUBLIC_API_URL: "http://api:8000"
+      NODE_ENV: production
+      PORT: "3000"
+      # .next/standalone's server.js binds to HOSTNAME; the default is localhost,
+      # which inside a container refuses connections from the published port.
+      HOSTNAME: "0.0.0.0"
+      NEXT_TELEMETRY_DISABLED: "1"
+    depends_on:
+      api:
+        # Not `service_started`: the API answers /api/health only after uvicorn
+        # has finished importing the engine. Waiting for healthy means the first
+        # page load in the browser never races a connection-refused.
+        condition: service_healthy
+    restart: unless-stopped

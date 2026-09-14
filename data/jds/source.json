@@ -1,0 +1,38 @@
+[
+  {
+    "slug": "camhr_junior_web_developer_phnom_penh",
+    "file": "camhr_junior_web_developer_phnom_penh.txt",
+    "title": "Junior Web Developer",
+    "company": "Angkor Digital Co., Ltd.",
+    "board": "CamHR",
+    "source_url": null,
+    "country": "KH",
+    "collected_on": "2026-09-10",
+    "synthetic": true,
+    "note": "Hand-written stand-in until real JDs are collected"
+  },
+  {
+    "slug": "sg_frontend_engineer_graduate",
+    "file": "sg_frontend_engineer_graduate.txt",
+    "title": "Frontend Engineer - Graduate Programme 2027",
+    "company": "Meridian Systems Pte. Ltd.",
+    "board": "MyCareersFuture",
+    "source_url": null,
+    "country": "SG",
+    "collected_on": "2026-09-10",
+    "synthetic": true,
+    "note": "Hand-written stand-in until real JDs are collected"
+  },
+  {
+    "slug": "remote_us_junior_react_developer",
+    "file": "remote_us_junior_react_developer.txt",
+    "title": "Junior React Developer (Remote, US)",
+    "company": "Northwind Labs, Inc.",
+    "board": "We Work Remotely",
+    "source_url": null,
+    "country": "REMOTE",
+    "collected_on": "2026-09-10",
+    "synthetic": true,
+    "note": "Hand-written stand-in until real JDs are collected"
+  }
+]

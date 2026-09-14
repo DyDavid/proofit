@@ -1,0 +1,40 @@
+Frontend Engineer - Graduate Programme 2027
+Meridian Systems Pte. Ltd.
+Singapore (Tanjong Pagar) | Full-time, permanent | Graduate Programme
+Salary: SGD 4,800 - 5,600 per month
+Applications close 14 November 2026
+
+ABOUT MERIDIAN SYSTEMS
+Meridian Systems builds treasury and payments software for banks across Southeast Asia. Our engineering organisation is 180 people across Singapore, Kuala Lumpur and Ho Chi Minh City. The Graduate Programme places new engineers into a delivery squad from week one, with a named mentor, a structured 18-month curriculum and a formal review at months 6, 12 and 18.
+
+THE ROLE
+As a Frontend Engineer on the Graduate Programme you will work in a squad of six alongside backend engineers, a designer and a product manager. You will ship user-facing features in our React application suite, take part in code review from your first week, and join our on-call shadowing rotation from month nine.
+
+WHAT YOU WILL DO
+- Implement user-facing features in React against designs and acceptance criteria agreed with your squad
+- Write and maintain automated tests for the code you ship
+- Take part in code review, both as author and as reviewer
+- Contribute to our internal component library and its design-token documentation
+- Present your work at the fortnightly engineering demo
+
+REQUIREMENTS
+- Bachelor's degree in Computer Science, Software Engineering or a closely related discipline, graduating in 2026 or 2027
+- Proficiency in JavaScript (ES2020+) and TypeScript
+- Hands-on experience with React and its ecosystem
+- Experience with modern build tooling such as Vite or Webpack
+- Working knowledge of automated testing with Jest, Vitest or React Testing Library
+- Familiarity with version control workflows in Git
+- At least one internship or industrial attachment in a software engineering team
+- Professional working proficiency in English
+
+NICE TO HAVE
+- Exposure to CSS-in-JS or utility-first CSS frameworks such as Tailwind
+- Demonstrated interest in accessibility and performance engineering
+- Contributions to open-source projects or a public portfolio
+- An additional language relevant to our regional customers, such as Khmer, Thai or Bahasa Indonesia
+
+VISA AND ELIGIBILITY
+Successful international candidates are sponsored for a Singapore Employment Pass under Meridian's graduate mobility scheme, subject to Ministry of Manpower approval.
+
+HOW TO APPLY
+Submit your CV, your transcript and a link to any code you are willing to share. Shortlisted applicants complete a two-hour take-home exercise followed by two interviews.

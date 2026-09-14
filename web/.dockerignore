@@ -1,0 +1,63 @@
+# Build context for web/Dockerfile (deploy/docker-compose.yml: context ../web).
+#
+# Everything listed here is excluded from the tarball Docker sends to the daemon.
+# Two reasons it matters: node_modules alone is hundreds of megabytes of context
+# that would be reinstalled by `npm ci` anyway, and a stray .env would be copied
+# into an image layer where `docker history` can read it back out.
+
+# ─── Dependencies — reinstalled from the lockfile inside the image ─────────
+node_modules
+.pnp
+.pnp.*
+.yarn/cache
+.yarn/unplugged
+
+# ─── Build output — rebuilt inside the image; a stale .next also poisons it ─
+.next
+out
+build
+dist
+*.tsbuildinfo
+next-env.d.ts
+
+# ─── Secrets — MUST NOT reach any image layer ──────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ─── VCS / CI / editors ────────────────────────────────────────────────────
+.git
+.gitignore
+.github
+.vscode
+.idea
+.claude
+
+# ─── Vercel / Turbo local state ────────────────────────────────────────────
+.vercel
+.turbo
+
+# ─── Tests and coverage — not part of a production build ───────────────────
+coverage
+.nyc_output
+**/__tests__
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/*.spec.tsx
+
+# ─── Docs and OS noise ─────────────────────────────────────────────────────
+README.md
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.DS_Store
+Thumbs.db
+
+# ─── Never copy the Dockerfile into itself ─────────────────────────────────
+Dockerfile
+.dockerignore

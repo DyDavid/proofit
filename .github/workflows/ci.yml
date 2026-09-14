@@ -1,0 +1,164 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Proofit — CI
+#
+# Three independent jobs, run in parallel. Each one guards a different way this
+# monorepo can silently break:
+#
+#   python  ruff + pytest .............. the engine and the API still work
+#   web ..... tsc + next build + i18n .. the app compiles and km.json has not
+#                                        drifted from en.json
+#   types ... regenerate + git diff .... web/lib/types.ts is still in sync with
+#                                        engine/normalize/schema.py
+#
+# The `types` job is the schema-drift guard demanded by PERSON_B_PLAN_v2.md §5
+# Phase 1 task 2. web/lib/types.ts is GENERATED and must never be hand-edited;
+# when this job fails the fix is to run scripts/gen-types.sh and commit the
+# result — and if a screen then breaks, to change the fixture, not the UI.
+# ═══════════════════════════════════════════════════════════════════════════
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only token: nothing here writes to the repository.
+permissions:
+  contents: read
+
+# A second push to the same branch cancels the first run still in flight. Saves
+# free-tier Actions minutes and stops a stale ✗ from landing after a fix.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned to the versions in pyproject.toml (requires-python >=3.12,<3.13) and
+  # in web/Dockerfile (node:22-alpine). CI must not test a runtime we do not ship.
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "22"
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  python:
+    name: python — ruff + pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          # setup-python reads pyproject.toml's dependency set to key the cache.
+          cache: pip
+
+      - name: Install engine with api + dev extras
+        # Editable install so `engine` resolves the same way it does in
+        # api/Dockerfile and in a developer's .venv — one import path, no
+        # sys.path games (pyproject.toml [tool.setuptools] packages).
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[api,dev]"
+
+      - name: ruff check
+        # Config lives in pyproject.toml [tool.ruff]: line-length 100,
+        # target py312, rules E,F,I,UP,B,SIM.
+        run: ruff check .
+
+      - name: pytest
+        # testpaths, pythonpath and --strict-markers come from
+        # pyproject.toml [tool.pytest.ini_options].
+        # Covers tests/test_fixtures.py (every data/fixtures/*.json validates
+        # against the Pydantic schema) and tests/test_rewrite_validator.py.
+        run: pytest
+
+  # ─────────────────────────────────────────────────────────────────────────
+  web:
+    name: web — typecheck, build, i18n parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          # The lockfile is not at the repo root — this is a monorepo.
+          cache-dependency-path: web/package-lock.json
+
+      - name: npm ci
+        working-directory: web
+        run: npm ci
+
+      - name: TypeScript typecheck
+        working-directory: web
+        # Separate from the build: `next build` can succeed while types are
+        # wrong, and tsc gives a far better error than a runtime crash.
+        # tsconfig.json is strict; this is the wall that keeps it strict.
+        run: npx tsc --noEmit
+
+      - name: next build
+        working-directory: web
+        env:
+          # Empty on purpose — the client bundle then uses the relative /api/...
+          # path and the Next server rewrite resolves it at runtime. Baking a
+          # host in here would freeze it into every browser's JavaScript.
+          NEXT_PUBLIC_API_URL: ""
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: npm run build
+
+      - name: i18n key parity (en.json ⇄ km.json)
+        # PERSON_B_PLAN_v2.md §7.1 and §5 Phase 1 task 6. Exits non-zero if a key
+        # exists in one locale file and not the other. A missing Khmer key does
+        # not crash the app — next-intl falls back — so it ships silently and is
+        # discovered by a Khmer-first user, which is exactly the failure the
+        # Week 12 QA session is too late to catch cheaply. This is that guard.
+        # Run from the repository root: the script lives in scripts/, not web/.
+        run: node scripts/i18n-check.mjs
+
+  # ─────────────────────────────────────────────────────────────────────────
+  types:
+    name: types — web/lib/types.ts is in sync with schema.py
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install engine (Pydantic models export the JSON Schema)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[api,dev]"
+
+      - name: Install web dependencies (json-schema-to-typescript)
+        working-directory: web
+        run: npm ci
+
+      - name: Regenerate web/lib/types.ts
+        # Invoked via `bash` rather than as an executable so the check does not
+        # depend on the file's mode bit surviving a clone on every platform.
+        run: bash scripts/gen-types.sh
+
+      - name: Fail if the committed types are stale
+        run: |
+          if ! git diff --exit-code -- web/lib/types.ts; then
+            echo "::error file=web/lib/types.ts::web/lib/types.ts is stale. engine/normalize/schema.py changed but the generated types were not regenerated."
+            echo ""
+            echo "Fix:  bash scripts/gen-types.sh  &&  git add web/lib/types.ts"
+            echo ""
+            echo "web/lib/types.ts is GENERATED — never edit it by hand."
+            echo "If a screen breaks after regenerating, change the fixture, not the UI"
+            echo "(PERSON_B_PLAN_v2.md §9, 'Schema drift breaks the UI')."
+            exit 1
+          fi
+          echo "web/lib/types.ts matches engine/normalize/schema.py."

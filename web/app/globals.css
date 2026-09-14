@@ -1,0 +1,212 @@
+@import "tailwindcss";
+
+/* ==========================================================================
+   Proofit — design system
+   "Prove your fit" / បញ្ជាក់ភាពសក្តិសមរបស់អ្នក
+
+   Warm paper-and-ink editorial system (BRAND.md §3/§4, revised 12 Sep 2026).
+   Tailwind v4: there is NO tailwind.config.ts. Every design token lives here,
+   once, inside @theme.
+
+   This system has no dark mode. The reference it matches (a working
+   prototype predating this file) has none either — a paper background does
+   not have a natural dark inverse, and inventing one un-reviewed would be
+   guessing at a look nobody has approved. If dark mode is wanted later it
+   gets its own design pass, not a mechanical colour inversion here.
+
+   Accessibility (PERSON_B_PLAN_v2.md Phase 0.5): a verdict is NEVER colour
+   alone. Components pair every verdict tone with an inline SVG icon and the
+   word itself — see components/ui/VerdictIcon.tsx.
+
+   Khmer (PERSON_B_PLAN_v2.md §7.4): body line-height >= 1.7, never text-xs.
+   Khmer script stacks subscript consonants below the baseline and clips at
+   normal line heights. Fraunces and IBM Plex Mono have no Khmer glyphs, so
+   `font-serif` / `font-mono` fall back to Kantumruy Pro under
+   `html[lang="km"]` — see the base layer below.
+   ========================================================================== */
+
+@theme {
+  /* ---- Paper and ink. Nothing here is pure white or pure black. --------- */
+  --color-paper: #f3eee4;
+  --color-paper-2: #eae3d5;
+  --color-paper-3: #e0d7c4;
+  --color-surface-raised: #fbf8f1;
+  --color-ink: #1b1915;
+  --color-ink-2: #4a453c;
+  /* Adjusted from the prototype's #7A7364 (4.07:1 on paper, under AA).
+     This shade clears 4.86:1 — see BRAND.md §3. */
+  --color-ink-3: #6d675a;
+  --color-rule: #cfc6b2;
+
+  /* ---- Brand / accent: lacquer red. Doubles as the `missing` verdict —
+         deliberate, see BRAND.md §3. ------------------------------------- */
+  --color-lac: #b4301c;
+  --color-lac-2: #8f2415;
+  --color-lac-tint: #f2dcd5;
+  --color-missing: #b4301c;
+  --color-missing-tint: #f2dcd5;
+
+  /* ---- Verdict: proven (forest green). Safe as text at 5.53:1. --------- */
+  --color-proven: #2c6b3f;
+  --color-proven-tint: #dde9db;
+
+  /* ---- Verdict: partial (olive). `-ink` is the text-safe shade; `partial`
+         itself is for icons/swatches only — see BRAND.md §3. -------------- */
+  --color-partial: #9a6a08;
+  --color-partial-ink: #8a5f07;
+  --color-partial-tint: #f1e4c0;
+
+  /* ---- Highlight, behind a <mark>-ed resume excerpt only. --------------- */
+  --color-hl: #f4e27e;
+
+  /* ---- Shape: sharp content surfaces, pill controls (BRAND.md §3). ------ */
+  --radius-card: 0px;
+  --radius-control: 0px;
+  --radius-tag: 3px;
+  --radius-pill: 9999px;
+
+  /* ---- Type: display / body / data, one role each (BRAND.md §4). ------- */
+  --font-serif:
+    var(--font-fraunces), "Iowan Old Style", "Palatino Linotype", Georgia,
+    serif;
+  --font-sans:
+    var(--font-kantumruy), "Kantumruy Pro", ui-sans-serif, system-ui,
+    -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    "Noto Sans Khmer", sans-serif;
+  --font-mono:
+    var(--font-plex-mono), "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas,
+    monospace;
+
+  /* Khmer body copy. Exposed as the `leading-khmer` utility. */
+  --leading-khmer: 1.75;
+
+  /* ---- Spacing. Tailwind's 0.25rem base step is kept; these are the two
+         rhythm values the page shells reuse so sections line up. ------------ */
+  --spacing-section: 4rem;
+  --spacing-gutter: 1.5rem;
+}
+
+/* ==========================================================================
+   Base layer
+   ========================================================================== */
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+  }
+
+  body {
+    background-color: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    /* Khmer rule: body copy never drops below 1.7. */
+    line-height: var(--leading-khmer);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    position: relative;
+  }
+
+  /* Subtle paper grain, matching the reference. Fixed + behind content so it
+     never affects layout or interferes with text selection/hit-testing. */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    opacity: 0.55;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .06 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  #main {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Headings may tighten, but not below the point where Khmer subscripts
+     collide with the line above. */
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    line-height: 1.15;
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  /* Fraunces and IBM Plex Mono have no Khmer glyphs (BRAND.md §4): fall back
+     to Kantumruy Pro SemiBold under the Khmer locale, centrally, so no
+     component ever needs a Khmer-specific class of its own. */
+  html[lang="km"] .font-serif,
+  html[lang="km"] .font-mono {
+    font-family: var(--font-sans);
+    font-weight: 600;
+    letter-spacing: 0;
+  }
+
+  /* Single source of truth for the focus ring, matching the reference. */
+  :focus-visible {
+    outline: 2px solid var(--color-lac);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background-color: var(--color-hl);
+    color: var(--color-ink);
+  }
+
+  [hidden] {
+    display: none !important;
+  }
+}
+
+/* ==========================================================================
+   Component layer
+   ========================================================================== */
+
+@layer components {
+  /* Apply to any block of Khmer body copy that is not the <body> default,
+     e.g. inside a component that tightens leading for Latin. */
+  .khmer-body {
+    line-height: var(--leading-khmer);
+  }
+
+  /* Visually hidden but announced by screen readers. */
+  .sr-only-focusable:not(:focus):not(:focus-within) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border-width: 0;
+  }
+
+  /* Background gradient clip that lets the highlight colour show only behind
+     the text, not the full line-height box — used for evidence excerpts. */
+  .proofit-mark {
+    background: linear-gradient(
+      transparent 15%,
+      var(--color-hl) 15%,
+      var(--color-hl) 88%,
+      transparent 88%
+    );
+    color: inherit;
+    padding: 0 2px;
+  }
+}

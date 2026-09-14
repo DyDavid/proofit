@@ -1,0 +1,40 @@
+Junior Web Developer
+Angkor Digital Co., Ltd.
+Phnom Penh, Cambodia | Full Time | 1 Position | Salary: Negotiable
+Posted: 01 September 2026 | Closing Date: 30 September 2026
+
+ABOUT THE COMPANY
+Angkor Digital Co., Ltd. is a Phnom Penh based digital agency. We build websites, landing pages and small business systems for local companies, NGOs and hotels. Our team is 14 people. We work Monday to Friday, 8:00 to 17:00, at our office in Toul Kork.
+
+JOB DESCRIPTION
+We are looking for a Junior Web Developer to join our production team. You will work with our senior developer and our designer to turn approved designs into working web pages, fix issues reported by clients, and help maintain the sites we already deliver. Fresh graduates and final-year students are welcome to apply.
+
+RESPONSIBILITIES
+- Build web pages from approved designs and make sure they work on phone, tablet and desktop
+- Fix bugs and small change requests reported by our clients
+- Help the senior developer connect pages to simple APIs and content systems
+- Test your own work in Chrome, Safari and on a real Android phone before handover
+- Update the team on your progress in the daily 15 minute stand up
+
+REQUIREMENTS
+- Bachelor's degree in Information Technology, Computer Science or a related field; final-year students may apply
+- Solid understanding of HTML5 and CSS3
+- Able to write clean JavaScript (ES6)
+- At least 1 year of experience building websites; internship or freelance projects accepted
+- Good command of written and spoken English, and Khmer
+- Willing to learn, honest, and able to work in a team
+- Basic understanding of object-oriented programming
+
+NICE TO HAVE
+- Experience with React or Vue is an advantage
+- Familiar with Git and GitHub
+- Knowledge of PHP or Laravel
+- Experience with responsive, mobile-first layouts
+
+BENEFITS
+- Seniority pay and public holidays as per Cambodian Labour Law
+- Annual bonus based on company performance
+- Training budget for online courses
+
+HOW TO APPLY
+Interested candidates please send your CV and a link to any website you have made. Only shortlisted candidates will be contacted.

@@ -1,0 +1,87 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "proofit-engine"
+version = "0.1.0"
+description = "Proofit — requirement coverage analysis for Cambodian entry-level candidates. Importable engine package."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { text = "MIT" }
+authors = [{ name = "Proofit team" }]
+
+# The engine stays deliberately thin. It is imported by api/ on a 512 MB Render
+# free instance, so anything heavy (a local embedding model, torch) belongs behind
+# an API call instead — see PERSON_B_PLAN_v2.md §9 "Render OOM on embeddings".
+dependencies = [
+  "pydantic>=2.9,<3",
+]
+
+[project.optional-dependencies]
+# Everything the FastAPI service needs on top of the engine.
+api = [
+  "fastapi>=0.115,<1",
+  "uvicorn[standard]>=0.32,<1",
+  "pydantic-settings>=2.6,<3",
+  "python-multipart>=0.0.12",
+  "httpx>=0.27,<1",
+  "anthropic>=0.39,<1",
+  "supabase>=2.9,<3",
+]
+
+# Resume and JD text extraction. Person A owns the normalizers; these are the
+# parsers they were specified to use (PROJECT_SPEC.md §7).
+parse = [
+  "pdfminer.six>=20240706",
+  "python-docx>=1.1",
+]
+
+dev = [
+  "pytest>=8.3,<9",
+  "pytest-asyncio>=0.24",
+  "ruff>=0.7",
+  "mypy>=1.13",
+]
+
+[tool.setuptools]
+# Flat layout: the package lives at ./engine, matching the tree in
+# PERSON_B_PLAN_v2.md §3. Both api/ and Person A's scripts then import it the same
+# way — `from engine.normalize.schema import Match` — with no sys.path games.
+packages = [
+  "engine",
+  "engine.normalize",
+  "engine.match",
+  "engine.ingest",
+  "engine.rewrite",
+  "engine.country",
+]
+
+[tool.setuptools.package-data]
+# engine/country/rules.json (F6, Phase 4) and engine/rewrite/forbidden.json must
+# ship inside the wheel, or the Docker image loses them.
+"engine.country" = ["*.json"]
+"engine.rewrite" = ["*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q --strict-markers"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+files = ["engine", "api", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["supabase.*", "anthropic.*", "pdfminer.*", "docx.*"]
+ignore_missing_imports = true

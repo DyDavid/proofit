@@ -1,0 +1,186 @@
+{
+  "common": {
+    "appName": "Proofit",
+    "tagline": "Prove your fit",
+    "locale": {
+      "en": "EN",
+      "km": "ខ្មែរ"
+    },
+    "localeSwitcher": {
+      "label": "Language"
+    },
+    "nav": {
+      "home": "Home",
+      "analyze": "Analyze",
+      "about": "About"
+    },
+    "action": {
+      "analyze": "Analyze",
+      "trySample": "Try a sample",
+      "retry": "Try again",
+      "copy": "Copy",
+      "reject": "Reject",
+      "back": "Back"
+    },
+    "loading": "Working on it…",
+    "footerMeta": "AUPP · Final Year Project · 2026",
+    "error": {
+      "generic": "Something went wrong on our side. Please try again."
+    }
+  },
+  "landing": {
+    "hero": {
+      "eyebrow": "For Cambodian graduates · any job, anywhere",
+      "title": "Prove your <em>fit</em>, requirement by requirement.",
+      "subtitle": "Proofit reads a job post and your resume, then tells you which requirements you have already proven, which you have partly proven, and which you have no evidence for — quoting the exact line from your resume behind every verdict.",
+      "cta": "Analyze my resume",
+      "ctaSecondary": "Try a sample analysis"
+    },
+    "diff": {
+      "evidence": {
+        "title": "Coursework and projects count as evidence",
+        "body": "Most tools only look for job history, so a fresh graduate is marked missing on everything. Proofit reads coursework, class projects, part-time work, volunteering and competitions as real evidence — and says honestly how far that evidence goes."
+      },
+      "local": {
+        "title": "Built for the job posts you actually apply to",
+        "body": "Paste a post from CamHR, Bongthom, or any job board in the world. If a page cannot be fetched, paste the text instead — the analysis is exactly the same."
+      },
+      "crossborder": {
+        "title": "Apply abroad without guessing",
+        "body": "Pick Singapore, Japan or remote-US and Proofit adapts the resume conventions it checks, then tells you what the post actually says about visa sponsorship."
+      }
+    },
+    "how": {
+      "eyebrow": "How it works",
+      "step1": {
+        "title": "Upload your resume",
+        "body": "PDF or DOCX. Every line becomes evidence — coursework, projects and part-time work included, not just employment."
+      },
+      "step2": {
+        "title": "Paste the job post",
+        "body": "Text or a link. Each requirement is read out on its own, with its priority."
+      },
+      "step3": {
+        "title": "Read your coverage",
+        "body": "Proven, partial or missing for every requirement, with the resume line that decided it."
+      }
+    }
+  },
+  "analyze": {
+    "eyebrow": "New analysis",
+    "title": "Analyze a job post",
+    "subtitle": "Add your resume and the job post. A full analysis usually takes under a minute.",
+    "resume": {
+      "label": "Your resume",
+      "dropzone": "Drop your resume here, or choose a file",
+      "dropzoneHint": "PDF or DOCX, up to 5 MB",
+      "replace": "Replace file",
+      "errorType": "That file type is not supported. Upload a PDF or a DOCX file.",
+      "errorSize": "That file is larger than 5 MB. Upload a smaller file."
+    },
+    "jd": {
+      "label": "The job post",
+      "tab": {
+        "text": "Paste text",
+        "url": "Paste a link"
+      },
+      "placeholderText": "Paste the full job post here, including the requirements section.",
+      "placeholderUrl": "https://www.camhr.com/job/…"
+    },
+    "country": {
+      "label": "Where is this job based?",
+      "placeholder": "Select a destination country",
+      "options": {
+        "cambodia": "Cambodia",
+        "singapore": "Singapore",
+        "japan": "Japan",
+        "usRemote": "United States (remote)",
+        "australia": "Australia",
+        "other": "Other"
+      }
+    },
+    "submit": "Analyze",
+    "submitHint": "Add both your resume and the job post to continue.",
+    "onboarding": {
+      "title": "What Proofit does, and what it will not do",
+      "line1": "It checks your evidence against every requirement in the post, one requirement at a time.",
+      "line2": "It never invents experience. Every suggestion is built only from lines already in your resume.",
+      "line3": "It does not promise to beat any hiring software. It shows you requirement coverage."
+    }
+  },
+  "results": {
+    "title": "Your requirement coverage",
+    "eyebrow": "Result",
+    "realismLabel": "realism verdict",
+    "confidence": "{pct}% confidence",
+    "evidenceType": {
+      "employment": "Employment",
+      "internship": "Internship",
+      "part_time": "Part-time",
+      "coursework": "Coursework",
+      "project": "Project",
+      "volunteer": "Volunteer",
+      "certification": "Certification",
+      "competition": "Competition"
+    },
+    "coverage": {
+      "all": "Overall coverage",
+      "required": "Required-only coverage",
+      "tooltip": "Required items carry more weight than preferred ones, which is why the two figures differ.",
+      "underline": "underlined = required",
+      "weighting": "Weighted: proven = 1, partial = 0.5, missing = 0. Preferred requirements count half."
+    },
+    "realism": {
+      "strong_fit": "Strong fit",
+      "stretch": "A stretch",
+      "unrealistic": "Unrealistic for now"
+    },
+    "verdict": {
+      "proven": "Proven",
+      "partial": "Partly proven",
+      "missing": "No evidence"
+    },
+    "priority": {
+      "required": "Required",
+      "preferred": "Preferred"
+    },
+    "group": {
+      "missing": "No evidence",
+      "partial": "Partly proven",
+      "proven": "Proven",
+      "count": "{count} · {required} required"
+    },
+    "evidence": {
+      "from": "From your resume",
+      "why": "Why this verdict",
+      "missingReason": "Why nothing matched"
+    },
+    "actions": {
+      "title": "Fix these first",
+      "gain": "+{pct}% required coverage"
+    },
+    "baseline": {
+      "toggle": "Compare with a keyword matcher"
+    },
+    "empty": "No requirements were found in this job post. Check the text you pasted and try again."
+  },
+  "progress": {
+    "title": "Analyzing",
+    "stage": {
+      "reading_resume": "Reading your resume",
+      "reading_job": "Reading the job post",
+      "matching_requirements": "Matching requirements",
+      "checking_realism": "Checking how realistic the fit is"
+    },
+    "timeout": "This is taking longer than expected. The analysis may still be running in the background.",
+    "timeoutAction": "Run the analysis again"
+  },
+  "about": {
+    "eyebrow": "About",
+    "title": "About Proofit",
+    "method": "Proofit turns the job post and your resume into the same structure, then judges each requirement against your evidence records one at a time. Every verdict cites either the resume line that proves it or an explicit reason nothing matched.",
+    "limits": "Proofit is a study aid, not a hiring decision. It can misread an unusual resume layout or a scanned PDF, it can disagree with a recruiter, and it will never claim experience you do not have.",
+    "team": "Proofit is a final-year project by two students at the American University of Phnom Penh.",
+    "legality": "We read robots.txt before fetching from any job board, we rate-limit our requests, and we store a structured extract with a link back rather than a copy of the post. We never fetch from Facebook or LinkedIn — paste the text instead."
+  }
+}
