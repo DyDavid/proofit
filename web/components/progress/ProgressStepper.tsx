@@ -35,8 +35,9 @@ interface ServerErrorState {
  *    error — the analysis may still finish — so the recovery action resumes
  *    polling rather than discarding anything (docs/errors.md §3).
  *  - `serverError`: the API reported `status: "failed"` with a typed error.
- *    Offers Retry (re-runs with the same resume_id/job_id, no re-upload)
- *    and a copyable error_id (docs/errors.md §2 ENGINE_FAILED).
+ *    Offers Retry (re-runs with the same resume_id/job_id, no re-upload),
+ *    a copyable error_id (docs/errors.md §2 ENGINE_FAILED), and a link back
+ *    to /analyze so a retry that itself fails is never a dead end.
  */
 export function ProgressStepper({ analysisId }: ProgressStepperProps) {
   const t = useTranslations("progress");
@@ -48,6 +49,7 @@ export function ProgressStepper({ analysisId }: ProgressStepperProps) {
   const [timedOut, setTimedOut] = React.useState(false);
   const [serverError, setServerError] = React.useState<ServerErrorState | null>(null);
   const [retrying, setRetrying] = React.useState(false);
+  const [retryFailed, setRetryFailed] = React.useState(false);
   const [copied, setCopied] = React.useState(false);
   const startedAtRef = React.useRef<number | null>(null);
   // Holds the current `poll` closure so `keepWaiting` can resume the same
@@ -61,6 +63,7 @@ export function ProgressStepper({ analysisId }: ProgressStepperProps) {
     startedAtRef.current = Date.now();
     setTimedOut(false);
     setServerError(null);
+    setRetryFailed(false);
     setActiveIndex(0);
 
     async function poll() {
@@ -114,13 +117,16 @@ export function ProgressStepper({ analysisId }: ProgressStepperProps) {
 
   async function retry() {
     setRetrying(true);
+    setRetryFailed(false);
     try {
       const { analysis_id } = await retryAnalysis(currentId);
       setCurrentId(analysis_id);
       setServerError(null);
     } catch {
-      // Retry itself failed (e.g. the original analysis is gone server-side)
-      // — leave the error card up; the user can navigate back to /analyze.
+      // Retry itself failed (e.g. the original analysis is gone server-side
+      // after a restart). Say so instead of silently reverting the spinner —
+      // the card's "Back" link is then the way out.
+      setRetryFailed(true);
     } finally {
       setRetrying(false);
     }
@@ -162,6 +168,9 @@ export function ProgressStepper({ analysisId }: ProgressStepperProps) {
           >
             {tc("action.retry")}
           </Button>
+          <Button as="a" href="/analyze" variant="ghost" size="sm">
+            {tc("action.back")}
+          </Button>
           {serverError.errorId ? (
             <button
               type="button"
@@ -172,6 +181,11 @@ export function ProgressStepper({ analysisId }: ProgressStepperProps) {
             </button>
           ) : null}
         </div>
+        {retryFailed ? (
+          <p role="alert" className="text-sm leading-[1.6] text-ink-2">
+            {tc("error.generic")}
+          </p>
+        ) : null}
       </div>
     );
   }
