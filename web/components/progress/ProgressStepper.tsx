@@ -5,7 +5,7 @@ import * as React from "react";
 
 import { Button } from "@/components/ui/Button";
 import { useRouter } from "@/i18n/routing";
-import { getAnalysis } from "@/lib/api";
+import { getAnalysis, retryAnalysis } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const STAGES = [
@@ -16,38 +16,68 @@ const STAGES = [
 ] as const;
 
 const POLL_INTERVAL_MS = 2000;
+const TIMEOUT_MS = 120_000;
 
 export interface ProgressStepperProps {
   analysisId: string;
 }
 
+interface ServerErrorState {
+  code: string;
+  errorId: string;
+}
+
 /**
- * Polls `GET /api/analyses/{id}` every 2s (PERSON_B_PLAN_v2.md §5 Phase 1
- * task 4) and drives the stepper from the real `stage` field. `null`/unknown
- * stage (e.g. still `queued`) falls back to showing the first step active,
- * per Phase 2 task 3's "fall back to timed fake stages when stage is null."
+ * Polls `GET /api/analyses/{id}` every 2s and drives the stepper from the
+ * real `stage` field. Three terminal states beyond "still going":
+ *  - `timedOut`: 120s client ceiling reached while still queued/running, or
+ *    a network hiccup that never resolved within that ceiling. Not a server
+ *    error — the analysis may still finish — so the recovery action resumes
+ *    polling rather than discarding anything (docs/errors.md §3).
+ *  - `serverError`: the API reported `status: "failed"` with a typed error.
+ *    Offers Retry (re-runs with the same resume_id/job_id, no re-upload)
+ *    and a copyable error_id (docs/errors.md §2 ENGINE_FAILED).
  */
 export function ProgressStepper({ analysisId }: ProgressStepperProps) {
   const t = useTranslations("progress");
+  const te = useTranslations("errors");
+  const tc = useTranslations("common");
   const router = useRouter();
+  const [currentId, setCurrentId] = React.useState(analysisId);
   const [activeIndex, setActiveIndex] = React.useState(0);
-  const [failed, setFailed] = React.useState(false);
+  const [timedOut, setTimedOut] = React.useState(false);
+  const [serverError, setServerError] = React.useState<ServerErrorState | null>(null);
+  const [retrying, setRetrying] = React.useState(false);
+  const [copied, setCopied] = React.useState(false);
+  const startedAtRef = React.useRef<number | null>(null);
 
   React.useEffect(() => {
     let cancelled = false;
+    startedAtRef.current = Date.now();
+    setTimedOut(false);
+    setServerError(null);
+    setActiveIndex(0);
 
     async function poll() {
+      const elapsed = Date.now() - (startedAtRef.current ?? Date.now());
       try {
-        const res = await getAnalysis(analysisId);
+        const res = await getAnalysis(currentId);
         if (cancelled) return;
 
         if (res.status === "done") {
           setActiveIndex(STAGES.length);
-          router.push(`/results?id=${analysisId}`);
+          router.push(`/results?id=${currentId}`);
           return;
         }
         if (res.status === "failed") {
-          setFailed(true);
+          setServerError({
+            code: res.error?.code ?? "INTERNAL",
+            errorId: res.error?.error_id ?? "",
+          });
+          return;
+        }
+        if (elapsed > TIMEOUT_MS) {
+          setTimedOut(true);
           return;
         }
 
@@ -55,7 +85,12 @@ export function ProgressStepper({ analysisId }: ProgressStepperProps) {
         setActiveIndex(index >= 0 ? index : 0);
         setTimeout(poll, POLL_INTERVAL_MS);
       } catch {
-        if (!cancelled) setFailed(true);
+        if (cancelled) return;
+        if (elapsed > TIMEOUT_MS) {
+          setTimedOut(true);
+          return;
+        }
+        setTimeout(poll, POLL_INTERVAL_MS);
       }
     }
 
@@ -63,15 +98,89 @@ export function ProgressStepper({ analysisId }: ProgressStepperProps) {
     return () => {
       cancelled = true;
     };
-  }, [analysisId, router]);
+  }, [currentId, router]);
 
-  if (failed) {
+  function keepWaiting() {
+    startedAtRef.current = Date.now();
+    setTimedOut(false);
+  }
+
+  async function retry() {
+    setRetrying(true);
+    try {
+      const { analysis_id } = await retryAnalysis(currentId);
+      setCurrentId(analysis_id);
+      setServerError(null);
+    } catch {
+      // Retry itself failed (e.g. the original analysis is gone server-side)
+      // — leave the error card up; the user can navigate back to /analyze.
+    } finally {
+      setRetrying(false);
+    }
+  }
+
+  async function copyErrorId() {
+    if (!serverError?.errorId) return;
+    try {
+      await navigator.clipboard.writeText(serverError.errorId);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard access denied — nothing to do; the id is still visible as text.
+    }
+  }
+
+  if (serverError) {
+    const knownCodes = [
+      "RESUME_UNREADABLE",
+      "JOB_FETCH_FAILED",
+      "ENGINE_FAILED",
+      "RATE_LIMITED",
+      "INTERNAL",
+    ] as const;
+    const message = (knownCodes as readonly string[]).includes(serverError.code)
+      ? te(serverError.code as (typeof knownCodes)[number])
+      : te("INTERNAL");
+
     return (
       <div className="grid gap-4">
-        <p className="text-sm leading-[1.6] text-missing">{t("timeout")}</p>
-        <Button as="a" href="/analyze" variant="secondary" size="sm" className="justify-self-start">
-          {t("timeoutAction")}
-        </Button>
+        <p className="text-sm leading-[1.6] text-missing">{message}</p>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={retry}
+            loading={retrying}
+          >
+            {tc("action.retry")}
+          </Button>
+          {serverError.errorId ? (
+            <button
+              type="button"
+              onClick={copyErrorId}
+              className="font-mono text-xs text-ink-3 underline decoration-rule underline-offset-2 hover:decoration-ink"
+            >
+              {copied ? tc("action.copy") + " ✓" : `${serverError.errorId} · ${tc("action.copy")}`}
+            </button>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
+  if (timedOut) {
+    return (
+      <div className="grid gap-4">
+        <p className="text-sm leading-[1.6] text-ink-2">{t("timeout")}</p>
+        <div className="flex flex-wrap gap-3">
+          <Button type="button" variant="secondary" size="sm" onClick={keepWaiting}>
+            {t("timeoutAction")}
+          </Button>
+          <Button as="a" href="/analyze" variant="ghost" size="sm">
+            {t("timeoutRetry")}
+          </Button>
+        </div>
       </div>
     );
   }
