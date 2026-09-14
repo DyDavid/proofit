@@ -1,0 +1,17 @@
+{
+  "coverage_score": 52.8,
+  "method": "tfidf",
+  "results": [
+    { "requirement_id": "r1", "verdict": "partial", "score": 0.34, "matched_terms": ["bachelor", "information"] },
+    { "requirement_id": "r2", "verdict": "proven", "score": 0.71, "matched_terms": ["html", "css"] },
+    { "requirement_id": "r3", "verdict": "partial", "score": 0.38, "matched_terms": ["javascript"] },
+    { "requirement_id": "r4", "verdict": "missing", "score": 0.11, "matched_terms": ["projects"] },
+    { "requirement_id": "r5", "verdict": "proven", "score": 0.82, "matched_terms": ["english", "khmer"] },
+    { "requirement_id": "r6", "verdict": "missing", "score": 0.0, "matched_terms": [] },
+    { "requirement_id": "r7", "verdict": "proven", "score": 0.66, "matched_terms": ["object-oriented", "programming"] },
+    { "requirement_id": "r8", "verdict": "proven", "score": 0.58, "matched_terms": ["react"] },
+    { "requirement_id": "r9", "verdict": "missing", "score": 0.0, "matched_terms": [] },
+    { "requirement_id": "r10", "verdict": "missing", "score": 0.0, "matched_terms": [] },
+    { "requirement_id": "r11", "verdict": "partial", "score": 0.42, "matched_terms": ["responsive"] }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "coverage_score": 35.0,
+  "method": "tfidf",
+  "results": [
+    { "requirement_id": "r1", "verdict": "missing", "score": 0.15, "matched_terms": ["bachelor", "software"] },
+    { "requirement_id": "r2", "verdict": "partial", "score": 0.35, "matched_terms": ["javascript"] },
+    { "requirement_id": "r3", "verdict": "partial", "score": 0.4, "matched_terms": ["react"] },
+    { "requirement_id": "r4", "verdict": "proven", "score": 0.68, "matched_terms": ["vite", "build"] },
+    { "requirement_id": "r5", "verdict": "missing", "score": 0.13, "matched_terms": ["react"] },
+    { "requirement_id": "r6", "verdict": "missing", "score": 0.0, "matched_terms": [] },
+    { "requirement_id": "r7", "verdict": "missing", "score": 0.12, "matched_terms": ["software"] },
+    { "requirement_id": "r8", "verdict": "partial", "score": 0.38, "matched_terms": ["english"] },
+    { "requirement_id": "r9", "verdict": "missing", "score": 0.14, "matched_terms": ["css"] },
+    { "requirement_id": "r10", "verdict": "missing", "score": 0.0, "matched_terms": [] },
+    { "requirement_id": "r11", "verdict": "proven", "score": 0.62, "matched_terms": ["portfolio", "projects"] },
+    { "requirement_id": "r12", "verdict": "proven", "score": 0.58, "matched_terms": ["khmer"] }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "coverage_score": 12.5,
+  "method": "tfidf",
+  "results": [
+    { "requirement_id": "r1", "verdict": "missing", "score": 0.1, "matched_terms": ["bachelor"] },
+    { "requirement_id": "r2", "verdict": "missing", "score": 0.15, "matched_terms": ["react"] },
+    { "requirement_id": "r3", "verdict": "partial", "score": 0.35, "matched_terms": ["react"] },
+    { "requirement_id": "r4", "verdict": "missing", "score": 0.0, "matched_terms": [] },
+    { "requirement_id": "r5", "verdict": "missing", "score": 0.08, "matched_terms": [] },
+    { "requirement_id": "r6", "verdict": "missing", "score": 0.13, "matched_terms": ["react"] },
+    { "requirement_id": "r7", "verdict": "missing", "score": 0.12, "matched_terms": ["pipeline"] },
+    { "requirement_id": "r8", "verdict": "missing", "score": 0.0, "matched_terms": [] },
+    { "requirement_id": "r9", "verdict": "missing", "score": 0.0, "matched_terms": [] },
+    { "requirement_id": "r10", "verdict": "partial", "score": 0.4, "matched_terms": ["english"] },
+    { "requirement_id": "r11", "verdict": "missing", "score": 0.0, "matched_terms": [] },
+    { "requirement_id": "r12", "verdict": "missing", "score": 0.15, "matched_terms": ["state", "management"] },
+    { "requirement_id": "r13", "verdict": "proven", "score": 0.55, "matched_terms": ["portfolio"] },
+    { "requirement_id": "r14", "verdict": "missing", "score": 0.0, "matched_terms": [] }
+  ]
+}
