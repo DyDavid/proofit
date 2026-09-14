@@ -1,19 +1,29 @@
 # Error Matrix
 
-> **Status: seeded early. This is a Phase 2 deliverable, not a Phase 1 one.**
+> **Status: seeded in Phase 0/1, implemented in Phase 2.** Read `### Phase 2 checklist`
+> in §4 for the live box-by-box state; this banner is the summary.
 >
-> `PERSON_B_PLAN_v2.md` §5 Phase 2.4 schedules `docs/errors.md` for Weeks 5–7 and requires
-> that every case listed here be tested with a forced failure before Phase 2 closes.
-> It is written now, during Phase 0/1, because the ten error **codes** are part of the API
-> contract that Phase 1 freezes — the codes have to be decided before the routes are written,
-> or they get invented ad-hoc at three different call sites.
+> The ten error **codes** were decided during Phase 0/1, ahead of the routes, because they
+> are part of the API contract Phase 1 freezes — otherwise they get invented ad-hoc at three
+> different call sites. `PERSON_B_PLAN_v2.md` §5 Phase 2.4 then scheduled the implementation
+> for Weeks 5–7, and required a forced failure per case before Phase 2 closes.
 >
-> **What is true today (Phase 1):** the codes below are the authoritative list, and the API
-> returns the envelope in §1. **What is not true yet:** the Khmer and English strings are not
-> yet in `web/messages/en.json` / `km.json` under `errors.*` — Phase 1's i18n key set stops at
-> `common.error.generic`, a single generic fallback. Phase 2.4 adds the per-code keys and wires
-> each screen to them. Until then the UI shows `common.error.generic` for every failure.
-> **Nothing here has been tested against a forced failure yet.**
+> **What is true today:** the codes below are the authoritative list; the API returns the §1
+> envelope for all of them; the per-code `errors.*` catalogue exists in both
+> `web/messages/en.json` and `web/messages/km.json`; and every screen switches on `code` and
+> renders a catalogue string — no UI surface renders the server's `message` field, and an
+> unrecognised code falls back to `errors.INTERNAL` rather than failing the render. Four codes
+> have been forced deliberately in mock mode and confirmed end to end: `RESUME_BAD_TYPE`,
+> `RESUME_TOO_LARGE`, `JOB_EMPTY`, `ANALYSIS_NOT_FOUND`.
+>
+> **What is not true yet:** `km.json` holds the English strings as placeholders — the
+> provisional Khmer in §2 has not been moved into it, and is confirmed or replaced in the
+> Phase 5 Khmer QA session (§4), the same gate that covers the rest of the Khmer catalogue.
+> `ENGINE_FAILED`'s `status: "failed"` path is exercised by an automated test but has not had
+> its manual screenshot taken. The remaining four codes cannot be forced from here yet:
+> `RESUME_UNREADABLE` needs Person A's normalizer (mock mode never parses file content),
+> `JOB_URL_BLOCKED` and `JOB_FETCH_FAILED` need the Phase 3 URL fetcher, and `RATE_LIMITED`
+> is only reachable against the real Anthropic API at CP2.
 
 ---
 
@@ -169,7 +179,7 @@ Khmer strings marked **provisional** — see §4.
 | **English** | Something went wrong on our side. Try again — if it keeps happening, send us this error id. |
 | **Khmer** | មានបញ្ហាមួយកើតឡើងនៅខាងយើង។ សូមព្យាយាមម្តងទៀត — បើនៅតែកើតឡើង សូមផ្ញើលេខសម្គាល់កំហុសនេះមកយើង។ |
 | **Recovery** | Error card with Retry and a copyable `error_id`. Never renders a stack trace or the server `message` field. |
-| **i18n key** | `errors.INTERNAL` *(Phase 2)*, and `common.error.generic` is this string — it is the fallback the UI uses for any code it does not recognise. |
+| **i18n key** | `errors.INTERNAL` *(Phase 2)* — what the error card falls back to for any code it does not recognise, on the Progress and Results screens where an `error_id` is on offer. `common.error.generic` is the shorter sibling, used where there is no id to quote: a transport failure, or a form submit that returned a code with no field-specific message. |
 
 ---
 
