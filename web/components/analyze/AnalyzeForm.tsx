@@ -30,6 +30,7 @@ const COUNTRY_KEYS = [
 export function AnalyzeForm() {
   const t = useTranslations("analyze");
   const tc = useTranslations("common");
+  const te = useTranslations("errors");
   const router = useRouter();
   const [file, setFile] = React.useState<File | null>(null);
   const [jobPost, setJobPost] = React.useState<JobPostValue>({
@@ -41,7 +42,9 @@ export function AnalyzeForm() {
     COUNTRY_KEYS[0],
   );
   const [submitting, setSubmitting] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
+  const [resumeError, setResumeError] = React.useState<string | null>(null);
+  const [jobError, setJobError] = React.useState<string | null>(null);
+  const [formError, setFormError] = React.useState<string | null>(null);
 
   const canSubmit = Boolean(file) && hasJobPost(jobPost);
 
@@ -50,7 +53,9 @@ export function AnalyzeForm() {
     if (!canSubmit || submitting || !file) return;
 
     setSubmitting(true);
-    setError(null);
+    setResumeError(null);
+    setJobError(null);
+    setFormError(null);
     try {
       const { resume_id } = await uploadResume(file);
       const { job_id } = await submitJob(
@@ -59,7 +64,24 @@ export function AnalyzeForm() {
       const { analysis_id } = await createAnalysis({ resume_id, job_id, country });
       router.push(`/progress?id=${analysis_id}`);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : tc("error.generic"));
+      const code = err instanceof ApiError ? err.code : undefined;
+      const message =
+        code &&
+        (["RESUME_BAD_TYPE", "RESUME_TOO_LARGE", "JOB_EMPTY"] as const).includes(
+          code as "RESUME_BAD_TYPE" | "RESUME_TOO_LARGE" | "JOB_EMPTY",
+        )
+          ? te(code as "RESUME_BAD_TYPE" | "RESUME_TOO_LARGE" | "JOB_EMPTY")
+          : err instanceof ApiError
+            ? err.message
+            : tc("error.generic");
+      if (code === "RESUME_BAD_TYPE" || code === "RESUME_TOO_LARGE") {
+        setResumeError(message);
+      } else if (code === "JOB_EMPTY") {
+        setJobError(message);
+        document.getElementById(jobPost.mode === "text" ? "jd-text" : "jd-url")?.focus();
+      } else {
+        setFormError(message);
+      }
       setSubmitting(false);
     }
   }
@@ -70,12 +92,12 @@ export function AnalyzeForm() {
         <Card padding="lg">
           <h2 className="mb-1 font-serif text-xl text-ink">{t("resume.label")}</h2>
           <p className="mb-4 text-sm text-ink-3">{t("resume.dropzoneHint")}</p>
-          <ResumeDropzone file={file} onChange={setFile} />
+          <ResumeDropzone file={file} onChange={setFile} serverError={resumeError} />
         </Card>
 
         <Card padding="lg">
           <h2 className="mb-4 font-serif text-xl text-ink">{t("jd.label")}</h2>
-          <JobPostPanel value={jobPost} onChange={setJobPost} />
+          <JobPostPanel value={jobPost} onChange={setJobPost} error={jobError} />
         </Card>
       </div>
 
@@ -104,9 +126,9 @@ export function AnalyzeForm() {
       {!canSubmit && !submitting ? (
         <p className="-mt-4 font-mono text-sm text-ink-3">{t("submitHint")}</p>
       ) : null}
-      {error ? (
+      {formError ? (
         <p role="alert" className="-mt-4 text-sm text-missing">
-          {error}
+          {formError}
         </p>
       ) : null}
     </form>

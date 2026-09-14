@@ -16,6 +16,7 @@ export interface JobPostValue {
 export interface JobPostPanelProps {
   value: JobPostValue;
   onChange: (value: JobPostValue) => void;
+  error?: string | null;
 }
 
 const FIELD_CLASS = cn(
@@ -24,7 +25,7 @@ const FIELD_CLASS = cn(
 );
 
 /** Paste-text / paste-URL tabs for the job post input. */
-export function JobPostPanel({ value, onChange }: JobPostPanelProps) {
+export function JobPostPanel({ value, onChange, error }: JobPostPanelProps) {
   const t = useTranslations("analyze.jd");
 
   return (
@@ -78,6 +79,11 @@ export function JobPostPanel({ value, onChange }: JobPostPanelProps) {
           />
         </>
       )}
+      {error ? (
+        <p role="alert" className="mt-2 text-sm text-missing">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

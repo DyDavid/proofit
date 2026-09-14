@@ -15,6 +15,7 @@ const MAX_BYTES = 5 * 1024 * 1024;
 export interface ResumeDropzoneProps {
   file: File | null;
   onChange: (file: File | null) => void;
+  serverError?: string | null;
 }
 
 function formatSize(bytes: number): string {
@@ -26,7 +27,7 @@ function formatSize(bytes: number): string {
  * and size are checked here before anything is sent anywhere, since there is
  * no upload endpoint yet in Phase 1 skeleton scope.
  */
-export function ResumeDropzone({ file, onChange }: ResumeDropzoneProps) {
+export function ResumeDropzone({ file, onChange, serverError }: ResumeDropzoneProps) {
   const t = useTranslations("analyze.resume");
   const inputRef = React.useRef<HTMLInputElement>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -48,19 +49,26 @@ export function ResumeDropzone({ file, onChange }: ResumeDropzoneProps) {
 
   if (file) {
     return (
-      <div className="flex items-center gap-3.5 border border-rule bg-paper p-3.5">
-        <div className="relative flex h-12 w-10 shrink-0 items-center justify-center border border-ink bg-surface-raised">
-          <span className="absolute bottom-1 left-0 right-0 text-center font-mono text-[9px] tracking-wide text-ink">
-            {file.name.split(".").pop()?.toUpperCase()}
-          </span>
+      <div className="grid gap-2">
+        <div className="flex items-center gap-3.5 border border-rule bg-paper p-3.5">
+          <div className="relative flex h-12 w-10 shrink-0 items-center justify-center border border-ink bg-surface-raised">
+            <span className="absolute bottom-1 left-0 right-0 text-center font-mono text-[9px] tracking-wide text-ink">
+              {file.name.split(".").pop()?.toUpperCase()}
+            </span>
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-medium text-ink">{file.name}</p>
+            <p className="font-mono text-xs text-ink-3">{formatSize(file.size)}</p>
+          </div>
+          <Button variant="ghost" size="sm" type="button" onClick={() => onChange(null)}>
+            {t("replace")}
+          </Button>
         </div>
-        <div className="min-w-0 flex-1">
-          <p className="truncate font-medium text-ink">{file.name}</p>
-          <p className="font-mono text-xs text-ink-3">{formatSize(file.size)}</p>
-        </div>
-        <Button variant="ghost" size="sm" type="button" onClick={() => onChange(null)}>
-          {t("replace")}
-        </Button>
+        {(error ?? serverError) ? (
+          <p role="alert" className="text-sm text-missing">
+            {error ?? serverError}
+          </p>
+        ) : null}
       </div>
     );
   }
@@ -120,9 +128,9 @@ export function ResumeDropzone({ file, onChange }: ResumeDropzoneProps) {
           tabIndex={-1}
         />
       </div>
-      {error ? (
+      {(error ?? serverError) ? (
         <p role="alert" className="text-sm text-missing">
-          {error}
+          {error ?? serverError}
         </p>
       ) : null}
     </div>
