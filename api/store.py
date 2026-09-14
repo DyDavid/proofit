@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from engine.normalize.schema import AnalysisStatus, Match, MatchStage
+from engine.normalize.schema import AnalysisStatus, BaselineMatch, Match, MatchStage
 
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "data" / "fixtures"
 
@@ -46,6 +46,16 @@ def _load_fixture(name: str) -> Match:
 
 
 _FIXTURES: dict[str, Match] = {name: _load_fixture(name) for name in _FIXTURE_ROTATION}
+
+
+def _load_baseline_fixture(name: str) -> BaselineMatch:
+    raw = json.loads((FIXTURES_DIR / f"{name}.baseline.json").read_text())
+    return BaselineMatch.model_validate(raw)
+
+
+_BASELINES: dict[str, BaselineMatch] = {
+    name: _load_baseline_fixture(name) for name in _FIXTURE_ROTATION
+}
 
 
 def _new_id(prefix: str) -> str:
@@ -81,6 +91,8 @@ class AnalysisRecord:
     status: AnalysisStatus = "queued"
     stage: MatchStage | None = None
     match: Match | None = None
+    baseline: BaselineMatch | None = None
+    error: dict | None = None
 
 
 @dataclass
@@ -90,6 +102,13 @@ class Store:
     jobs_by_hash: dict[str, str] = field(default_factory=dict)
     analyses: dict[str, AnalysisRecord] = field(default_factory=dict)
     _rotation_index: int = 0
+    #: Caches the fixture name `pick_fixture_name` picked for a given job_id.
+    #: Without this, calling `pick_fixture_name` twice for the same job_id on
+    #: the rotation fallback path (once directly, once via `pick_fixture`'s
+    #: internal delegation) would advance `_rotation_index` twice and hand
+    #: back two *different* names — silently pairing a match with a baseline
+    #: from an unrelated fixture. Caching makes the pick idempotent per job_id.
+    _picked_fixture_names: dict[str, str] = field(default_factory=dict)
 
     def add_resume(self, filename: str, content_type: str, size: int) -> ResumeRecord:
         record = ResumeRecord(id=_new_id("res"), filename=filename, content_type=content_type, size=size)
@@ -115,16 +134,36 @@ class Store:
         self.analyses[record.id] = record
         return record
 
-    def pick_fixture(self, job_id: str) -> Match:
+    def pick_fixture_name(self, job_id: str) -> str:
+        """The fixture name `pick_fixture`/`pick_baseline` would each pick —
+        factored out so a match and its baseline always come from the same
+        fixture (run_baseline's contract: 'must be run on the same pair').
+
+        Cached per job_id so repeated calls for the same job_id (e.g. one
+        direct call plus one via `pick_fixture`'s internal delegation, in the
+        same analysis run) always agree — otherwise the rotation fallback
+        would advance on the second call and hand back a different name."""
+        cached = self._picked_fixture_names.get(job_id)
+        if cached is not None:
+            return cached
+
         job = self.jobs.get(job_id)
         text_lower = (job.raw if job else "").lower()
         for company, name in _FIXTURE_BY_COMPANY.items():
             if company in text_lower:
-                return _FIXTURES[name]
+                self._picked_fixture_names[job_id] = name
+                return name
 
         name = _FIXTURE_ROTATION[self._rotation_index % len(_FIXTURE_ROTATION)]
         self._rotation_index += 1
-        return _FIXTURES[name]
+        self._picked_fixture_names[job_id] = name
+        return name
+
+    def pick_fixture(self, job_id: str) -> Match:
+        return _FIXTURES[self.pick_fixture_name(job_id)]
+
+    def pick_baseline(self, fixture_name: str) -> BaselineMatch:
+        return _BASELINES[fixture_name]
 
 
 store = Store()
