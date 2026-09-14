@@ -65,3 +65,33 @@ def test_engine_failure_sets_status_failed_with_an_error_envelope() -> None:
     assert res["match"] is None
     assert res["error"]["code"] == "ENGINE_FAILED"
     assert "error_id" in res["error"]
+
+
+def test_retry_creates_a_new_analysis_reusing_the_same_inputs() -> None:
+    resume_id = client.post(
+        "/api/resumes",
+        files={"file": ("r.pdf", b"%PDF-1.4 fake", "application/pdf")},
+    ).json()["resume_id"]
+    job_id = client.post("/api/jobs", json={"text": "x" * 41}).json()["job_id"]
+    original_id = client.post(
+        "/api/analyses",
+        json={"resume_id": resume_id, "job_id": job_id, "country": "japan"},
+    ).json()["analysis_id"]
+
+    retry_res = client.post(f"/api/analyses/{original_id}/retry")
+    assert retry_res.status_code == 202
+    retry_body = retry_res.json()
+    assert retry_body["analysis_id"] != original_id
+    assert retry_body["status"] == "queued"
+
+    retried = store.analyses[retry_body["analysis_id"]]
+    original = store.analyses[original_id]
+    assert retried.resume_id == original.resume_id
+    assert retried.job_id == original.job_id
+    assert retried.country == original.country
+
+
+def test_retry_on_unknown_id_is_analysis_not_found() -> None:
+    res = client.post("/api/analyses/an_doesnotexist/retry")
+    assert res.status_code == 404
+    assert res.json()["error"]["code"] == "ANALYSIS_NOT_FOUND"

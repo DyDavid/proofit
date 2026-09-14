@@ -105,3 +105,13 @@ async def get_analysis(analysis_id: str) -> dict:
         "baseline": record.baseline.model_dump(mode="json") if record.baseline else None,
         "error": record.error,
     }
+
+
+@router.post("/analyses/{analysis_id}/retry", status_code=202)
+async def retry_analysis(analysis_id: str, background_tasks: BackgroundTasks) -> dict:
+    record = store.create_retry(analysis_id)
+    if record is None:
+        raise ApiError(status_code=404, code="ANALYSIS_NOT_FOUND", message="Unknown analysis_id.")
+
+    background_tasks.add_task(_run_mock_analysis, record.id)
+    return {"analysis_id": record.id, "status": record.status}

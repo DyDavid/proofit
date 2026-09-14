@@ -134,6 +134,12 @@ class Store:
         self.analyses[record.id] = record
         return record
 
+    def create_retry(self, original_id: str) -> AnalysisRecord | None:
+        original = self.analyses.get(original_id)
+        if original is None:
+            return None
+        return self.create_analysis(original.resume_id, original.job_id, original.country)
+
     def pick_fixture_name(self, job_id: str) -> str:
         """The fixture name `pick_fixture`/`pick_baseline` would each pick —
         factored out so a match and its baseline always come from the same
