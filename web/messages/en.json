@@ -75,6 +75,7 @@
       "dropzone": "Drop your resume here, or choose a file",
       "dropzoneHint": "PDF or DOCX, up to 5 MB",
       "replace": "Replace file",
+      "remembered": "Remembered from your last visit",
       "errorType": "That file type is not supported. Upload a PDF or a DOCX file.",
       "errorSize": "That file is larger than 5 MB. Upload a smaller file."
     },

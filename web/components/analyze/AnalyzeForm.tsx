@@ -9,6 +9,12 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { useRouter } from "@/i18n/routing";
 import { ApiError, createAnalysis, submitJob, uploadResume } from "@/lib/api";
+import {
+  clearRememberedResume,
+  loadRememberedResume,
+  saveRememberedResume,
+  type RememberedResume,
+} from "@/lib/localResume";
 import { cn } from "@/lib/utils";
 
 const COUNTRY_KEYS = [
@@ -45,25 +51,53 @@ export function AnalyzeForm() {
   const [resumeError, setResumeError] = React.useState<string | null>(null);
   const [jobError, setJobError] = React.useState<string | null>(null);
   const [formError, setFormError] = React.useState<string | null>(null);
+  const [rememberedResume, setRememberedResume] = React.useState<RememberedResume | null>(
+    null,
+  );
 
-  const canSubmit = Boolean(file) && hasJobPost(jobPost);
+  React.useEffect(() => {
+    setRememberedResume(loadRememberedResume());
+  }, []);
+
+  const canSubmit = Boolean(file || rememberedResume) && hasJobPost(jobPost);
+
+  function handleReplaceRememberedResume() {
+    clearRememberedResume();
+    setRememberedResume(null);
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!canSubmit || submitting || !file) return;
+    if (!canSubmit || submitting) return;
 
     setSubmitting(true);
     setResumeError(null);
     setJobError(null);
     setFormError(null);
     try {
-      const { resume_id } = await uploadResume(file);
+      let resumeId: string;
+      if (file) {
+        const uploaded = await uploadResume(file);
+        resumeId = uploaded.resume_id;
+        const remembered = { id: resumeId, filename: file.name, size: file.size };
+        saveRememberedResume(remembered);
+        setRememberedResume(remembered);
+      } else {
+        // canSubmit guarantees rememberedResume is set when file is not.
+        resumeId = rememberedResume!.id;
+      }
       const { job_id } = await submitJob(
         jobPost.mode === "text" ? { text: jobPost.text } : { url: jobPost.url },
       );
-      const { analysis_id } = await createAnalysis({ resume_id, job_id, country });
+      const { analysis_id } = await createAnalysis({ resume_id: resumeId, job_id, country });
       router.push(`/progress?id=${analysis_id}`);
     } catch (err) {
+      if (err instanceof ApiError && err.code === "RESUME_NOT_FOUND") {
+        // The remembered id came from a server session that no longer
+        // exists (e.g. the backend restarted) — drop it and ask again.
+        clearRememberedResume();
+        setRememberedResume(null);
+      }
       const code = err instanceof ApiError ? err.code : undefined;
       const message =
         code &&
@@ -92,14 +126,36 @@ export function AnalyzeForm() {
         <Card padding="lg">
           <h2 className="mb-1 font-serif text-xl text-ink">{t("resume.label")}</h2>
           <p className="mb-4 text-sm text-ink-3">{t("resume.dropzoneHint")}</p>
-          <ResumeDropzone
-            file={file}
-            onChange={(f) => {
-              setFile(f);
-              setResumeError(null);
-            }}
-            serverError={resumeError}
-          />
+          {!file && rememberedResume ? (
+            <div className="flex items-center gap-3.5 border border-rule bg-paper p-3.5">
+              <div className="relative flex h-12 w-10 shrink-0 items-center justify-center border border-ink bg-surface-raised">
+                <span className="absolute bottom-1 left-0 right-0 text-center font-mono text-[9px] tracking-wide text-ink">
+                  {rememberedResume.filename.split(".").pop()?.toUpperCase()}
+                </span>
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-medium text-ink">{rememberedResume.filename}</p>
+                <p className="font-mono text-xs text-ink-3">{t("resume.remembered")}</p>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                type="button"
+                onClick={handleReplaceRememberedResume}
+              >
+                {t("resume.replace")}
+              </Button>
+            </div>
+          ) : (
+            <ResumeDropzone
+              file={file}
+              onChange={(f) => {
+                setFile(f);
+                setResumeError(null);
+              }}
+              serverError={resumeError}
+            />
+          )}
         </Card>
 
         <Card padding="lg">
