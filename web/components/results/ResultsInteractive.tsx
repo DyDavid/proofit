@@ -3,13 +3,22 @@
 import { useTranslations } from "next-intl";
 import * as React from "react";
 
+import { BaselineToggle } from "@/components/results/BaselineToggle";
 import { Badge, type BadgeTone } from "@/components/ui/Badge";
 import { VerdictIcon, type Verdict } from "@/components/ui/VerdictIcon";
 import { cn } from "@/lib/utils";
-import type { Evidence, Match, MatchResult, Requirement } from "@/lib/types";
+import type {
+  BaselineMatch,
+  BaselineResult,
+  Evidence,
+  Match,
+  MatchResult,
+  Requirement,
+} from "@/lib/types";
 
 export interface ResultsInteractiveProps {
   match: Match;
+  baseline?: BaselineMatch | null;
 }
 
 const GROUP_ORDER: Verdict[] = ["missing", "partial", "proven"];
@@ -43,12 +52,16 @@ function RequirementRow({
   evidenceById,
   isOpen,
   onToggle,
+  baselineResult,
+  showBaseline,
 }: {
   result: MatchResult;
   requirement: Requirement | undefined;
   evidenceById: Map<string, Evidence>;
   isOpen: boolean;
   onToggle: (open: boolean) => void;
+  baselineResult: BaselineResult | undefined;
+  showBaseline: boolean;
 }) {
   const t = useTranslations("results");
   const evidenceRecords = (result.evidence_ids ?? [])
@@ -89,6 +102,11 @@ function RequirementRow({
             confidence={result.confidence}
             label={t("confidence", { pct: Math.round(result.confidence * 100) })}
           />
+          {showBaseline && baselineResult ? (
+            <Badge tone="muted" className="opacity-70">
+              {t(`verdict.${baselineResult.verdict}`)}
+            </Badge>
+          ) : null}
           <svg
             aria-hidden="true"
             viewBox="0 0 24 24"
@@ -155,13 +173,14 @@ function RequirementRow({
  * preferred within each group) plus the sticky priority-actions rail.
  *
  * Client component because the rail's "jump to requirement" links must open
- * the target's `<details>` and scroll to it — Phase 1 skeleton scope only:
- * no baseline-comparison toggle and no hidden-strengths section yet
- * (PERSON_B_PLAN_v2.md Phase 2 / Phase 4).
+ * the target's `<details>` and scroll to it. Carries the keyword-baseline
+ * comparison toggle when a `baseline` is supplied (Phase 2); the
+ * hidden-strengths section is still Phase 4 scope.
  */
-export function ResultsInteractive({ match }: ResultsInteractiveProps) {
+export function ResultsInteractive({ match, baseline }: ResultsInteractiveProps) {
   const t = useTranslations("results");
   const [openIds, setOpenIds] = React.useState<Set<string>>(new Set());
+  const [showBaseline, setShowBaseline] = React.useState(false);
 
   const requirementById = React.useMemo(() => {
     const map = new Map<string, Requirement>();
@@ -174,6 +193,12 @@ export function ResultsInteractive({ match }: ResultsInteractiveProps) {
     for (const e of match.resume?.evidence ?? []) map.set(e.id, e);
     return map;
   }, [match.resume?.evidence]);
+
+  const baselineByRequirement = React.useMemo(() => {
+    const map = new Map<string, BaselineResult>();
+    for (const r of baseline?.results ?? []) map.set(r.requirement_id, r);
+    return map;
+  }, [baseline?.results]);
 
   const groups = React.useMemo(() => {
     const results = match.results ?? [];
@@ -212,7 +237,17 @@ export function ResultsInteractive({ match }: ResultsInteractiveProps) {
   return (
     <div className="grid gap-10 lg:grid-cols-[1fr_320px] lg:items-start">
       <div>
-        <h2 className="mb-2 font-serif text-2xl text-ink">{t("title")}</h2>
+        {baseline ? (
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="font-serif text-2xl text-ink">{t("title")}</h2>
+            <BaselineToggle
+              shown={showBaseline}
+              onToggle={() => setShowBaseline((s) => !s)}
+            />
+          </div>
+        ) : (
+          <h2 className="mb-2 font-serif text-2xl text-ink">{t("title")}</h2>
+        )}
         {groups.map((group) => (
           <div key={group.verdict} className="mb-8">
             <div className="mb-1 flex items-baseline justify-between border-b border-ink pb-2">
@@ -239,6 +274,8 @@ export function ResultsInteractive({ match }: ResultsInteractiveProps) {
                 evidenceById={evidenceById}
                 isOpen={openIds.has(result.requirement_id)}
                 onToggle={(open) => toggle(result.requirement_id, open)}
+                baselineResult={baselineByRequirement.get(result.requirement_id)}
+                showBaseline={showBaseline}
               />
             ))}
           </div>

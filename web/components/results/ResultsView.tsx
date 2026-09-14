@@ -4,7 +4,7 @@ import { ResultsInteractive } from "@/components/results/ResultsInteractive";
 import { CoverageStat, type CoverageTile } from "@/components/results/CoverageStat";
 import type { StampTone } from "@/components/ui/Stamp";
 import { Stamp } from "@/components/ui/Stamp";
-import type { Match } from "@/lib/types";
+import type { BaselineMatch, Match } from "@/lib/types";
 
 const REALISM_TONE: Record<string, StampTone> = {
   strong_fit: "proven",
@@ -35,6 +35,7 @@ function formatDate(iso: string): string {
 
 export interface ResultsViewProps {
   match: Match;
+  baseline?: BaselineMatch | null;
 }
 
 /**
@@ -44,7 +45,7 @@ export interface ResultsViewProps {
  * `next-intl`'s isomorphic `useTranslations` (not the `/server` variant) so
  * the exact same component works from a Server or a Client Component.
  */
-export function ResultsView({ match }: ResultsViewProps) {
+export function ResultsView({ match, baseline }: ResultsViewProps) {
   const t = useTranslations("results");
   const job = match.job;
 
@@ -117,7 +118,7 @@ export function ResultsView({ match }: ResultsViewProps) {
         />
       </div>
 
-      <ResultsInteractive match={match} />
+      <ResultsInteractive match={match} baseline={baseline} />
     </div>
   );
 }
