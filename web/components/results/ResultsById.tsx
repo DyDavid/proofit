@@ -13,6 +13,27 @@ export interface ResultsByIdProps {
   id: string;
 }
 
+/**
+ * Error codes a `status: "failed"` analysis can carry (docs/errors.md §2).
+ * An unrecognised code falls back to `errors.INTERNAL` rather than being
+ * handed to next-intl unchecked — same allowlist-then-fallback rule as
+ * `ProgressStepper`, which polls the same field.
+ */
+const FAILED_CODES = [
+  "RESUME_UNREADABLE",
+  "JOB_FETCH_FAILED",
+  "ENGINE_FAILED",
+  "RATE_LIMITED",
+  "INTERNAL",
+] as const;
+
+/**
+ * The `/results?id=…` path: fetches one analysis by id and renders
+ * `ResultsView` from it. Four states — not-found (a stale or bookmarked link
+ * against the in-memory store), error (the analysis finished `failed`, or the
+ * fetch itself broke), loading, and success. An analysis still queued or
+ * running is redirected back to `/progress?id=…` rather than shown here.
+ */
 export function ResultsById({ id }: ResultsByIdProps) {
   const t = useTranslations("common");
   const te = useTranslations("errors");
@@ -33,7 +54,16 @@ export function ResultsById({ id }: ResultsByIdProps) {
           setMatch(res.match);
           setBaseline(res.baseline);
         } else if (res.status === "failed") {
-          setError(res.error ? te(res.error.code as "ENGINE_FAILED") : t("error.generic"));
+          const code = res.error?.code;
+          if (!code) {
+            setError(t("error.generic"));
+          } else {
+            setError(
+              (FAILED_CODES as readonly string[]).includes(code)
+                ? te(code as (typeof FAILED_CODES)[number])
+                : te("INTERNAL"),
+            );
+          }
         } else {
           router.replace(`/progress?id=${id}`);
         }
