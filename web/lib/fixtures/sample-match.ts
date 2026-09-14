@@ -6,13 +6,22 @@ import type { Match } from "@/lib/types";
  * No mock API exists yet — that is a separate Phase 1 task (fixtures +
  * FastAPI mock mode). This object renders the Results screen end to end
  * against Person A's locked schema so the UI can be built and demoed before
- * either of those exist. Numbers and wording are illustrative, modeled on a
- * real AUPP-style resume against a real Junior Software Developer post, in
- * Proofit's voice (BRAND.md §6): no invented experience, no ATS framing.
+ * either of those exist. The wording and the per-requirement verdicts are
+ * illustrative, modeled on a real AUPP-style resume against a real Junior
+ * Software Developer post, in Proofit's voice (BRAND.md §6): no invented
+ * experience, no ATS framing. The two coverage figures are not illustrative —
+ * they are computed from those verdicts, as shown below.
  */
 export const sampleMatch: Match = {
-  coverage_score: 68,
-  coverage_required_only: 61,
+  // Computed from this file's own `results[]` under the weighted rule the UI
+  // states verbatim in `results.coverage.weighting` (proven=1, partial=0.5,
+  // missing=0; required weight 1, preferred weight 0.5), so this pair and
+  // `sample-baseline.ts` are comparable under one rule:
+  //   required  (r1,r2,r4,r5,r8,r9):  0+0+0.5+0.5+1+1 = 3.0 / 6
+  //   preferred (r3,r6,r7,r10,r11,r12): 0+0.5+0.5+1+1+1 = 4.0 raw → 2.0 / 3
+  //   (3.0 + 2.0) / 9 * 100 = 55.6 ; required-only 3.0 / 6 * 100 = 50.0
+  coverage_score: 55.6,
+  coverage_required_only: 50.0,
   engine_version: "fixture-0.1",
   generated_at: "2026-09-10T09:00:00Z",
   realism_verdict: "stretch",

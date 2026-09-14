@@ -21,10 +21,11 @@ import type { BaselineMatch } from "@/lib/types";
  *   required (r1,r2,r4,r5,r8,r9): 0+0+0.5+0.5+0.5+0 = 1.5 / 6
  *   preferred (r3,r6,r7,r10,r11,r12): 0+0+0+0+1+0 = 1.0 / 6 (raw) → 0.5 / 3 (weighted)
  *   (1.5 + 0.5) / 9 * 100 = 22.2
- * sampleMatch.coverage_score is 68 → a 45.8-point gap. There is no test
- * enforcing any particular gap for this file (unlike the backend fixtures'
- * `tests/test_baseline_fixtures.py`); this number is whatever the rule,
- * applied honestly and consistently, produces.
+ * `sampleMatch.coverage_score` is 55.6 under that same formula applied to its
+ * own results — 5/9 of the total weight against this file's 2/9 — so the gap
+ * is 33.3 points. There is no test enforcing any particular gap for this file
+ * (unlike the backend fixtures' `tests/test_baseline_fixtures.py`); this
+ * number is whatever the rule, applied honestly and consistently, produces.
  */
 export const sampleBaseline: BaselineMatch = {
   coverage_score: 22.2,
