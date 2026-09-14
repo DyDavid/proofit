@@ -154,7 +154,9 @@
     "evidence": {
       "from": "From your resume",
       "why": "Why this verdict",
-      "missingReason": "Why nothing matched"
+      "missingReason": "Why nothing matched",
+      "howThisCounts": "{evidenceType} — counts as partial evidence here, not proof of paid experience.",
+      "howThisCountsDetailed": "{evidenceType} ({detail}) — counts as partial evidence here, not proof of paid experience."
     },
     "actions": {
       "title": "Fix these first",

@@ -153,6 +153,25 @@ function RequirementRow({
                     .join(" · ")}
                 </p>
               ) : null}
+              {result.verdict === "partial" &&
+              evidence.evidence_type !== "employment" &&
+              evidence.evidence_type !== "internship" ? (
+                <p className="mt-2 text-[13px] leading-[1.5] text-ink-3">
+                  {evidence.duration_months || evidence.team_size
+                    ? t("evidence.howThisCountsDetailed", {
+                        evidenceType: t(`evidenceType.${evidence.evidence_type}`),
+                        detail: [
+                          evidence.duration_months ? `${evidence.duration_months} mo` : null,
+                          evidence.team_size ? `team of ${evidence.team_size}` : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · "),
+                      })
+                    : t("evidence.howThisCounts", {
+                        evidenceType: t(`evidenceType.${evidence.evidence_type}`),
+                      })}
+                </p>
+              ) : null}
             </div>
           ))
         )}
