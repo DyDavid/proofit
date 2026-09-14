@@ -50,6 +50,11 @@ export function ProgressStepper({ analysisId }: ProgressStepperProps) {
   const [retrying, setRetrying] = React.useState(false);
   const [copied, setCopied] = React.useState(false);
   const startedAtRef = React.useRef<number | null>(null);
+  // Holds the current `poll` closure so `keepWaiting` can resume the same
+  // polling chain in place — the chain terminates (no further `setTimeout`)
+  // once it hits the timeout branch, and `timedOut` isn't an effect
+  // dependency, so nothing would otherwise restart it.
+  const pollRef = React.useRef<() => void>(() => {});
 
   React.useEffect(() => {
     let cancelled = false;
@@ -94,6 +99,7 @@ export function ProgressStepper({ analysisId }: ProgressStepperProps) {
       }
     }
 
+    pollRef.current = poll;
     poll();
     return () => {
       cancelled = true;
@@ -103,6 +109,7 @@ export function ProgressStepper({ analysisId }: ProgressStepperProps) {
   function keepWaiting() {
     startedAtRef.current = Date.now();
     setTimedOut(false);
+    pollRef.current();
   }
 
   async function retry() {
