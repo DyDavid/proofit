@@ -93,3 +93,19 @@ export function hasJobPost(value: JobPostValue): boolean {
   if (value.mode === "text") return value.text.trim().length > 40;
   return /^https?:\/\/\S+\.\S+/.test(value.url.trim());
 }
+
+const BLOCKED_JOB_HOSTS = ["linkedin.com", "facebook.com"];
+
+/** True if the URL's host is linkedin.com/facebook.com or a subdomain of
+ * either — mirrors api/routes/jobs.py's `_is_blocked_job_host` so the same
+ * rule fires before the request is even sent (docs/errors.md JOB_URL_BLOCKED
+ * recovery: show inline and switch to Paste text before the round trip). */
+export function isBlockedJobUrl(url: string): boolean {
+  let host: string;
+  try {
+    host = new URL(url.trim()).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  return BLOCKED_JOB_HOSTS.some((blocked) => host === blocked || host.endsWith(`.${blocked}`));
+}

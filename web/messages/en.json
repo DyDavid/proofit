@@ -179,7 +179,8 @@
     },
     "timeout": "This is taking longer than expected. The analysis may still be running in the background.",
     "timeoutAction": "Keep waiting",
-    "timeoutRetry": "Run the analysis again"
+    "timeoutRetry": "Run the analysis again",
+    "cachedBadge": "Already analyzed — loaded instantly"
   },
   "errors": {
     "RESUME_BAD_TYPE": "This file type isn't supported. Please upload a PDF or DOCX file.",

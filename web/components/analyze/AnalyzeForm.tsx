@@ -3,7 +3,7 @@
 import { useTranslations } from "next-intl";
 import * as React from "react";
 
-import { JobPostPanel, hasJobPost, type JobPostValue } from "@/components/analyze/JobPostPanel";
+import { hasJobPost, isBlockedJobUrl, JobPostPanel, type JobPostValue } from "@/components/analyze/JobPostPanel";
 import { ResumeDropzone } from "@/components/analyze/ResumeDropzone";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -33,7 +33,13 @@ const COUNTRY_KEYS = [
  * developer-facing English for logs only and is never rendered to a user
  * (docs/errors.md §1, api/errors.py).
  */
-const LOCALIZED_CODES = ["RESUME_BAD_TYPE", "RESUME_TOO_LARGE", "JOB_EMPTY"] as const;
+const LOCALIZED_CODES = [
+  "RESUME_BAD_TYPE",
+  "RESUME_TOO_LARGE",
+  "JOB_EMPTY",
+  "JOB_URL_BLOCKED",
+  "JOB_FETCH_FAILED",
+] as const;
 type LocalizedCode = (typeof LOCALIZED_CODES)[number];
 
 function isLocalizedCode(code: string | undefined): code is LocalizedCode {
@@ -84,6 +90,13 @@ export function AnalyzeForm() {
     e.preventDefault();
     if (!canSubmit || submitting) return;
 
+    if (jobPost.mode === "url" && isBlockedJobUrl(jobPost.url)) {
+      setJobPost({ ...jobPost, mode: "text" });
+      setJobError(te("JOB_URL_BLOCKED"));
+      requestAnimationFrame(() => document.getElementById("jd-text")?.focus());
+      return;
+    }
+
     setSubmitting(true);
     setResumeError(null);
     setJobError(null);
@@ -100,11 +113,11 @@ export function AnalyzeForm() {
         // canSubmit guarantees rememberedResume is set when file is not.
         resumeId = rememberedResume!.id;
       }
-      const { job_id } = await submitJob(
+      const { job_id, cached } = await submitJob(
         jobPost.mode === "text" ? { text: jobPost.text } : { url: jobPost.url },
       );
       const { analysis_id } = await createAnalysis({ resume_id: resumeId, job_id, country });
-      router.push(`/progress?id=${analysis_id}`);
+      router.push(`/progress?id=${analysis_id}${cached ? "&cached=1" : ""}`);
     } catch (err) {
       if (err instanceof ApiError && err.code === "RESUME_NOT_FOUND") {
         // The remembered id came from a server session that no longer
@@ -116,6 +129,10 @@ export function AnalyzeForm() {
       const message = isLocalizedCode(code) ? te(code) : tc("error.generic");
       if (code === "RESUME_BAD_TYPE" || code === "RESUME_TOO_LARGE") {
         setResumeError(message);
+      } else if (code === "JOB_URL_BLOCKED" || code === "JOB_FETCH_FAILED") {
+        setJobPost((v) => ({ ...v, mode: "text" }));
+        setJobError(message);
+        document.getElementById("jd-text")?.focus();
       } else if (code === "JOB_EMPTY") {
         setJobError(message);
         document.getElementById(jobPost.mode === "text" ? "jd-text" : "jd-url")?.focus();
