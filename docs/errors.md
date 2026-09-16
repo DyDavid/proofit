@@ -3,10 +3,12 @@
 > **Status: seeded in Phase 0/1, implemented in Phase 2.** Read `### Phase 2 checklist`
 > in §4 for the live box-by-box state; this banner is the summary.
 >
-> The ten error **codes** were decided during Phase 0/1, ahead of the routes, because they
-> are part of the API contract Phase 1 freezes — otherwise they get invented ad-hoc at three
-> different call sites. `PERSON_B_PLAN_v2.md` §5 Phase 2.4 then scheduled the implementation
-> for Weeks 5–7, and required a forced failure per case before Phase 2 closes.
+> The original ten error **codes** were decided during Phase 0/1, ahead of the routes, because
+> they are part of the API contract Phase 1 freezes — otherwise they get invented ad-hoc at
+> three different call sites. `PERSON_B_PLAN_v2.md` §5 Phase 2.4 then scheduled the
+> implementation for Weeks 5–7, and required a forced failure per case before Phase 2 closes.
+> Phase 3 added an eleventh, `ANALYSIS_NOT_READY` (§2), once the rewrite endpoint gave it
+> something to guard.
 >
 > **What is true today:** the codes below are the authoritative list; the API returns the §1
 > envelope for all of them; the per-code `errors.*` catalogue exists in both
@@ -44,7 +46,7 @@ second error format anywhere in the system.
 
 | Field | Type | Purpose |
 |---|---|---|
-| `code` | `str` | One of the ten values in §2. **This is what the UI switches on** — never parse `message`. |
+| `code` | `str` | One of the eleven values in §2. **This is what the UI switches on** — never parse `message`. |
 | `message` | `str` | English, developer-facing. Goes in logs and in the Render dashboard. **Never rendered to the user.** |
 | `error_id` | `str` | Unique per occurrence. Shown to the user on unrecoverable errors with a copy button, and logged server-side, so a user can report an error the team can actually find. |
 
@@ -150,6 +152,16 @@ Khmer strings marked **provisional** — see §4.
 | **Khmer** | យើងរកមិនឃើញការវិភាគនេះទេ។ លទ្ធផលមិនត្រូវបានរក្សាទុករយៈពេលយូរនៅឡើយទេ — សូមចាប់ផ្តើមការវិភាគថ្មី។ |
 | **Recovery** | Full-page state on `/[locale]/results/[id]`, not a toast — the page has nothing else to show. Primary action returns to `/[locale]/analyze`. **Revisit this string when Supabase persistence lands at CP2 (Phase 2.5):** "aren't saved permanently yet" becomes wrong once matches are persisted, and the message becomes a plain "this link has expired or never existed." |
 | **i18n key** | `errors.ANALYSIS_NOT_FOUND` *(Phase 2)* |
+
+### `ANALYSIS_NOT_READY` — 409 Conflict
+
+| | |
+|---|---|
+| **Trigger** | `POST /api/analyses/{id}/rewrites` called before the analysis has `status: "done"` — there is no `match` yet to run F5 against. Added in Phase 3 alongside the endpoint itself (`PERSON_B_PLAN_v2.md` §5 Phase 3 task 6); not one of the original ten because the endpoint that can raise it did not exist before this phase. |
+| **English** | This analysis isn't finished yet. Wait for it to complete before asking for rewrite suggestions. |
+| **Khmer** | ការវិភាគនេះមិនទាន់បញ្ចប់ទេ។ សូមរង់ចាំវាបញ្ចប់សិន មុននឹងសុំសំណើសរសេរឡើងវិញ។ |
+| **Recovery** | Not user-facing in Phase 3 — the endpoint is called from Phase 4's Hidden Strengths UI, which only appears once `status: "done"`, so a real user should not be able to trigger this. Kept in the envelope rather than a bare exception anyway, per this file's own rule (§1). |
+| **i18n key** | `errors.ANALYSIS_NOT_READY` *(Phase 3)* |
 
 ### `ENGINE_FAILED` — 500 Internal Server Error *(usually delivered as `status: "failed"` on a 200)*
 

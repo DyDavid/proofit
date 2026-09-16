@@ -193,6 +193,7 @@
     "JOB_URL_BLOCKED": "We can't open LinkedIn or Facebook links. Copy the job description text and paste it here instead — that works exactly the same.",
     "JOB_FETCH_FAILED": "We couldn't open that link. Copy the job description text and paste it here instead.",
     "ANALYSIS_NOT_FOUND": "We couldn't find this analysis. Results aren't saved permanently yet — start a new analysis to see fresh results.",
+    "ANALYSIS_NOT_READY": "This analysis isn't finished yet. Wait for it to complete before asking for rewrite suggestions.",
     "ENGINE_FAILED": "The analysis didn't finish. Try again — if it keeps failing, send us this error id.",
     "RATE_LIMITED": "Too many requests right now. Wait about a minute and try again.",
     "INTERNAL": "Something went wrong on our side. Try again — if it keeps happening, send us this error id."

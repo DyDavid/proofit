@@ -27,7 +27,7 @@ logger = logging.getLogger("proofit.errors")
 
 class ApiError(HTTPException):
     """A user-facing API error. `code` must be one of docs/errors.md §2's
-    ten values — check that table before inventing an eleventh."""
+    eleven values — check that table before inventing a twelfth."""
 
     def __init__(self, status_code: int, code: str, message: str) -> None:
         super().__init__(status_code=status_code, detail=message)
