@@ -12,10 +12,11 @@ import hashlib
 import json
 import secrets
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from engine.normalize.schema import AnalysisStatus, BaselineMatch, Match, MatchStage
+from engine.normalize.schema import AnalysisStatus, BaselineMatch, Match, MatchStage, utcnow
 
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "data" / "fixtures"
 
@@ -93,6 +94,7 @@ class AnalysisRecord:
     match: Match | None = None
     baseline: BaselineMatch | None = None
     error: dict | None = None
+    created_at: datetime = field(default_factory=utcnow)
 
 
 @dataclass
@@ -139,6 +141,18 @@ class Store:
         if original is None:
             return None
         return self.create_analysis(original.resume_id, original.job_id, original.country)
+
+    def analyses_for_resume(self, resume_id: str) -> list[AnalysisRecord]:
+        """Completed analyses for one resume, newest first — the History list
+        (PERSON_B_PLAN_v2.md §5 Phase 3 task 2). Only `status == "done"`
+        records carry a `match`, which is where job title/company/coverage/
+        realism come from in mock mode — there is no separate normalized-job
+        store to join against."""
+        done = [
+            a for a in self.analyses.values()
+            if a.resume_id == resume_id and a.status == "done" and a.match is not None
+        ]
+        return sorted(done, key=lambda a: a.created_at, reverse=True)
 
     def pick_fixture_name(self, job_id: str) -> str:
         """The fixture name `pick_fixture`/`pick_baseline` would each pick —

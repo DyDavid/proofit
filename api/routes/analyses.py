@@ -13,7 +13,7 @@ import asyncio
 import logging
 import time
 
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Query
 from pydantic import BaseModel
 
 from api.config import settings
@@ -29,6 +29,15 @@ class AnalysisIn(BaseModel):
     resume_id: str
     job_id: str
     country: str
+
+
+class AnalysisSummary(BaseModel):
+    analysis_id: str
+    job_title: str
+    company: str | None
+    coverage: float
+    realism_verdict: str
+    created_at: str
 
 
 async def _run_mock_analysis(analysis_id: str) -> None:
@@ -105,6 +114,25 @@ async def get_analysis(analysis_id: str) -> dict:
         "baseline": record.baseline.model_dump(mode="json") if record.baseline else None,
         "error": record.error,
     }
+
+
+@router.get("/analyses")
+async def list_analyses(resume_id: str = Query(..., min_length=1)) -> list[AnalysisSummary]:
+    summaries: list[AnalysisSummary] = []
+    for record in store.analyses_for_resume(resume_id):
+        assert record.match is not None  # guaranteed by analyses_for_resume's own filter
+        job = record.match.job
+        summaries.append(
+            AnalysisSummary(
+                analysis_id=record.id,
+                job_title=job.title if job else "",
+                company=job.company if job else None,
+                coverage=record.match.coverage_required_only,
+                realism_verdict=record.match.realism_verdict,
+                created_at=record.created_at.isoformat(),
+            )
+        )
+    return summaries
 
 
 @router.post("/analyses/{analysis_id}/retry", status_code=202)
