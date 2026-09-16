@@ -127,3 +127,42 @@ export async function getAnalysisHistory(resumeId: string): Promise<AnalysisSumm
   if (!res.ok) throw await toApiError(res);
   return res.json();
 }
+
+/**
+ * F6 — one destination market's resume conventions (`engine.country.rules.
+ * CountryRules`). Not part of `web/lib/types.ts`: that file is generated
+ * from `engine/normalize/schema.py`'s `SchemaBundle`
+ * (PERSON_B_PLAN_v2.md §2), and F6's config model lives in
+ * `engine/country/rules.py`, a separate module never bundled into it.
+ */
+export interface CountryRules {
+  code: string;
+  display_name: string;
+  aliases: string[];
+  max_pages: number;
+  page_length_note: string;
+  include_photo: boolean;
+  photo_note: string;
+  include_personal_details: string[];
+  omit_personal_details: string[];
+  date_format: string;
+  date_format_example: string;
+  section_order: string[];
+  tone_notes: string[];
+  visa_terms: string[];
+}
+
+/**
+ * Fetches one destination's full rule set (Phase 4 task 4: the Results
+ * screen's country checklist, `CountryFormat.tsx`). `destination` may be any
+ * of this codebase's three spellings — `rules_for`
+ * (engine/country/rules.py) resolves them all. Throws `ApiError` with code
+ * `COUNTRY_RULES_NOT_FOUND` (404) for the UI's "other" destination and for
+ * anything unrecognised — a normal, expected outcome the caller should
+ * degrade for, not an unexpected failure.
+ */
+export async function getCountryRules(destination: string): Promise<CountryRules> {
+  const res = await fetch(`/api/countries/${encodeURIComponent(destination)}`);
+  if (!res.ok) throw await toApiError(res);
+  return res.json();
+}

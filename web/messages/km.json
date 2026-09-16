@@ -182,6 +182,39 @@
       "suggested": "Suggested rewrite",
       "factsUsed": "Built from your resume",
       "rejected": "Suggestion rejected."
+    },
+    "country": {
+      "title": "Applying elsewhere",
+      "intro": "See how this market expects a resume to look, and what the job post said about visa sponsorship.",
+      "selectLabel": "Destination",
+      "destinations": {
+        "KH": "Cambodia",
+        "SG": "Singapore",
+        "JP": "Japan",
+        "AU": "Australia",
+        "REMOTE": "United States (remote)",
+        "other": "Other"
+      },
+      "noRules": "We don't have format conventions for this destination yet.",
+      "length": "Length",
+      "photo": {
+        "label": "Photo",
+        "included": "Expected",
+        "omitted": "Leave it off"
+      },
+      "include": "Include",
+      "omit": "Leave out",
+      "dateFormat": "Date format",
+      "sectionOrder": "Section order",
+      "toneNotes": "Tone notes",
+      "visa": {
+        "title": "Visa sponsorship",
+        "badgeYes": "Sponsors visas",
+        "badgeNo": "Does not sponsor visas",
+        "unstated": "This job post doesn't say either way about visa sponsorship. Silence isn't a no — ask directly if it matters to you.",
+        "sourceLabel": "From the job post",
+        "lookForTitle": "What to look for in a post from this market"
+      }
     }
   },
   "progress": {
@@ -206,6 +239,7 @@
     "JOB_FETCH_FAILED": "We couldn't open that link. Copy the job description text and paste it here instead.",
     "ANALYSIS_NOT_FOUND": "We couldn't find this analysis. Results aren't saved permanently yet — start a new analysis to see fresh results.",
     "ANALYSIS_NOT_READY": "This analysis isn't finished yet. Wait for it to complete before asking for rewrite suggestions.",
+    "COUNTRY_RULES_NOT_FOUND": "We don't have format rules for this destination yet.",
     "ENGINE_FAILED": "The analysis didn't finish. Try again — if it keeps failing, send us this error id.",
     "RATE_LIMITED": "Too many requests right now. Wait about a minute and try again.",
     "INTERNAL": "Something went wrong on our side. Try again — if it keeps happening, send us this error id."

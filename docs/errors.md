@@ -8,7 +8,10 @@
 > three different call sites. `PERSON_B_PLAN_v2.md` §5 Phase 2.4 then scheduled the
 > implementation for Weeks 5–7, and required a forced failure per case before Phase 2 closes.
 > Phase 3 added an eleventh, `ANALYSIS_NOT_READY` (§2), once the rewrite endpoint gave it
-> something to guard.
+> something to guard. Phase 4 task 4 added a twelfth, `COUNTRY_RULES_NOT_FOUND` (§2), once
+> `GET /api/countries/{destination}` gave it something to guard — a 404 on the UI's "other"
+> destination, which the Results screen's country selector degrades gracefully rather than
+> treating as a failure.
 >
 > **What is true today:** the codes below are the authoritative list; the API returns the §1
 > envelope for all of them; the per-code `errors.*` catalogue exists in both
@@ -185,6 +188,16 @@ Khmer strings marked **provisional** — see §4.
 | **Khmer** | មានសំណើច្រើនពេកនៅពេលនេះ។ សូមរង់ចាំប្រហែលមួយនាទី រួចព្យាយាមម្តងទៀត។ |
 | **Recovery** | Retry button, disabled for 60 s with a visible countdown so the user is not invited to hammer a limit that is already exceeded. Honour a `Retry-After` header when the upstream sends one. |
 | **i18n key** | `errors.RATE_LIMITED` *(Phase 2)* |
+
+### `COUNTRY_RULES_NOT_FOUND` — 404 Not Found
+
+| | |
+|---|---|
+| **Trigger** | `GET /api/countries/{destination}` for a destination `rules_for` cannot resolve (`engine/country/rules.py`) — the UI's "other" option, which has no rules by design, or an unrecognised string. Added in Phase 4 task 4 alongside the endpoint itself, once F6's country checklist gave it something to guard. |
+| **English** | We don't have format rules for this destination yet. |
+| **Khmer** | *(mirrors the English string — see §4/global-constraints: this repo does not invent new Khmer ahead of the Phase 5 QA session.)* |
+| **Recovery** | Not a failure state on the Results screen: the country checklist (`CountryFormat.tsx`) treats this 404 as the expected outcome for "other" and shows its own "no rules for this destination" line instead of the generic error catalogue — the visa signal (`sponsors_visa` / `sponsors_visa_source_line`) still renders normally either way, since it comes from the job post, not from this endpoint. |
+| **i18n key** | `errors.COUNTRY_RULES_NOT_FOUND`, unused by `CountryFormat.tsx`'s own copy but kept in the catalogue per this file's own rule (§4 Phase 2 checklist: every code gets a catalogue entry) |
 
 ### `INTERNAL` — 500 Internal Server Error
 

@@ -11,7 +11,7 @@ from fastapi import FastAPI
 
 from api.config import settings
 from api.errors import install_error_handlers
-from api.routes import analyses, health, jobs, resumes
+from api.routes import analyses, countries, health, jobs, resumes
 
 app = FastAPI(title="Proofit API", version=settings.app_version)
 install_error_handlers(app)
@@ -20,3 +20,4 @@ app.include_router(health.router, prefix="/api")
 app.include_router(resumes.router, prefix="/api")
 app.include_router(jobs.router, prefix="/api")
 app.include_router(analyses.router, prefix="/api")
+app.include_router(countries.router, prefix="/api")

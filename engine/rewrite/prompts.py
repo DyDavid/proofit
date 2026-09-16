@@ -116,14 +116,44 @@ GENERATE_TOOL_SCHEMA: dict[str, Any] = {
 }
 
 
-def build_generate_user_prompt(requirement_text: str, evidence_lines: list[str]) -> str:
+def build_generate_user_prompt(
+    requirement_text: str,
+    evidence_lines: list[str],
+    tone_notes: list[str] | None = None,
+) -> str:
+    """Build the user turn for `generate_rewrite`.
+
+    `tone_notes` is F6's optional addition (task 4c): a destination market's
+    register and structure guidance (`CountryRules.tone_notes`,
+    `engine/country/rules.py`), passed through by `create_rewrites` via
+    `rules_for(record.country)`. Optional and default-`None` so every
+    existing call site — and every test that asserts on this function's
+    output without passing it — is unaffected.
+
+    global-constraints.md's rule 1 ("no invented facts") applies here exactly
+    as it does to `requirement_text`: tone notes describe HOW to phrase the
+    rewrite, never WHAT the candidate did or has. When present, they are
+    appended as their own block, clearly labelled and kept out of the
+    evidence section above — so a fabricated-sounding detail inside a tone
+    note (e.g. "emphasize 10 years of experience") cannot be mistaken for
+    something to cite in `facts_used`.
+    """
     numbered = "\n".join(evidence_lines)
-    return (
+    prompt = (
         f"Job requirement (for vocabulary only — never a source of facts): {requirement_text}\n\n"
         f"Evidence records, the ONLY source of facts (id: description):\n{numbered}\n\n"
         "Rewrite the primary evidence line so it speaks to the requirement, using only facts "
         "already present above."
     )
+    if tone_notes:
+        bullets = "\n".join(f"- {note}" for note in tone_notes)
+        prompt += (
+            "\n\nStyle guidance for the target market — HOW to phrase this rewrite, "
+            "never a source of facts. Nothing below is something the candidate did or "
+            "has, and none of it may be cited in facts_used:\n"
+            f"{bullets}"
+        )
+    return prompt
 
 
 # ── validate_rewrite (LLM layer) ────────────────────────────────────────────

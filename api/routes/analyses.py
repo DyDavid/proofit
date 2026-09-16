@@ -20,6 +20,7 @@ from pydantic import BaseModel, ValidationError
 from api.config import settings
 from api.errors import ApiError, new_error_id
 from api.store import STAGE_ORDER, store
+from engine.country.rules import rules_for
 from engine.normalize.schema import HiddenStrength, Match
 from engine.rewrite.detect import detect_hidden_strengths
 from engine.rewrite.generate import generate_rewrite
@@ -202,6 +203,16 @@ def create_rewrites(analysis_id: str) -> dict:
     requirements_by_id = {r.id: r for r in match.job.requirements}
     evidence_by_id = {e.id: e for e in resume.evidence}
 
+    # F6 (task 4c): country-toned rewrites. `record.country` carries
+    # whichever of this codebase's three destination spellings the browser
+    # originally sent (`AnalysisRecord.country`, api/store.py) — `rules_for`
+    # is the one place that reconciles them. `None` for the UI's "other"
+    # destination is a normal outcome, not an error (engine/country/rules.py),
+    # so `tone_notes` is simply `None` and every rewrite generates exactly as
+    # it did before F6 existed.
+    country_rules = rules_for(record.country)
+    tone_notes = country_rules.tone_notes if country_rules else None
+
     rejected_count = 0
     try:
         candidates = detect_hidden_strengths(match, resume)
@@ -214,7 +225,7 @@ def create_rewrites(analysis_id: str) -> dict:
             accepted = None
             first_failure = None
             for attempt in range(2):
-                rewrite = generate_rewrite(requirement, [anchor])
+                rewrite = generate_rewrite(requirement, [anchor], tone_notes)
                 result = validate_rewrite(rewrite, resume.evidence)
                 if result.ok:
                     accepted = rewrite

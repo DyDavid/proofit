@@ -38,7 +38,11 @@ def _changed_words(current_phrasing: str, suggested_phrasing: str) -> list[str]:
     return changed
 
 
-def generate_rewrite(requirement: Requirement, evidence_records: list[Evidence]) -> Rewrite:
+def generate_rewrite(
+    requirement: Requirement,
+    evidence_records: list[Evidence],
+    tone_notes: list[str] | None = None,
+) -> Rewrite:
     """Rewrite the primary evidence record's line toward one requirement.
 
     Args:
@@ -49,6 +53,12 @@ def generate_rewrite(requirement: Requirement, evidence_records: list[Evidence])
             `changed_words` diff, and its `id` becomes `Rewrite.evidence_id`.
             Any further records are extra context the model may also cite in
             `facts_used`.
+        tone_notes: F6's destination market register/structure guidance
+            (`CountryRules.tone_notes`), or `None` when the caller has none —
+            either `rules_for` returned `None` (the UI's "other" destination,
+            a normal outcome, not an error) or no country was resolved.
+            Passed straight through to `build_generate_user_prompt`, which is
+            what actually labels it as phrasing guidance, never facts.
 
     Raises:
         ValueError: if `evidence_records` is empty — there is nothing to
@@ -62,7 +72,7 @@ def generate_rewrite(requirement: Requirement, evidence_records: list[Evidence])
 
     response = llm.call_structured(
         system=prompts.GENERATE_SYSTEM_PROMPT,
-        user=prompts.build_generate_user_prompt(requirement.text, evidence_lines),
+        user=prompts.build_generate_user_prompt(requirement.text, evidence_lines, tone_notes),
         tool_name=prompts.GENERATE_TOOL_NAME,
         tool_description="Propose a rewrite grounded only in the given evidence.",
         tool_schema=prompts.GENERATE_TOOL_SCHEMA,

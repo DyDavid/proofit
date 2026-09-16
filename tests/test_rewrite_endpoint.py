@@ -39,7 +39,7 @@ def _dispatch_call_structured(
     return _side_effect
 
 
-def _seed_done_analysis(analysis_id: str) -> str:
+def _seed_done_analysis(analysis_id: str, country: str = "cambodia") -> str:
     job = Job(
         source_type="pasted",
         content_hash="deadbeef",
@@ -73,7 +73,7 @@ def _seed_done_analysis(analysis_id: str) -> str:
         job=job,
         resume=resume,
     )
-    record = AnalysisRecord(id=analysis_id, resume_id="res_test", job_id="job_test", country="cambodia")
+    record = AnalysisRecord(id=analysis_id, resume_id="res_test", job_id="job_test", country=country)
     record.status = "done"
     record.match = match
     store.analyses[record.id] = record
@@ -328,3 +328,73 @@ def test_rewrites_endpoint_404s_for_an_unknown_analysis() -> None:
     res = client.post("/api/analyses/an_doesnotexist/rewrites")
     assert res.status_code == 404
     assert res.json()["error"]["code"] == "ANALYSIS_NOT_FOUND"
+
+
+def test_rewrites_endpoint_passes_the_destination_tone_notes_into_the_prompt() -> None:
+    """Task 4 (c): `create_rewrites` resolves `record.country` through
+    `rules_for` and passes `CountryRules.tone_notes` into `generate_rewrite`.
+    Seeds the analysis with `country="singapore"` — a real
+    `AnalyzeForm.tsx`-shaped value — and asserts one of Singapore's actual
+    `tone_notes` (engine/country/rules.json) reaches the prompt the (mocked)
+    model is sent, proving the wiring is live end to end rather than merely
+    plumbed and unused."""
+    from engine.country.rules import rules_for
+
+    analysis_id = _seed_done_analysis("an_test_rewrites_tone_notes", country="singapore")
+    singapore_tone_note = rules_for("singapore").tone_notes[0]
+
+    captured: dict[str, str] = {}
+
+    def _generate_stub(*, tool_name: str, user: str = "", **_kwargs: object) -> dict[str, Any]:
+        if tool_name == prompts.DETECT_TOOL_NAME:
+            return {"found": True, "evidence_id": "e1", "rationale": "React dashboard fits."}
+        if tool_name == prompts.GENERATE_TOOL_NAME:
+            captured["user"] = user
+            return {
+                "suggested_phrasing": "Built a React dashboard for a university course project.",
+                "facts_used": ["e1"],
+            }
+        raise AssertionError(f"unexpected tool_name in test stub: {tool_name}")
+
+    with (
+        patch("engine.rewrite.detect.llm.call_structured", side_effect=_generate_stub),
+        patch("engine.rewrite.generate.llm.call_structured", side_effect=_generate_stub),
+        patch(
+            "engine.rewrite.validate._call_llm_validator",
+            return_value=ValidationResult(ok=True, violations=[]),
+        ),
+    ):
+        res = client.post(f"/api/analyses/{analysis_id}/rewrites")
+
+    assert res.status_code == 200
+    assert res.json()["rejected_count"] == 0
+    assert singapore_tone_note in captured["user"]
+
+
+def test_rewrites_endpoint_works_when_destination_has_no_country_rules() -> None:
+    """The UI's "other" destination has no `CountryRules` —
+    `rules_for("other")` returns `None` by design, and `create_rewrites`
+    must degrade to `tone_notes=None` rather than erroring."""
+    analysis_id = _seed_done_analysis("an_test_rewrites_no_country_rules", country="other")
+
+    call_structured_stub = _dispatch_call_structured(
+        detect_response={"found": True, "evidence_id": "e1", "rationale": "React dashboard fits."},
+        generate_response={
+            "suggested_phrasing": "Built a React dashboard for a university course project.",
+            "facts_used": ["e1"],
+        },
+    )
+    with (
+        patch("engine.rewrite.detect.llm.call_structured", side_effect=call_structured_stub),
+        patch("engine.rewrite.generate.llm.call_structured", side_effect=call_structured_stub),
+        patch(
+            "engine.rewrite.validate._call_llm_validator",
+            return_value=ValidationResult(ok=True, violations=[]),
+        ),
+    ):
+        res = client.post(f"/api/analyses/{analysis_id}/rewrites")
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["rejected_count"] == 0
+    assert len(body["hidden_strengths"]) == 1
