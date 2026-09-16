@@ -98,11 +98,30 @@ class AnalysisRecord:
 
 
 @dataclass
+class RewriteRejection:
+    """One F5 validator failure (PERSON_B_PLAN_v2.md §5 Phase 3 task 5) — a
+    report figure for the evaluation chapter, not an error to hide. Lives here
+    rather than in a real DB table for the same reason `AnalysisRecord` does:
+    nothing in this codebase has a real database yet (`engine/README.md` line
+    30 gives DB migrations to Person A, but Supabase isn't wired until CP2)."""
+
+    id: str
+    analysis_id: str
+    requirement_id: str
+    evidence_id: str
+    suggested_phrasing: str
+    violations: list[dict[str, str]]
+    retry_succeeded: bool
+    created_at: datetime = field(default_factory=utcnow)
+
+
+@dataclass
 class Store:
     resumes: dict[str, ResumeRecord] = field(default_factory=dict)
     jobs: dict[str, JobRecord] = field(default_factory=dict)
     jobs_by_hash: dict[str, str] = field(default_factory=dict)
     analyses: dict[str, AnalysisRecord] = field(default_factory=dict)
+    rewrite_rejections: list[RewriteRejection] = field(default_factory=list)
     _rotation_index: int = 0
     #: Caches the fixture name `pick_fixture_name` picked for a given job_id.
     #: Without this, calling `pick_fixture_name` twice for the same job_id on
@@ -184,6 +203,28 @@ class Store:
 
     def pick_baseline(self, fixture_name: str) -> BaselineMatch:
         return _BASELINES[fixture_name]
+
+    def log_rewrite_rejection(
+        self,
+        *,
+        analysis_id: str,
+        requirement_id: str,
+        evidence_id: str,
+        suggested_phrasing: str,
+        violations: list[dict[str, str]],
+        retry_succeeded: bool,
+    ) -> RewriteRejection:
+        record = RewriteRejection(
+            id=_new_id("rej"),
+            analysis_id=analysis_id,
+            requirement_id=requirement_id,
+            evidence_id=evidence_id,
+            suggested_phrasing=suggested_phrasing,
+            violations=violations,
+            retry_succeeded=retry_succeeded,
+        )
+        self.rewrite_rejections.append(record)
+        return record
 
 
 store = Store()
