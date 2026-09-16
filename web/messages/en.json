@@ -107,6 +107,9 @@
       "line1": "It checks your evidence against every requirement in the post, one requirement at a time.",
       "line2": "It never invents experience. Every suggestion is built only from lines already in your resume.",
       "line3": "It does not promise to beat any hiring software. It shows you requirement coverage."
+    },
+    "history": {
+      "title": "Your past analyses"
     }
   },
   "results": {

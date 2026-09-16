@@ -94,3 +94,18 @@ export async function getAnalysis(id: string): Promise<AnalysisStatusResponse> {
   if (!res.ok) throw await toApiError(res);
   return res.json();
 }
+
+export interface AnalysisSummary {
+  analysis_id: string;
+  job_title: string;
+  company: string | null;
+  coverage: number;
+  realism_verdict: string;
+  created_at: string;
+}
+
+export async function getAnalysisHistory(resumeId: string): Promise<AnalysisSummary[]> {
+  const res = await fetch(`/api/analyses?resume_id=${encodeURIComponent(resumeId)}`);
+  if (!res.ok) throw await toApiError(res);
+  return res.json();
+}

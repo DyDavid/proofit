@@ -6,7 +6,7 @@ import type { StampTone } from "@/components/ui/Stamp";
 import { Stamp } from "@/components/ui/Stamp";
 import type { BaselineMatch, Match } from "@/lib/types";
 
-const REALISM_TONE: Record<string, StampTone> = {
+export const REALISM_TONE: Record<string, StampTone> = {
   strong_fit: "proven",
   stretch: "partial",
   unrealistic: "missing",

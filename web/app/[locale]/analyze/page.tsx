@@ -1,5 +1,6 @@
 import { getTranslations } from "next-intl/server";
 
+import { AnalysisHistory } from "@/components/analyze/AnalysisHistory";
 import { AnalyzeForm } from "@/components/analyze/AnalyzeForm";
 
 export default async function AnalyzePage() {
@@ -42,6 +43,7 @@ export default async function AnalyzePage() {
       </div>
 
       <AnalyzeForm />
+      <AnalysisHistory />
     </div>
   );
 }
