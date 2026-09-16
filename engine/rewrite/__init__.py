@@ -33,6 +33,7 @@ here — F5 output reaches the UI as ``Match.hidden_strengths``.
 
 from __future__ import annotations
 
-#: Nothing public yet. Populated in Phase 3 (F5). Deliberately empty rather than
-#: stubbed: no name here should promise behaviour that does not exist.
+#: Phase 3 (F5) is underway. Nothing is re-exported at the package root —
+#: import from the submodule that owns it (`engine.rewrite.detect`,
+#: `.generate`, `.validate`) rather than `engine.rewrite` directly.
 __all__: list[str] = []
