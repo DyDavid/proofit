@@ -166,3 +166,27 @@ export async function getCountryRules(destination: string): Promise<CountryRules
   if (!res.ok) throw await toApiError(res);
   return res.json();
 }
+
+/** One entry from `GET /api/countries` — just enough to populate a
+ * destination selector. `display_name` is English only (same convention as
+ * `CountryRules`); the UI's own labels still come from `results.country.
+ * destinations.*` so locale switching keeps working. */
+export interface CountryListEntry {
+  code: string;
+  display_name: string;
+}
+
+/**
+ * Every market this app has rules for, in `rules.json`'s own order
+ * (Phase 4 hardening task 5). `CountryFormat.tsx`'s destination selector
+ * fetches this instead of hardcoding the code list a second time, so a
+ * country added to `engine/country/rules.json` needs no matching UI change.
+ * The UI's sixth option, "other", is deliberately absent from this response
+ * — see `api/routes/countries.py` — and is still added by the caller.
+ */
+export async function getCountries(): Promise<CountryListEntry[]> {
+  const res = await fetch("/api/countries");
+  if (!res.ok) throw await toApiError(res);
+  const body = (await res.json()) as { countries: CountryListEntry[] };
+  return body.countries;
+}

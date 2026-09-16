@@ -4,7 +4,13 @@ import { useTranslations } from "next-intl";
 import * as React from "react";
 
 import { Badge } from "@/components/ui/Badge";
-import { ApiError, getCountryRules, type CountryRules } from "@/lib/api";
+import {
+  ApiError,
+  getCountries,
+  getCountryRules,
+  type CountryListEntry,
+  type CountryRules,
+} from "@/lib/api";
 import type { Match } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -13,20 +19,13 @@ export interface CountryFormatProps {
 }
 
 /**
- * Canonical values `rules_for` (engine/country/rules.py) accepts directly —
- * the ISO-style codes `Job.country` already uses, plus the UI's sixth
- * option, "other", which is deliberately rule-less. Using these codes
- * (rather than `AnalyzeForm.tsx`'s browser-camelCase spellings) means the
- * selector's default can come straight from `match.job.country` with no
- * translation step, and "other" round-trips through the same real
- * `GET /api/countries/other` 404 path a hand-typed unknown string would.
+ * The UI's sixth destination option. Deliberately absent from
+ * `GET /api/countries` — it has no rules to list, the same reason
+ * `rules_for("other")` returns `None` rather than a stub entry
+ * (`api/routes/countries.py`) — so it is appended here, the one piece of
+ * this selector that genuinely cannot come from the config.
  */
-const DESTINATION_KEYS = ["KH", "SG", "JP", "AU", "REMOTE", "other"] as const;
-type DestinationKey = (typeof DESTINATION_KEYS)[number];
-
-function isDestinationKey(value: string | null | undefined): value is DestinationKey {
-  return (DESTINATION_KEYS as readonly string[]).includes(value ?? "");
-}
+const OTHER_KEY = "other";
 
 /**
  * `errors.*` codes this section renders through the generic catalogue.
@@ -224,18 +223,50 @@ export function CountryFormat({ match }: CountryFormatProps) {
   const te = useTranslations("errors");
 
   const jobCountry = match.job?.country;
-  const [destination, setDestination] = React.useState<DestinationKey>(
-    isDestinationKey(jobCountry) ? jobCountry : "KH",
-  );
+
+  // `null` means "still loading" — the destination selector renders disabled
+  // until this arrives, since its options come from this list rather than a
+  // second hardcoded copy of the same five codes (Phase 4 hardening task 5:
+  // GET /api/countries existed but had no caller before this).
+  const [countries, setCountries] = React.useState<CountryListEntry[] | null>(null);
+  const [destination, setDestination] = React.useState<string | null>(null);
+
   const [rules, setRules] = React.useState<CountryRules | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [errorCode, setErrorCode] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    getCountries()
+      .then((list) => {
+        if (!cancelled) setCountries(list);
+      })
+      .catch(() => {
+        // Degrades to just the "other" option below, same "must degrade,
+        // not error" convention as the rules fetch — this section stays
+        // read-only exploration, never a hard failure.
+        if (!cancelled) setCountries([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Picks the initial destination once the country list resolves: the
+  // analysis's own destination when it's a market this app has rules for,
+  // else "KH" — same default the old hardcoded list used.
+  React.useEffect(() => {
+    if (countries === null || destination !== null) return;
+    const codes = countries.map((c) => c.code);
+    setDestination(jobCountry && codes.includes(jobCountry) ? jobCountry : "KH");
+  }, [countries, destination, jobCountry]);
 
   // Guards against a slower earlier fetch resolving after a faster later one
   // when the user switches the selector twice in quick succession.
   const requestIdRef = React.useRef(0);
 
   React.useEffect(() => {
+    if (destination === null) return;
     const requestId = ++requestIdRef.current;
     setLoading(true);
     setErrorCode(null);
@@ -263,6 +294,8 @@ export function CountryFormat({ match }: CountryFormatProps) {
         : te("INTERNAL")
       : null;
 
+  const selectorReady = countries !== null && destination !== null;
+
   return (
     <section className="mt-12 border-t border-ink pt-10">
       <div className="mb-2 flex flex-wrap items-end justify-between gap-4">
@@ -274,18 +307,28 @@ export function CountryFormat({ match }: CountryFormatProps) {
           >
             {t("selectLabel")}
           </label>
-          <select
-            id="country-format-destination"
-            value={destination}
-            onChange={(e) => setDestination(e.target.value as DestinationKey)}
-            className="min-h-9 border border-rule bg-paper px-3 text-[14px] text-ink"
-          >
-            {DESTINATION_KEYS.map((key) => (
-              <option key={key} value={key}>
-                {t(`destinations.${key}`)}
-              </option>
-            ))}
-          </select>
+          {selectorReady ? (
+            <select
+              id="country-format-destination"
+              value={destination}
+              onChange={(e) => setDestination(e.target.value)}
+              className="min-h-9 border border-rule bg-paper px-3 text-[14px] text-ink"
+            >
+              {[...countries.map((c) => c.code), OTHER_KEY].map((key) => (
+                <option key={key} value={key}>
+                  {t(`destinations.${key}`)}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <select
+              id="country-format-destination"
+              disabled
+              className="min-h-9 border border-rule bg-paper px-3 text-[14px] text-ink-3"
+            >
+              <option>{tc("loading")}</option>
+            </select>
+          )}
         </div>
       </div>
       <p className="mb-5 max-w-2xl text-[15px] leading-[1.6] text-ink-2">{t("intro")}</p>

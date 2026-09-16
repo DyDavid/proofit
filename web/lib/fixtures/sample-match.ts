@@ -313,4 +313,36 @@ export const sampleMatch: Match = {
       text: "Add one line about PostgreSQL performance work from ICT 210, if you did any indexing.",
     },
   ],
+  // Two illustrative F5 suggestions (Phase 4 task 3's Hidden Strengths
+  // section). Both target `partial` requirements whose underlying evidence
+  // is stronger than its current phrasing — exactly the "satisfies but
+  // phrases badly" case the feature exists for. `current_phrasing` is
+  // copied verbatim from the cited evidence's `source_line`;
+  // `suggested_phrasing` restates it without adding any number, employer,
+  // tool, duration or outcome the cited evidence doesn't already contain
+  // (PROJECT_SPEC.md §9 rule 1). Checked against both deterministic layers
+  // of `engine/rewrite/validate.py`: no forbidden phrase from
+  // `engine/rewrite/forbidden.json` appears, and every number/proper-noun
+  // token in `suggested_phrasing` already appears in the cited evidence.
+  hidden_strengths: [
+    {
+      requirement_id: "r5",
+      evidence_id: "e14",
+      facts_used: ["e14"],
+      current_phrasing:
+        "Part-time Technical Support, DGC Cambodia: resolved 30+ tickets a week for internal systems, escalating server incidents to the backend team.",
+      suggested_phrasing:
+        "Provided technical support for DGC Cambodia, resolving 30+ tickets a week on internal systems and escalating server incidents to the backend team.",
+      changed_words: ["Provided", "resolving", "on", "and"],
+    },
+    {
+      requirement_id: "r4",
+      evidence_id: "e22",
+      facts_used: ["e21", "e22"],
+      current_phrasing: "Designed 14 REST endpoints and wrote the OpenAPI documentation.",
+      suggested_phrasing:
+        "Designed and built 14 REST endpoints, with OpenAPI documentation for each.",
+      changed_words: ["built", "with", "for", "each"],
+    },
+  ],
 };
