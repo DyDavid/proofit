@@ -1,27 +1,40 @@
-"""F5 — hallucination validator (PERSON_B_PLAN_v2.md §5 Phase 3 task 4).
+"""F5 — hallucination validator (PERSON_B_PLAN_v2.md §5 Phase 3 task 4;
+extended to a third layer in Phase 4 hardening task 1).
 
-Two layers, in order, and the order is load-bearing:
+Three layers, in order, and the order is load-bearing:
 
-1. **Deterministic pre-check** (`precheck_rewrite`), which costs nothing: every
-   number, year, month-count and capitalized proper noun in the rewrite must
-   already appear in the text of at least one cited (`facts_used`) evidence
-   record, or the rewrite fails immediately, before any LLM is called. This
-   catches the loud failures — an invented year, employer, tool or headcount —
-   deterministically and for free.
+1. **Deterministic scope-inflation gate** (`precheck_scope_inflation`), which
+   also costs nothing and runs first: PROJECT_SPEC.md §9 rule 2 ("no scope
+   inflation") enforced as code rather than as a prompt instruction. It fires
+   only when *every* evidence record the rewrite cites in `facts_used` is
+   non-employment (`coursework`, `project`, `competition`, `volunteer`) *and*
+   the rewrite's phrasing contains a forbidden phrase from
+   `engine/rewrite/forbidden.json` (e.g. "professional", "worked at"). If even
+   one cited record is `employment`, `internship` or `part_time`, professional
+   language may be legitimately supported by that record, so the gate stays
+   silent and defers the judgement call to the LLM layer.
 
-2. **A separate LLM call** (`_call_llm_validator`), reached only if the
-   pre-check passes, that receives only the rewrite and the cited evidence and
-   looks for the quiet failure the regex cannot see: a claim that invents no
-   new literal token but still overstates the evidence — a status upgrade
-   ("worked as a software engineer" for a class project), a scope inflation
-   ("led the team" for "participated"), or an unsupported outcome claim
-   (PROJECT_SPEC.md §9 rule 2).
+2. **Deterministic pre-check** (`precheck_rewrite`), which also costs
+   nothing: every number, year, month-count and capitalized proper noun in the
+   rewrite must already appear in the text of at least one cited
+   (`facts_used`) evidence record, or the rewrite fails immediately, before
+   any LLM is called. This catches the loud failures — an invented year,
+   employer, tool or headcount — deterministically and for free.
 
-Two layers = defensible: a reviewer can point at the pre-check's exact
-non-matching token for the loud failures, and at the LLM's own stated
-reasoning for the quiet ones — neither layer is asked to do the other's job.
+3. **A separate LLM call** (`_call_llm_validator`), reached only if both
+   deterministic layers pass, that receives only the rewrite and the cited
+   evidence and looks for the quiet failure neither regex layer can see: a
+   claim that invents no new literal token and uses no forbidden phrase but
+   still overstates the evidence — a status upgrade phrased without any of
+   the gate's fixed wordlist, a scope inflation ("led the team" for
+   "participated"), or an unsupported outcome claim.
 
-Every rejection, from either layer, is meant to be logged by the caller via
+Three layers = defensible: a reviewer can point at the scope gate's exact
+forbidden phrase, or the pre-check's exact non-matching token, for the loud
+failures, and at the LLM's own stated reasoning for the quiet ones — no layer
+is asked to do another's job.
+
+Every rejection, from any layer, is meant to be logged by the caller via
 `api.store.store.log_rewrite_rejection` (PERSON_B_PLAN_v2.md §5 Phase 3 task
 5, Task 10 of this plan) — this module only judges, it does not log, keeping
 it importable and testable with no store dependency.
@@ -29,18 +42,53 @@ it importable and testable with no store dependency.
 
 from __future__ import annotations
 
+import json
 import re
+from functools import lru_cache
+from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from engine.normalize.schema import Evidence
 from engine.rewrite import llm, prompts
 from engine.rewrite.models import Rewrite, ValidationResult, Violation
 
-__all__ = ["validate_rewrite", "precheck_rewrite"]
+__all__ = [
+    "validate_rewrite",
+    "precheck_rewrite",
+    "precheck_scope_inflation",
+    "load_forbidden",
+    "ForbiddenConfig",
+    "ForbiddenPhrase",
+]
 
 _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
 _NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
 _ACRONYM_RE = re.compile(r"\b[A-Z]{2,}\b")
 _WORD_RE = re.compile(r"[A-Za-z][a-zA-Z']*")
+
+FORBIDDEN_PATH = Path(__file__).resolve().parent / "forbidden.json"
+
+
+class _ForbiddenBase(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, frozen=True)
+
+
+class ForbiddenPhrase(_ForbiddenBase):
+    phrase: str = Field(..., min_length=1)
+    reason_en: str = Field(..., min_length=1)
+    reason_km: str = Field(..., min_length=1)
+
+
+class ForbiddenConfig(_ForbiddenBase):
+    version: str = Field(..., min_length=1)
+    applies_to_evidence_types: list[str] = Field(..., min_length=1)
+    forbidden_phrases: list[ForbiddenPhrase] = Field(..., min_length=1)
+
+
+@lru_cache(maxsize=1)
+def load_forbidden() -> ForbiddenConfig:
+    return ForbiddenConfig.model_validate(json.loads(FORBIDDEN_PATH.read_text(encoding="utf-8")))
 
 
 def _facts_text(rewrite: Rewrite, evidence_records: list[Evidence]) -> str:
@@ -78,6 +126,34 @@ def _extract_checkable_tokens(text: str) -> list[str]:
     return tokens
 
 
+def precheck_scope_inflation(
+    rewrite: Rewrite, evidence_records: list[Evidence]
+) -> ValidationResult | None:
+    """PROJECT_SPEC.md §9 rule 2, as code rather than as a prompt instruction.
+
+    Fires only when *every* cited evidence record is non-employment. One cited
+    `employment` / `internship` / `part_time` record can legitimately support
+    professional language, and deciding that is the LLM layer's job, not this
+    one's — a deterministic gate should only reject what is unambiguous.
+    """
+    config = load_forbidden()
+    cited = [e for e in evidence_records if e.id in rewrite.facts_used]
+    if not cited:
+        return None
+    if not all(e.evidence_type in config.applies_to_evidence_types for e in cited):
+        return None
+
+    haystack = rewrite.suggested_phrasing.lower()
+    violations = [
+        Violation(claim=entry.phrase, reason=entry.reason_en)
+        for entry in config.forbidden_phrases
+        if re.search(rf"\b{re.escape(entry.phrase.lower())}", haystack)
+    ]
+    if not violations:
+        return None
+    return ValidationResult(ok=False, violations=violations)
+
+
 def precheck_rewrite(rewrite: Rewrite, evidence_records: list[Evidence]) -> ValidationResult | None:
     """The deterministic layer. Returns `None` when the rewrite passes — the
     caller then proceeds to the LLM layer — or a `ValidationResult(ok=False,
@@ -110,8 +186,13 @@ def _call_llm_validator(rewrite: Rewrite, evidence_records: list[Evidence]) -> V
 
 
 def validate_rewrite(rewrite: Rewrite, evidence_records: list[Evidence]) -> ValidationResult:
-    """Run both layers in order. The LLM layer never runs if the pre-check
-    already failed — "costs nothing" only holds if the free check runs first."""
+    """Run all three layers in order: the scope-inflation gate, then the
+    deterministic pre-check, then the LLM. Each later layer only runs if
+    every earlier one already passed — "costs nothing" only holds if the free
+    checks run first."""
+    scope_failure = precheck_scope_inflation(rewrite, evidence_records)
+    if scope_failure is not None:
+        return scope_failure
     precheck_failure = precheck_rewrite(rewrite, evidence_records)
     if precheck_failure is not None:
         return precheck_failure

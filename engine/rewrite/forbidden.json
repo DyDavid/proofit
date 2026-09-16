@@ -1,0 +1,31 @@
+{
+  "version": "1.0.0",
+  "applies_to_evidence_types": ["coursework", "project", "competition", "volunteer"],
+  "forbidden_phrases": [
+    {
+      "phrase": "professional",
+      "reason_en": "Describes unpaid coursework or a personal project as professional work.",
+      "reason_km": "Describes unpaid coursework or a personal project as professional work."
+    },
+    {
+      "phrase": "employed",
+      "reason_en": "Claims an employment relationship the cited evidence does not record.",
+      "reason_km": "Claims an employment relationship the cited evidence does not record."
+    },
+    {
+      "phrase": "worked at",
+      "reason_en": "Names an employer for evidence that is not employment.",
+      "reason_km": "Names an employer for evidence that is not employment."
+    },
+    {
+      "phrase": "years of experience",
+      "reason_en": "Converts project or coursework duration into professional experience.",
+      "reason_km": "Converts project or coursework duration into professional experience."
+    },
+    {
+      "phrase": "engineer at",
+      "reason_en": "Assigns a job title at an organisation on non-employment evidence.",
+      "reason_km": "Assigns a job title at an organisation on non-employment evidence."
+    }
+  ]
+}
