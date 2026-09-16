@@ -8,6 +8,8 @@ stored as-is, not retrieved.
 
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 from fastapi import APIRouter
 from pydantic import BaseModel
 
@@ -15,6 +17,17 @@ from api.errors import ApiError
 from api.store import store
 
 router = APIRouter()
+
+_BLOCKED_JOB_HOSTS: frozenset[str] = frozenset({"linkedin.com", "facebook.com"})
+
+
+def _is_blocked_job_host(url: str) -> bool:
+    """True if `url`'s host is linkedin.com/facebook.com or a subdomain of
+    either (PROJECT_SPEC.md §9 rule 6). A pure string check on the URL as
+    given — it never fetches anything, so it needs none of Person A's
+    engine.ingest.fetch_jd (still NotImplementedError until CP2)."""
+    host = (urlparse(url).hostname or "").lower()
+    return any(host == blocked or host.endswith(f".{blocked}") for blocked in _BLOCKED_JOB_HOSTS)
 
 
 class JobIn(BaseModel):
@@ -47,6 +60,12 @@ async def submit_job(payload: JobIn) -> dict:
             )
         record, cached = store.add_job(text, source="text")
     else:
+        if _is_blocked_job_host(url):
+            raise ApiError(
+                status_code=422,
+                code="JOB_URL_BLOCKED",
+                message="Host is on the LinkedIn/Facebook blocklist (PROJECT_SPEC.md §9 rule 6).",
+            )
         record, cached = store.add_job(url, source="url")
 
     return {"job_id": record.id, "cached": cached}

@@ -50,3 +50,21 @@ def test_analysis_not_found_uses_the_envelope() -> None:
     res = client.get("/api/analyses/an_doesnotexist")
     assert res.status_code == 404
     assert res.json()["error"]["code"] == "ANALYSIS_NOT_FOUND"
+
+
+def test_job_url_blocked_for_linkedin() -> None:
+    res = client.post("/api/jobs", json={"url": "https://www.linkedin.com/jobs/view/1234"})
+    assert res.status_code == 422
+    assert res.json()["error"]["code"] == "JOB_URL_BLOCKED"
+
+
+def test_job_url_blocked_for_facebook_subdomain() -> None:
+    res = client.post("/api/jobs", json={"url": "https://m.facebook.com/jobs/1234"})
+    assert res.status_code == 422
+    assert res.json()["error"]["code"] == "JOB_URL_BLOCKED"
+
+
+def test_job_url_allowed_for_other_hosts() -> None:
+    res = client.post("/api/jobs", json={"url": "https://www.camhr.com/job/1234"})
+    assert res.status_code == 200
+    assert res.json()["cached"] is False
