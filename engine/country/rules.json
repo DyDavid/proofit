@@ -1,0 +1,279 @@
+{
+  "version": "0.1.0",
+  "countries": [
+    {
+      "code": "KH",
+      "display_name": "Cambodia",
+      "aliases": ["KH", "KHM", "Cambodia"],
+      "max_pages": 2,
+      "page_length_note": "One to two pages. Two is normal even for a first job here — a strict one-page limit is a United States convention, not a local one.",
+      "include_photo": true,
+      "photo_note": "A passport-style photo is conventional on a Cambodian CV. Plain background, recent, business dress.",
+      "include_personal_details": [
+        "full name",
+        "phone number",
+        "email address",
+        "city or province you live in",
+        "date of birth",
+        "nationality",
+        "Khmer and English proficiency, stated separately",
+        "photograph"
+      ],
+      "omit_personal_details": [
+        "national ID card number",
+        "bank or payroll details",
+        "salary expectations, unless the post asks for them",
+        "a referee's phone number before you have asked their permission"
+      ],
+      "date_format": "DD/MM/YYYY",
+      "date_format_example": "15/09/2026",
+      "section_order": [
+        "Personal details",
+        "Career objective",
+        "Education",
+        "Work experience and internships",
+        "Projects",
+        "Skills",
+        "Languages",
+        "References"
+      ],
+      "tone_notes": [
+        "State Khmer and English levels explicitly. Most local posts ask for both, and leaving it out reads as a gap rather than an oversight.",
+        "Naming referees is normal practice here. Ask them before you list them.",
+        "University projects and coursework are expected content for a fresh graduate in this market, not padding.",
+        "Write in English unless the post itself is written in Khmer."
+      ],
+      "visa_terms": [
+        "work permit",
+        "employment card",
+        "foreign national",
+        "cambodian nationality",
+        "khmer nationals only",
+        "must be legally authorised to work in cambodia"
+      ]
+    },
+    {
+      "code": "SG",
+      "display_name": "Singapore",
+      "aliases": ["SG", "SGP", "Singapore"],
+      "max_pages": 2,
+      "page_length_note": "Two pages at most. One page is common and perfectly acceptable for a first job.",
+      "include_photo": false,
+      "photo_note": "Leave the photo off. Singapore's fair-employment guidelines ask employers not to weigh age, gender, race, religion or marital status, and a photo puts several of those back on the page.",
+      "include_personal_details": [
+        "full name",
+        "phone number with country code",
+        "email address",
+        "LinkedIn or portfolio URL",
+        "the city you are currently based in",
+        "a one-line statement of your work-authorisation status"
+      ],
+      "omit_personal_details": [
+        "photograph",
+        "date of birth or age",
+        "gender",
+        "race or ethnicity",
+        "religion",
+        "marital status",
+        "NRIC or FIN number"
+      ],
+      "date_format": "MMM YYYY",
+      "date_format_example": "Jan 2024",
+      "section_order": [
+        "Contact details",
+        "Professional summary",
+        "Work experience",
+        "Education",
+        "Skills",
+        "Projects"
+      ],
+      "tone_notes": [
+        "Open each bullet with what changed and close it with the number, if you have one.",
+        "Say plainly whether you need a work pass. Employers screen on it early, and being vague about it costs you the interview rather than delaying the question.",
+        "British spelling is standard.",
+        "Keep to a single column with ordinary headings. Multi-column and text-box layouts are read out of order by many resume parsers."
+      ],
+      "visa_terms": [
+        "employment pass",
+        "s pass",
+        "work permit",
+        "entrepass",
+        "personalised employment pass",
+        "ministry of manpower",
+        "compass framework",
+        "work pass",
+        "singapore citizen",
+        "singaporean or permanent resident",
+        "no sponsorship",
+        "eligible to work in singapore"
+      ]
+    },
+    {
+      "code": "JP",
+      "display_name": "Japan",
+      "aliases": ["JP", "JPN", "Japan"],
+      "max_pages": 2,
+      "page_length_note": "Japan expects two documents rather than one: a 履歴書 (rirekisho) on the standard form, and a 職務経歴書 (shokumu keirekisho) describing what you actually did. Around two pages each.",
+      "include_photo": true,
+      "photo_note": "The rirekisho has a photo box and it is expected to be filled: 3cm × 4cm, plain background, business dress, taken within the last three months.",
+      "include_personal_details": [
+        "full name with furigana",
+        "date of birth and age",
+        "gender",
+        "home address with postal code",
+        "phone number",
+        "email address",
+        "photograph"
+      ],
+      "omit_personal_details": [
+        "casual or conversational phrasing",
+        "self-promotion the evidence does not support",
+        "salary expectations, unless the post asks for them",
+        "unexplained gaps — every period should be accounted for"
+      ],
+      "date_format": "YYYY/MM",
+      "date_format_example": "2024/01",
+      "section_order": [
+        "学歴 Education",
+        "職歴 Work history",
+        "免許・資格 Licences and certifications",
+        "志望動機 Reason for applying",
+        "本人希望記入欄 Requests"
+      ],
+      "tone_notes": [
+        "List education and work history oldest first. A rirekisho is read forwards, which is the opposite of the reverse-chronological order every other market on this list expects.",
+        "Formal and factual. Understatement reads as competence here; overstatement reads as the absence of it.",
+        "Choose Gregorian years or Japanese era years and use that choice throughout. Mixing the two is the most common avoidable mistake.",
+        "The 志望動機 section is read closely. Write it for this employer specifically, not as a template."
+      ],
+      "visa_terms": [
+        "status of residence",
+        "在留資格",
+        "engineer/specialist in humanities/international services",
+        "技術・人文知識・国際業務",
+        "certificate of eligibility",
+        "在留資格認定証明書",
+        "visa sponsorship",
+        "highly skilled professional",
+        "高度専門職",
+        "working holiday",
+        "permanent residency",
+        "jlpt"
+      ]
+    },
+    {
+      "code": "AU",
+      "display_name": "Australia",
+      "aliases": ["AU", "AUS", "Australia"],
+      "max_pages": 3,
+      "page_length_note": "Two to three pages is normal and is not read as padding, which surprises people used to the one-page United States convention.",
+      "include_photo": false,
+      "photo_note": "No photo. Australian employers screen against it for the same anti-discrimination reasons as Singapore.",
+      "include_personal_details": [
+        "full name",
+        "phone number with country code",
+        "email address",
+        "LinkedIn or portfolio URL",
+        "city and state",
+        "a one-line statement of your work rights"
+      ],
+      "omit_personal_details": [
+        "photograph",
+        "date of birth or age",
+        "gender",
+        "marital status",
+        "nationality",
+        "tax file number"
+      ],
+      "date_format": "MMM YYYY",
+      "date_format_example": "Jan 2024",
+      "section_order": [
+        "Contact details",
+        "Professional summary",
+        "Key skills",
+        "Work experience",
+        "Education",
+        "Referees"
+      ],
+      "tone_notes": [
+        "Plain English and no inflated titles. Overstating a role reads badly in this market.",
+        "'Referees available on request' is the conventional closing line. Have two people ready before you write it.",
+        "Government roles and many large employers ask you to answer selection criteria in a separate document. Check the posting before you apply.",
+        "State your work rights plainly — 'full working rights' is the phrase employers look for."
+      ],
+      "visa_terms": [
+        "working rights",
+        "full working rights",
+        "australian citizen",
+        "permanent resident",
+        "subclass 482",
+        "temporary skill shortage",
+        "subclass 485",
+        "temporary graduate visa",
+        "subclass 186",
+        "employer nomination scheme",
+        "visa sponsorship",
+        "no sponsorship",
+        "must have valid work rights"
+      ]
+    },
+    {
+      "code": "REMOTE",
+      "display_name": "United States (remote)",
+      "aliases": ["REMOTE", "US", "USA", "usRemote", "United States"],
+      "max_pages": 1,
+      "page_length_note": "One page for a first job. Two pages only once you have the paid experience to fill them.",
+      "include_photo": false,
+      "photo_note": "No photo and no headshot in the header. United States employers screen against it on anti-discrimination grounds.",
+      "include_personal_details": [
+        "full name",
+        "phone number with country code",
+        "email address",
+        "LinkedIn URL",
+        "GitHub or portfolio URL",
+        "city and country, or the word Remote",
+        "a one-line statement of your work-authorisation status"
+      ],
+      "omit_personal_details": [
+        "photograph",
+        "date of birth or age",
+        "gender",
+        "marital status",
+        "nationality",
+        "full street address"
+      ],
+      "date_format": "MMM YYYY",
+      "date_format_example": "Jan 2024",
+      "section_order": [
+        "Contact details",
+        "Summary",
+        "Experience",
+        "Projects",
+        "Education",
+        "Skills"
+      ],
+      "tone_notes": [
+        "Open with a strong verb and close with a result. A number beats an adjective every time.",
+        "For a first job, Education can sit above Experience. Move it down once you have paid work to show.",
+        "Keep to a single column with ordinary headings. Multi-column and text-box layouts are read out of order by many resume parsers.",
+        "Check the time-zone overlap the post asks for before applying. A Phnom Penh working day overlaps a US Pacific one by very little.",
+        "Many roles advertised as United States remote require you to be living in the United States. That is a hard filter, not a preference."
+      ],
+      "visa_terms": [
+        "authorized to work in the united states",
+        "work authorization",
+        "no sponsorship",
+        "will not sponsor",
+        "sponsorship is not available",
+        "h-1b",
+        "opt",
+        "cpt",
+        "green card",
+        "us citizens and permanent residents only",
+        "must reside in the united states",
+        "eligible to work in the us",
+        "tn visa"
+      ]
+    }
+  ]
+}
