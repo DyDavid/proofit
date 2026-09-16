@@ -132,7 +132,7 @@ export function AnalyzeForm() {
       } else if (code === "JOB_URL_BLOCKED" || code === "JOB_FETCH_FAILED") {
         setJobPost((v) => ({ ...v, mode: "text" }));
         setJobError(message);
-        document.getElementById("jd-text")?.focus();
+        requestAnimationFrame(() => document.getElementById("jd-text")?.focus());
       } else if (code === "JOB_EMPTY") {
         setJobError(message);
         document.getElementById(jobPost.mode === "text" ? "jd-text" : "jd-url")?.focus();
