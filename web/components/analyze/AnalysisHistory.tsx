@@ -6,6 +6,7 @@ import * as React from "react";
 import { REALISM_TONE } from "@/components/results/ResultsView";
 import { Card } from "@/components/ui/Card";
 import { Stamp } from "@/components/ui/Stamp";
+import { Link } from "@/i18n/routing";
 import { getAnalysisHistory, type AnalysisSummary } from "@/lib/api";
 import { loadRememberedResume } from "@/lib/localResume";
 
@@ -42,7 +43,7 @@ export function AnalysisHistory() {
       <ul className="grid gap-3">
         {rows.map((row) => (
           <li key={row.analysis_id}>
-            <a
+            <Link
               href={`/results?id=${row.analysis_id}`}
               className="flex flex-wrap items-center justify-between gap-3 border border-rule bg-paper p-3.5 transition-colors hover:bg-paper-2"
             >
@@ -61,7 +62,7 @@ export function AnalysisHistory() {
                   {tr(`realism.${row.realism_verdict}`)}
                 </Stamp>
               </div>
-            </a>
+            </Link>
           </li>
         ))}
       </ul>
