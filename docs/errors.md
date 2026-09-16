@@ -187,7 +187,7 @@ Khmer strings marked **provisional** — see §4.
 
 | | |
 |---|---|
-| **Trigger** | The catch-all. Any unhandled exception in the API that is not one of the nine codes above. If this code appears in production logs it means a case is missing from this table — **treat every `INTERNAL` as a bug report against this document**, and either add a specific code or fix the cause. |
+| **Trigger** | The catch-all. Any unhandled exception in the API that is not one of the ten codes above. If this code appears in production logs it means a case is missing from this table — **treat every `INTERNAL` as a bug report against this document**, and either add a specific code or fix the cause. |
 | **English** | Something went wrong on our side. Try again — if it keeps happening, send us this error id. |
 | **Khmer** | មានបញ្ហាមួយកើតឡើងនៅខាងយើង។ សូមព្យាយាមម្តងទៀត — បើនៅតែកើតឡើង សូមផ្ញើលេខសម្គាល់កំហុសនេះមកយើង។ |
 | **Recovery** | Error card with Retry and a copyable `error_id`. Never renders a stack trace or the server `message` field. |

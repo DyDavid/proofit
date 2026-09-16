@@ -14,7 +14,7 @@ import logging
 import time
 
 from fastapi import APIRouter, BackgroundTasks, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from api.config import settings
 from api.errors import ApiError, new_error_id
@@ -224,15 +224,35 @@ async def create_rewrites(analysis_id: str) -> dict:
             rejected_count += 1
             continue
 
-        hidden_strength = HiddenStrength(
-            requirement_id=candidate.requirement_id,
-            evidence_id=candidate.evidence_id,
-            current_phrasing=anchor.source_line,
-            suggested_phrasing=accepted.suggested_phrasing,
-            facts_used=accepted.facts_used,
-            changed_words=accepted.changed_words,
-        )
-        match = _append_hidden_strength(match, hidden_strength)
+        try:
+            hidden_strength = HiddenStrength(
+                requirement_id=candidate.requirement_id,
+                evidence_id=candidate.evidence_id,
+                current_phrasing=anchor.source_line,
+                suggested_phrasing=accepted.suggested_phrasing,
+                facts_used=accepted.facts_used,
+                changed_words=accepted.changed_words,
+            )
+            match = _append_hidden_strength(match, hidden_strength)
+        except ValidationError as exc:
+            # validate_rewrite's two layers judge the *phrasing*; neither
+            # guarantees `facts_used` actually contains the anchor's own
+            # evidence_id (precheck_rewrite can pass with zero checkable
+            # tokens, and the LLM layer is never asked about facts_used at
+            # all). HiddenStrength's own `_cites_its_own_evidence` validator
+            # is the last line of defence against that — treat a failure
+            # there exactly like any other validator rejection rather than
+            # letting it crash the endpoint with a raw, unenveloped 500.
+            rejected_count += 1
+            store.log_rewrite_rejection(
+                analysis_id=analysis_id,
+                requirement_id=candidate.requirement_id,
+                evidence_id=candidate.evidence_id,
+                suggested_phrasing=accepted.suggested_phrasing,
+                violations=[{"claim": "facts_used/evidence_id integrity", "reason": str(exc)}],
+                retry_succeeded=False,
+            )
+            continue
 
     record.match = match
     return {

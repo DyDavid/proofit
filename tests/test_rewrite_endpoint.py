@@ -186,6 +186,59 @@ def test_rewrites_endpoint_flips_retry_succeeded_when_the_retry_passes() -> None
     assert logged[0].retry_succeeded is True
 
 
+def test_rewrites_endpoint_gracefully_rejects_a_facts_used_integrity_failure() -> None:
+    """`validate_rewrite`'s two layers judge the rewrite's *phrasing*, not
+    whether `facts_used` actually contains the anchor's own `evidence_id`.
+    `precheck_rewrite` only fires on a checkable token (a number or a
+    non-sentence-initial proper noun) — a phrasing with none of those (the
+    same shape as test_rewrite_validator.py's
+    test_rejects_a_status_upgrade_from_project_to_employment) passes the
+    precheck regardless of `facts_used`. If the LLM validator layer then also
+    approves it, `HiddenStrength`'s own `_cites_its_own_evidence` validator
+    (engine/normalize/schema.py) is the only thing left to catch a
+    `facts_used` that omits the anchor id — this must be caught and turned
+    into a graceful rejection, not left to crash the endpoint with a raw,
+    unenveloped 500."""
+    analysis_id = _seed_done_analysis("an_test_rewrites_facts_used_integrity")
+
+    call_structured_stub = _dispatch_call_structured(
+        detect_response={"found": True, "evidence_id": "e1", "rationale": "React dashboard fits."},
+        generate_response={
+            # Zero checkable tokens: no numbers, no non-sentence-initial
+            # capitalized words — precheck_rewrite passes no matter what
+            # facts_used says.
+            "suggested_phrasing": "Worked professionally as a software engineer, delivering "
+            "production features independently.",
+            # Omits "e1", the anchor's own evidence_id.
+            "facts_used": ["e2"],
+        },
+    )
+    with (
+        patch("engine.rewrite.detect.llm.call_structured", side_effect=call_structured_stub),
+        patch("engine.rewrite.generate.llm.call_structured", side_effect=call_structured_stub),
+        patch(
+            "engine.rewrite.validate._call_llm_validator",
+            # Simulates the LLM layer approving the phrasing itself — it was
+            # never asked to judge facts_used.
+            return_value=ValidationResult(ok=True, violations=[]),
+        ),
+    ):
+        before = len(store.rewrite_rejections)
+        res = client.post(f"/api/analyses/{analysis_id}/rewrites")
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["rejected_count"] == 1
+    assert body["hidden_strengths"] == []
+
+    get_res = client.get(f"/api/analyses/{analysis_id}").json()
+    assert get_res["match"]["hidden_strengths"] == []
+
+    logged = store.rewrite_rejections[before:]
+    assert len(logged) == 1
+    assert logged[0].retry_succeeded is False
+
+
 def test_rewrites_endpoint_requires_a_done_analysis() -> None:
     record = AnalysisRecord(id="an_test_not_ready", resume_id="res_x", job_id="job_x", country="cambodia")
     store.analyses[record.id] = record  # status defaults to "queued"
