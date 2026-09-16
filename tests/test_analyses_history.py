@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from api.main import app
+from api.store import AnalysisRecord, store
 
 client = TestClient(app)
 
@@ -65,41 +66,24 @@ def test_history_excludes_incomplete_analyses() -> None:
     history endpoint, even if they exist in the store. A regression that
     weakens the status == "done" filter would be caught by this test.
 
-    The test verifies this by:
-    1. Creating a done analysis that SHOULD appear in history
-    2. Polling it immediately after creation to catch it in queued/running state
-    3. Verifying it doesn't appear in history until status == "done"
+    Constructs an `AnalysisRecord` directly in the store with `status="queued"`
+    (the same pattern `tests/test_rewrite_endpoint.py` uses for
+    `test_rewrites_endpoint_requires_a_done_analysis`) rather than going
+    through the full create-analysis-and-poll flow: polling and then checking
+    "is it still not-done yet?" races the mock background task's own
+    completion timing, so on a slow CI run the analysis can already be `done`
+    by the time it's checked, silently degrading this into a weaker duplicate
+    of `test_history_newest_first` for that run. Constructing the record
+    directly makes the exclusion assertion unconditional and deterministic.
     """
     resume_id = client.post(
         "/api/resumes", files={"file": ("d.pdf", b"%PDF-1.4 fake", "application/pdf")},
     ).json()["resume_id"]
-
-    # Create a job and start an analysis
     job_id = client.post("/api/jobs", json={"text": "z" * 41}).json()["job_id"]
-    analysis_id = client.post(
-        "/api/analyses",
-        json={"resume_id": resume_id, "job_id": job_id, "country": "cambodia"},
-    ).json()["analysis_id"]
 
-    # Check status immediately after creation
-    status = client.get(f"/api/analyses/{analysis_id}").json()["status"]
+    record = AnalysisRecord(id="an_test_history_queued", resume_id=resume_id, job_id=job_id, country="cambodia")
+    store.analyses[record.id] = record  # status defaults to "queued"
 
-    # If we caught it before completion (queued/running), verify it's not in history
-    if status != "done":
-        res = client.get(f"/api/analyses?resume_id={resume_id}")
-        assert res.status_code == 200
-        assert res.json() == [], "Non-done analysis should not appear in history"
-
-    # Poll the analysis to completion
-    for _ in range(50):
-        status_check = client.get(f"/api/analyses/{analysis_id}").json()
-        if status_check["status"] == "done":
-            break
-
-    # Query history — analysis should now appear since status == "done"
     res = client.get(f"/api/analyses?resume_id={resume_id}")
     assert res.status_code == 200
-    body = res.json()
-    assert len(body) >= 1, "Done analysis should appear in history"
-    assert any(row["analysis_id"] == analysis_id for row in body), \
-        "This analysis should be in history after completion"
+    assert res.json() == [], "A queued (non-done) analysis should not appear in history"

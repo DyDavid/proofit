@@ -59,6 +59,17 @@ def call_structured(
         tools=[{"name": tool_name, "description": tool_description, "input_schema": tool_schema}],
         tool_choice={"type": "tool", "name": tool_name},
     )
+    if response.stop_reason == "max_tokens":
+        # The response was truncated mid-generation. It can still contain
+        # *some* tool_use block that happens to parse — but its `input` may
+        # be an incomplete JSON object cut off partway through, which is
+        # worse than an obvious failure: it looks like real data. Fail loudly
+        # instead of risking a `dict` that quietly isn't the one the model
+        # actually intended.
+        raise RuntimeError(
+            f"Anthropic response for tool {tool_name!r} was truncated (stop_reason=max_tokens); "
+            f"raise max_tokens or shorten the prompt."
+        )
     for block in response.content:
         if block.type == "tool_use" and block.name == tool_name:
             return dict(block.input)

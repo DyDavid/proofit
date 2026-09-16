@@ -186,6 +186,82 @@ def test_rewrites_endpoint_flips_retry_succeeded_when_the_retry_passes() -> None
     assert logged[0].retry_succeeded is True
 
 
+def test_rewrites_endpoint_does_not_flip_retry_succeeded_on_a_later_integrity_failure() -> None:
+    """Guards the fix that moved `first_failure.retry_succeeded = True` out of
+    the retry loop's `if result.ok:` branch and to after the `HiddenStrength`
+    construction actually succeeds.
+
+    Here the first attempt fails `validate_rewrite` (logged, `first_failure`
+    set), and the retry attempt *passes* `validate_rewrite` — but its
+    `facts_used` omits the anchor's own evidence_id (the same trick
+    `test_rewrites_endpoint_gracefully_rejects_a_facts_used_integrity_failure`
+    uses), so `HiddenStrength`'s own `_cites_its_own_evidence` validator
+    rejects it on construction, well after `result.ok` was already `True`.
+    The first failure's logged record must still show `retry_succeeded is
+    False`: the retry did not actually succeed, a second, separate rejection
+    gets logged for the integrity failure, and `RewriteRejection` — "a report
+    figure for the evaluation chapter" (`api/store.py`) — must not disagree
+    with itself about what happened."""
+    analysis_id = _seed_done_analysis("an_test_rewrites_retry_flip_then_integrity_fail")
+
+    detect_response = {"found": True, "evidence_id": "e1", "rationale": "React dashboard fits."}
+    generate_responses = [
+        # Attempt 1: cites e1, whose evidence includes the skill "React" —
+        # the only checkable token here — so precheck_rewrite passes and
+        # falls through to the (mocked) LLM layer, which fails it.
+        {
+            "suggested_phrasing": "Built a React dashboard for a university course project.",
+            "facts_used": ["e1"],
+        },
+        # Attempt 2 (the retry): zero checkable tokens (no numbers, no
+        # non-sentence-initial capitalized words), so precheck_rewrite
+        # passes no matter what facts_used says — and facts_used omits "e1",
+        # the anchor's own evidence_id.
+        {
+            "suggested_phrasing": "Worked professionally as a software engineer, delivering "
+            "production features independently.",
+            "facts_used": ["e2"],
+        },
+    ]
+
+    def _generate_stub(*, tool_name: str, **_kwargs: object) -> dict[str, Any]:
+        if tool_name == prompts.DETECT_TOOL_NAME:
+            return detect_response
+        if tool_name == prompts.GENERATE_TOOL_NAME:
+            return generate_responses.pop(0)
+        raise AssertionError(f"unexpected tool_name in test stub: {tool_name}")
+
+    with (
+        patch("engine.rewrite.detect.llm.call_structured", side_effect=_generate_stub),
+        patch("engine.rewrite.generate.llm.call_structured", side_effect=_generate_stub),
+        patch(
+            "engine.rewrite.validate._call_llm_validator",
+            side_effect=[
+                ValidationResult(
+                    ok=False,
+                    violations=[{"claim": "dashboard", "reason": "borderline on the first pass"}],
+                ),
+                ValidationResult(ok=True, violations=[]),
+            ],
+        ),
+    ):
+        before = len(store.rewrite_rejections)
+        res = client.post(f"/api/analyses/{analysis_id}/rewrites")
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["rejected_count"] == 1
+    assert body["hidden_strengths"] == []
+
+    logged = store.rewrite_rejections[before:]
+    assert len(logged) == 2, "the first failure and the later integrity failure should both be logged"
+    assert logged[0].retry_succeeded is False, (
+        "the retry passed validate_rewrite but its HiddenStrength then failed the "
+        "facts_used/evidence_id integrity check, so the first failure must not be "
+        "misreported as a successful retry"
+    )
+
+
 def test_rewrites_endpoint_gracefully_rejects_a_facts_used_integrity_failure() -> None:
     """`validate_rewrite`'s two layers judge the rewrite's *phrasing*, not
     whether `facts_used` actually contains the anchor's own `evidence_id`.

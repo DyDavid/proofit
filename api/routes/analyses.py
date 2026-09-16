@@ -13,6 +13,7 @@ import asyncio
 import logging
 import time
 
+import anthropic
 from fastapi import APIRouter, BackgroundTasks, Query
 from pydantic import BaseModel, ValidationError
 
@@ -165,11 +166,21 @@ def _append_hidden_strength(match: Match, hidden_strength: HiddenStrength) -> Ma
 
 
 @router.post("/analyses/{analysis_id}/rewrites")
-async def create_rewrites(analysis_id: str) -> dict:
+def create_rewrites(analysis_id: str) -> dict:
     """Runs the F5 pipeline for one completed analysis (PERSON_B_PLAN_v2.md §5
     Phase 3 task 6): detect candidates, generate a rewrite for each, validate
     it, retry generation+validation once on failure, log every failure, and
-    append every accepted HiddenStrength to the stored match."""
+    append every accepted HiddenStrength to the stored match.
+
+    Deliberately a plain `def`, not `async def`: every call inside this
+    function (`detect_hidden_strengths`, `generate_rewrite`,
+    `validate_rewrite`) is synchronous and ultimately blocks on the Anthropic
+    SDK's `client.messages.create()` — 10-40s in live mode, per this module's
+    own docstring. An `async def` route runs directly on the event loop, so a
+    blocking call here would freeze every other in-flight request, including
+    the `GET /api/analyses/{id}` poll the Progress screen depends on. FastAPI
+    runs a plain `def` route in a threadpool instead, so the LLM I/O blocks
+    only that worker thread."""
     record = store.analyses.get(analysis_id)
     if record is None:
         raise ApiError(status_code=404, code="ANALYSIS_NOT_FOUND", message="Unknown analysis_id.")
@@ -190,69 +201,83 @@ async def create_rewrites(analysis_id: str) -> dict:
 
     requirements_by_id = {r.id: r for r in match.job.requirements}
     evidence_by_id = {e.id: e for e in resume.evidence}
-    candidates = detect_hidden_strengths(match, resume)
 
     rejected_count = 0
-    for candidate in candidates:
-        requirement = requirements_by_id.get(candidate.requirement_id)
-        anchor = evidence_by_id.get(candidate.evidence_id)
-        if requirement is None or anchor is None:
-            continue
+    try:
+        candidates = detect_hidden_strengths(match, resume)
+        for candidate in candidates:
+            requirement = requirements_by_id.get(candidate.requirement_id)
+            anchor = evidence_by_id.get(candidate.evidence_id)
+            if requirement is None or anchor is None:
+                continue
 
-        accepted = None
-        first_failure = None
-        for attempt in range(2):
-            rewrite = generate_rewrite(requirement, [anchor])
-            result = validate_rewrite(rewrite, resume.evidence)
-            if result.ok:
-                if first_failure is not None:
-                    first_failure.retry_succeeded = True
-                accepted = rewrite
-                break
-            failure = store.log_rewrite_rejection(
-                analysis_id=analysis_id,
-                requirement_id=candidate.requirement_id,
-                evidence_id=candidate.evidence_id,
-                suggested_phrasing=rewrite.suggested_phrasing,
-                violations=result.as_log_violations,
-                retry_succeeded=False,
-            )
-            if attempt == 0:
-                first_failure = failure
+            accepted = None
+            first_failure = None
+            for attempt in range(2):
+                rewrite = generate_rewrite(requirement, [anchor])
+                result = validate_rewrite(rewrite, resume.evidence)
+                if result.ok:
+                    accepted = rewrite
+                    break
+                failure = store.log_rewrite_rejection(
+                    analysis_id=analysis_id,
+                    requirement_id=candidate.requirement_id,
+                    evidence_id=candidate.evidence_id,
+                    suggested_phrasing=rewrite.suggested_phrasing,
+                    violations=result.as_log_violations,
+                    retry_succeeded=False,
+                )
+                if attempt == 0:
+                    first_failure = failure
 
-        if accepted is None:
-            rejected_count += 1
-            continue
+            if accepted is None:
+                rejected_count += 1
+                continue
 
-        try:
-            hidden_strength = HiddenStrength(
-                requirement_id=candidate.requirement_id,
-                evidence_id=candidate.evidence_id,
-                current_phrasing=anchor.source_line,
-                suggested_phrasing=accepted.suggested_phrasing,
-                facts_used=accepted.facts_used,
-                changed_words=accepted.changed_words,
-            )
-            match = _append_hidden_strength(match, hidden_strength)
-        except ValidationError as exc:
-            # validate_rewrite's two layers judge the *phrasing*; neither
-            # guarantees `facts_used` actually contains the anchor's own
-            # evidence_id (precheck_rewrite can pass with zero checkable
-            # tokens, and the LLM layer is never asked about facts_used at
-            # all). HiddenStrength's own `_cites_its_own_evidence` validator
-            # is the last line of defence against that — treat a failure
-            # there exactly like any other validator rejection rather than
-            # letting it crash the endpoint with a raw, unenveloped 500.
-            rejected_count += 1
-            store.log_rewrite_rejection(
-                analysis_id=analysis_id,
-                requirement_id=candidate.requirement_id,
-                evidence_id=candidate.evidence_id,
-                suggested_phrasing=accepted.suggested_phrasing,
-                violations=[{"claim": "facts_used/evidence_id integrity", "reason": str(exc)}],
-                retry_succeeded=False,
-            )
-            continue
+            try:
+                hidden_strength = HiddenStrength(
+                    requirement_id=candidate.requirement_id,
+                    evidence_id=candidate.evidence_id,
+                    current_phrasing=anchor.source_line,
+                    suggested_phrasing=accepted.suggested_phrasing,
+                    facts_used=accepted.facts_used,
+                    changed_words=accepted.changed_words,
+                )
+                match = _append_hidden_strength(match, hidden_strength)
+            except ValidationError as exc:
+                # validate_rewrite's two layers judge the *phrasing*; neither
+                # guarantees `facts_used` actually contains the anchor's own
+                # evidence_id (precheck_rewrite can pass with zero checkable
+                # tokens, and the LLM layer is never asked about facts_used at
+                # all). HiddenStrength's own `_cites_its_own_evidence` validator
+                # is the last line of defence against that — treat a failure
+                # there exactly like any other validator rejection rather than
+                # letting it crash the endpoint with a raw, unenveloped 500.
+                rejected_count += 1
+                store.log_rewrite_rejection(
+                    analysis_id=analysis_id,
+                    requirement_id=candidate.requirement_id,
+                    evidence_id=candidate.evidence_id,
+                    suggested_phrasing=accepted.suggested_phrasing,
+                    violations=[{"claim": "facts_used/evidence_id integrity", "reason": str(exc)}],
+                    retry_succeeded=False,
+                )
+                continue
+
+            # Only flip the first failure's `retry_succeeded` once the retry's
+            # HiddenStrength has actually made it into `match` — validation
+            # passing (above) is necessary but not sufficient: the `except
+            # ValidationError` branch above can still reject this same
+            # candidate on the integrity check, and `continue`s past this
+            # line before reaching it. `RewriteRejection` is "a report figure
+            # for the evaluation chapter" (api/store.py) — a `True` logged
+            # before the outcome is actually known would misreport it.
+            if first_failure is not None:
+                first_failure.retry_succeeded = True
+    except anthropic.RateLimitError as exc:
+        raise ApiError(status_code=429, code="RATE_LIMITED", message=str(exc)) from exc
+    except Exception as exc:
+        raise ApiError(status_code=500, code="ENGINE_FAILED", message=str(exc)) from exc
 
     record.match = match
     return {
