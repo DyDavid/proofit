@@ -170,7 +170,19 @@
       "score": "Keyword matcher",
       "caption": "A plain word-overlap matcher scored against the same requirements. It compares wording only — it cannot read evidence — so treat its number as a floor, not a second opinion. Its verdicts are the muted labels in the rows below."
     },
-    "empty": "No requirements were found in this job post. Check the text you pasted and try again."
+    "empty": "No requirements were found in this job post. Check the text you pasted and try again.",
+    "hiddenStrengths": {
+      "title": "Hidden strengths",
+      "intro": "These are things you already prove, phrased weakly in your resume. Every suggestion below is built only from lines already there — nothing is invented.",
+      "run": "Suggest rewrites",
+      "running": "Checking your evidence…",
+      "empty": "No suggestions to show right now.",
+      "counter": "{passed} suggestions passed validation · {rejected} rejected",
+      "current": "Currently in your resume",
+      "suggested": "Suggested rewrite",
+      "factsUsed": "Built from your resume",
+      "rejected": "Suggestion rejected."
+    }
   },
   "progress": {
     "title": "Analyzing",

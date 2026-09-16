@@ -1,4 +1,4 @@
-import type { BaselineMatch, Match } from "@/lib/types";
+import type { BaselineMatch, HiddenStrength, Match } from "@/lib/types";
 
 /**
  * Thin client for the FastAPI mock/live service (PERSON_B_PLAN_v2.md §5
@@ -77,6 +77,24 @@ export async function retryAnalysis(
   id: string,
 ): Promise<{ analysis_id: string; status: string }> {
   const res = await fetch(`/api/analyses/${id}/retry`, { method: "POST" });
+  if (!res.ok) throw await toApiError(res);
+  return res.json();
+}
+
+export interface CreateRewritesResponse {
+  hidden_strengths: HiddenStrength[];
+  rejected_count: number;
+}
+
+/**
+ * Runs the F5 rewrite pipeline for one completed analysis (Phase 4 task 3:
+ * the Hidden Strengths section). Opt-in and costs real LLM calls server-side,
+ * so this is only ever invoked from a direct button press, never on mount.
+ * `POST /api/analyses/{id}/rewrites` takes no body — `analysis_id` in the
+ * path is the whole request, same shape as `retryAnalysis` above.
+ */
+export async function createRewrites(id: string): Promise<CreateRewritesResponse> {
+  const res = await fetch(`/api/analyses/${id}/rewrites`, { method: "POST" });
   if (!res.ok) throw await toApiError(res);
   return res.json();
 }

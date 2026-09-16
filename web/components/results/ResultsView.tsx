@@ -1,5 +1,6 @@
 import { useTranslations } from "next-intl";
 
+import { HiddenStrengths } from "@/components/results/HiddenStrengths";
 import { ResultsInteractive } from "@/components/results/ResultsInteractive";
 import { CoverageStat, type CoverageTile } from "@/components/results/CoverageStat";
 import type { StampTone } from "@/components/ui/Stamp";
@@ -36,6 +37,10 @@ function formatDate(iso: string): string {
 export interface ResultsViewProps {
   match: Match;
   baseline?: BaselineMatch | null;
+  /** Undefined on the static "try a sample" path — there is no analysis to
+   * run rewrites against, so `HiddenStrengths` hides its run button and
+   * renders `match.hidden_strengths` as-is. */
+  analysisId?: string;
 }
 
 /**
@@ -45,7 +50,7 @@ export interface ResultsViewProps {
  * `next-intl`'s isomorphic `useTranslations` (not the `/server` variant) so
  * the exact same component works from a Server or a Client Component.
  */
-export function ResultsView({ match, baseline }: ResultsViewProps) {
+export function ResultsView({ match, baseline, analysisId }: ResultsViewProps) {
   const t = useTranslations("results");
   const job = match.job;
 
@@ -119,6 +124,8 @@ export function ResultsView({ match, baseline }: ResultsViewProps) {
       </div>
 
       <ResultsInteractive match={match} baseline={baseline} />
+
+      <HiddenStrengths match={match} analysisId={analysisId} />
     </div>
   );
 }

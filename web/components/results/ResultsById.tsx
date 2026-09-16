@@ -104,5 +104,5 @@ export function ResultsById({ id }: ResultsByIdProps) {
     );
   }
 
-  return <ResultsView match={match} baseline={baseline} />;
+  return <ResultsView match={match} baseline={baseline} analysisId={id} />;
 }
