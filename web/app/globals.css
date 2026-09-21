@@ -2,7 +2,7 @@
 
 /* ==========================================================================
    Proofit — design system
-   "Prove your fit" / បញ្ជាក់ភាពសក្តិសមរបស់អ្នក
+   "Prove your fit"
 
    Warm paper-and-ink editorial system (BRAND.md §3/§4, revised 12 Sep 2026).
    Tailwind v4: there is NO tailwind.config.ts. Every design token lives here,
@@ -17,12 +17,6 @@
    Accessibility (PERSON_B_PLAN_v2.md Phase 0.5): a verdict is NEVER colour
    alone. Components pair every verdict tone with an inline SVG icon and the
    word itself — see components/ui/VerdictIcon.tsx.
-
-   Khmer (PERSON_B_PLAN_v2.md §7.4): body line-height >= 1.7, never text-xs.
-   Khmer script stacks subscript consonants below the baseline and clips at
-   normal line heights. Fraunces and IBM Plex Mono have no Khmer glyphs, so
-   `font-serif` / `font-mono` fall back to Kantumruy Pro under
-   `html[lang="km"]` — see the base layer below.
    ========================================================================== */
 
 @theme {
@@ -71,14 +65,13 @@
     serif;
   --font-sans:
     var(--font-kantumruy), "Kantumruy Pro", ui-sans-serif, system-ui,
-    -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
-    "Noto Sans Khmer", sans-serif;
+    -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono:
     var(--font-plex-mono), "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas,
     monospace;
 
-  /* Khmer body copy. Exposed as the `leading-khmer` utility. */
-  --leading-khmer: 1.75;
+  /* Relaxed body-copy leading (BRAND.md §4). */
+  --leading-body: 1.75;
 
   /* ---- Spacing. Tailwind's 0.25rem base step is kept; these are the two
          rhythm values the page shells reuse so sections line up. ------------ */
@@ -106,8 +99,8 @@
     background-color: var(--color-paper);
     color: var(--color-ink);
     font-family: var(--font-sans);
-    /* Khmer rule: body copy never drops below 1.7. */
-    line-height: var(--leading-khmer);
+    /* Relaxed body leading — BRAND.md §4. */
+    line-height: var(--leading-body);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
@@ -131,8 +124,6 @@
     z-index: 1;
   }
 
-  /* Headings may tighten, but not below the point where Khmer subscripts
-     collide with the line above. */
   h1,
   h2,
   h3,
@@ -145,16 +136,6 @@
 
   p {
     text-wrap: pretty;
-  }
-
-  /* Fraunces and IBM Plex Mono have no Khmer glyphs (BRAND.md §4): fall back
-     to Kantumruy Pro SemiBold under the Khmer locale, centrally, so no
-     component ever needs a Khmer-specific class of its own. */
-  html[lang="km"] .font-serif,
-  html[lang="km"] .font-mono {
-    font-family: var(--font-sans);
-    font-weight: 600;
-    letter-spacing: 0;
   }
 
   /* Single source of truth for the focus ring, matching the reference. */
@@ -178,12 +159,6 @@
    ========================================================================== */
 
 @layer components {
-  /* Apply to any block of Khmer body copy that is not the <body> default,
-     e.g. inside a component that tightens leading for Latin. */
-  .khmer-body {
-    line-height: var(--leading-khmer);
-  }
-
   /* Visually hidden but announced by screen readers. */
   .sr-only-focusable:not(:focus):not(:focus-within) {
     position: absolute;
