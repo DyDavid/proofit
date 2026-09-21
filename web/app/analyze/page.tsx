@@ -1,4 +1,4 @@
-import { getTranslations } from "next-intl/server";
+import { getTranslations } from "@/lib/copy";
 
 import { AnalysisHistory } from "@/components/analyze/AnalysisHistory";
 import { AnalyzeForm } from "@/components/analyze/AnalyzeForm";

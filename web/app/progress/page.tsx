@@ -1,9 +1,9 @@
-import { getLocale, getTranslations } from "next-intl/server";
+import { getTranslations } from "@/lib/copy";
 
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
 import { ProgressStepper } from "@/components/progress/ProgressStepper";
-import { redirect } from "@/i18n/routing";
+import { redirect } from "next/navigation";
 
 export interface ProgressPageProps {
   searchParams: Promise<{ id?: string; cached?: string }>;
@@ -15,7 +15,7 @@ export interface ProgressPageProps {
 export default async function ProgressPage({ searchParams }: ProgressPageProps) {
   const { id, cached } = await searchParams;
   if (!id) {
-    redirect({ href: "/analyze", locale: await getLocale() });
+    redirect("/analyze");
   }
 
   const t = await getTranslations("progress");

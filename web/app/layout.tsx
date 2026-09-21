@@ -1,20 +1,69 @@
+import type { Metadata } from "next";
+import { Fraunces, IBM_Plex_Mono, Kantumruy_Pro } from "next/font/google";
 import type { ReactNode } from "react";
+import Footer from "@/components/layout/Footer";
+import Header from "@/components/layout/Header";
+import { getTranslations } from "@/lib/copy";
+import "./globals.css";
 
-type Props = {
-  children: ReactNode;
-};
+/** Kantumruy Pro is the single UI font (BRAND.md §4). */
+const kantumruyPro = Kantumruy_Pro({
+  subsets: ["latin"],
+  weight: ["300", "400", "500", "600", "700"],
+  variable: "--font-kantumruy",
+  display: "swap",
+});
 
-/**
- * Pass-through root layout.
- *
- * Every Proofit route lives under `app/[locale]`, and that layout is the one
- * that renders `<html>` and `<body>` (it needs the resolved locale for
- * `lang={locale}`). Next.js still requires a file at `app/layout.tsx`, so this
- * one only forwards children — rendering `<html>` here as well would nest two
- * documents inside each other.
- *
- * @see https://next-intl.dev/docs/environments/error-files
- */
-export default function RootLayout({ children }: Props) {
-  return children;
+/** Display face for headlines and the big coverage numbers (BRAND.md §4). */
+const fraunces = Fraunces({
+  subsets: ["latin"],
+  weight: ["300", "400", "500", "600"],
+  style: ["normal", "italic"],
+  variable: "--font-fraunces",
+  display: "swap",
+});
+
+/** Label/data face: eyebrows, timestamps, verdict pills, stamps, confidence
+ * figures (BRAND.md §4). */
+const ibmPlexMono = IBM_Plex_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500"],
+  variable: "--font-plex-mono",
+  display: "swap",
+});
+
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslations("common");
+  const tLanding = await getTranslations("landing");
+
+  const appName = t("appName");
+
+  return {
+    title: {
+      default: `${appName} · ${t("tagline")}`,
+      template: `%s · ${appName}`,
+    },
+    description: tLanding("hero.subtitle"),
+    applicationName: appName,
+  };
+}
+
+export default function RootLayout({ children }: { children: ReactNode }) {
+  return (
+    <html
+      lang="en"
+      className={`${kantumruyPro.variable} ${fraunces.variable} ${ibmPlexMono.variable}`}
+      data-scroll-behavior="smooth"
+    >
+      <body
+        className={`${kantumruyPro.className} flex min-h-screen flex-col bg-paper leading-[1.75] text-ink antialiased`}
+      >
+        <Header />
+        <main id="main" className="flex-1">
+          {children}
+        </main>
+        <Footer />
+      </body>
+    </html>
+  );
 }

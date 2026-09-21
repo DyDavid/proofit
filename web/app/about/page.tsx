@@ -1,4 +1,4 @@
-import { getTranslations } from "next-intl/server";
+import { getTranslations } from "@/lib/copy";
 
 const SECTIONS = ["method", "limits", "team", "legality"] as const;
 

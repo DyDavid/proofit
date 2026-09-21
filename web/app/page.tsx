@@ -1,4 +1,4 @@
-import { getTranslations } from "next-intl/server";
+import { getTranslations } from "@/lib/copy";
 
 import { Button } from "@/components/ui/Button";
 
