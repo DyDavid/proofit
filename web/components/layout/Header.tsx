@@ -1,7 +1,6 @@
-import { useTranslations } from "next-intl";
-import LocaleSwitcher from "@/components/layout/LocaleSwitcher";
+import { useTranslations } from "@/lib/copy";
 import { Button } from "@/components/ui/Button";
-import { Link } from "@/i18n/routing";
+import Link from "next/link";
 
 const NAV_ITEMS = [
   { href: "/", key: "nav.home" },
@@ -10,9 +9,8 @@ const NAV_ITEMS = [
 ] as const;
 
 /**
- * Site header: Proofit wordmark, the three primary routes, the locale
- * switcher, and a primary CTA. Server component — the only interactive part
- * is the switcher.
+ * Site header: Proofit wordmark, the three primary routes, and a primary
+ * CTA. Server component.
  */
 export default function Header() {
   const t = useTranslations("common");
@@ -37,7 +35,6 @@ export default function Header() {
         </nav>
 
         <div className="ml-auto flex shrink-0 items-center gap-4">
-          <LocaleSwitcher />
           <Button as="a" href="/analyze" size="sm" className="hidden sm:inline-flex">
             {t("action.analyze")}
           </Button>
