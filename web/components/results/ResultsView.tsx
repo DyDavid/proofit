@@ -1,4 +1,4 @@
-import { useTranslations } from "next-intl";
+import { useTranslations } from "@/lib/copy";
 
 import { CountryFormat } from "@/components/results/CountryFormat";
 import { HiddenStrengths } from "@/components/results/HiddenStrengths";
@@ -46,10 +46,9 @@ export interface ResultsViewProps {
 
 /**
  * The full Results screen body, as a pure function of one `Match` — shared by
- * the static "try a sample" path (`app/[locale]/results/page.tsx`, no `?id=`)
- * and the real-analysis path (`ResultsById.tsx`, fetched by `?id=`). Uses
- * `next-intl`'s isomorphic `useTranslations` (not the `/server` variant) so
- * the exact same component works from a Server or a Client Component.
+ * the static "try a sample" path (`app/results/page.tsx`, no `?id=`) and the
+ * real-analysis path (`ResultsById.tsx`, fetched by `?id=`). `useTranslations`
+ * from `@/lib/copy` works identically from a Server or a Client Component.
  */
 export function ResultsView({ match, baseline, analysisId }: ResultsViewProps) {
   const t = useTranslations("results");

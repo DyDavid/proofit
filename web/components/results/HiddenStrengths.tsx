@@ -1,6 +1,6 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "@/lib/copy";
 import * as React from "react";
 
 import { Button } from "@/components/ui/Button";

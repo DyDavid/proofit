@@ -1,11 +1,11 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "@/lib/copy";
 import * as React from "react";
 
 import { Button } from "@/components/ui/Button";
 import { ResultsView } from "@/components/results/ResultsView";
-import { useRouter } from "@/i18n/routing";
+import { useRouter } from "next/navigation";
 import { ApiError, getAnalysis } from "@/lib/api";
 import type { BaselineMatch, Match } from "@/lib/types";
 
@@ -16,7 +16,7 @@ export interface ResultsByIdProps {
 /**
  * Error codes a `status: "failed"` analysis can carry (docs/errors.md §2).
  * An unrecognised code falls back to `errors.INTERNAL` rather than being
- * handed to next-intl unchecked — same allowlist-then-fallback rule as
+ * looked up unchecked — same allowlist-then-fallback rule as
  * `ProgressStepper`, which polls the same field.
  */
 const FAILED_CODES = [

@@ -1,12 +1,12 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "@/lib/copy";
 import * as React from "react";
 
 import { REALISM_TONE } from "@/components/results/ResultsView";
 import { Card } from "@/components/ui/Card";
 import { Stamp } from "@/components/ui/Stamp";
-import { Link } from "@/i18n/routing";
+import Link from "next/link";
 import { getAnalysisHistory, type AnalysisSummary } from "@/lib/api";
 import { loadRememberedResume } from "@/lib/localResume";
 

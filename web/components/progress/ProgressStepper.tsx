@@ -1,10 +1,10 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "@/lib/copy";
 import * as React from "react";
 
 import { Button } from "@/components/ui/Button";
-import { useRouter } from "@/i18n/routing";
+import { useRouter } from "next/navigation";
 import { getAnalysis, retryAnalysis } from "@/lib/api";
 import { cn } from "@/lib/utils";
 

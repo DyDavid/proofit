@@ -1,6 +1,6 @@
 import * as React from "react";
 
-import { Link } from "@/i18n/routing";
+import Link from "next/link";
 import { cn } from "@/lib/utils";
 
 export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
@@ -93,7 +93,7 @@ function Spinner() {
 
 /**
  * The one button in the app. Carries no text of its own — every label is a
- * child supplied by the caller through next-intl `t()`.
+ * child supplied by the caller through `t()`.
  */
 export const Button = React.forwardRef<
   HTMLButtonElement | HTMLAnchorElement,

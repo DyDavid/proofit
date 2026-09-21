@@ -1,13 +1,13 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "@/lib/copy";
 import * as React from "react";
 
 import { hasJobPost, isBlockedJobUrl, JobPostPanel, type JobPostValue } from "@/components/analyze/JobPostPanel";
 import { ResumeDropzone } from "@/components/analyze/ResumeDropzone";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { useRouter } from "@/i18n/routing";
+import { useRouter } from "next/navigation";
 import { ApiError, createAnalysis, submitJob, uploadResume } from "@/lib/api";
 import {
   clearRememberedResume,

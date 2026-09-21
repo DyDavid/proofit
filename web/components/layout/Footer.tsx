@@ -1,5 +1,5 @@
-import { useTranslations } from "next-intl";
-import { Link } from "@/i18n/routing";
+import { useTranslations } from "@/lib/copy";
+import Link from "next/link";
 
 /**
  * Site footer: wordmark, tagline, and the link to the About page where the
