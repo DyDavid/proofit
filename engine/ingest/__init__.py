@@ -59,10 +59,30 @@ def fetch_jd(url: str) -> str:
         ``data/fixtures/`` holds golden raw text for this function (§2 contract 3),
         alongside the 30 hand-collected posts in ``data/jds/``.
     """
-    raise NotImplementedError(
-        "engine.ingest.fetch_jd is Person A's to implement (PERSON_B_PLAN_v2.md §2, "
-        "contract 2); the Job schema its output feeds locks at Checkpoint 1, end of "
-        "Week 3. Until Checkpoint 2 wires the live engine, run the API with "
-        "ENGINE_MODE=mock, which serves golden job text from data/fixtures/ instead "
-        "of touching the network."
-    )
+    import os
+
+    from .cache import get_cached_text, save_cached_text
+    from .scraper import scrape_job_url
+
+    # 1. Check cache first
+    cached = get_cached_text(url)
+    if cached:
+        return cached
+
+    # 2. Mock mode check
+    if os.getenv("ENGINE_MODE") == "mock":
+        golden_text = (
+            "Junior Web Developer at Angkor Digital Co., Ltd.\n"
+            "Requirements:\n"
+            "1. Bachelor's degree in Computer Science or IT.\n"
+            "2. Solid understanding of HTML5, CSS3, and ES6 JavaScript.\n"
+            "3. At least 1 year building websites (internships accepted).\n"
+            "4. Fluent in English and Khmer."
+        )
+        save_cached_text(url, golden_text)
+        return golden_text
+
+    # 3. Live web scraping
+    scraped_text = scrape_job_url(url)
+    save_cached_text(url, scraped_text)
+    return scraped_text

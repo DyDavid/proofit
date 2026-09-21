@@ -1,6 +1,7 @@
 import { getTranslations } from "next-intl/server";
 
 import { AnalyzeForm } from "@/components/analyze/AnalyzeForm";
+import { AnalysisHistoryList } from "@/components/analyze/AnalysisHistoryList";
 
 export default async function AnalyzePage() {
   const t = await getTranslations("analyze");
@@ -42,6 +43,7 @@ export default async function AnalyzePage() {
       </div>
 
       <AnalyzeForm />
+      <AnalysisHistoryList />
     </div>
   );
 }

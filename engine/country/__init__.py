@@ -31,8 +31,6 @@ Person A / Person B boundary are listed in engine/README.md, and none of them is
 here.
 """
 
-from __future__ import annotations
+from engine.country.loader import CountryRules, get_country_rules, load_all_country_rules
 
-#: Nothing public yet. Populated in Phase 4 (F6). Deliberately empty rather than
-#: stubbed: no name here should promise behaviour that does not exist.
-__all__: list[str] = []
+__all__ = ["CountryRules", "get_country_rules", "load_all_country_rules"]

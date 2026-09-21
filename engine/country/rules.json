@@ -1,0 +1,58 @@
+{
+  "KH": {
+    "country_code": "KH",
+    "name": "Cambodia",
+    "max_pages": 2,
+    "photo_recommended": true,
+    "include_personal_details": true,
+    "date_format": "DD/MM/YYYY or Month YYYY",
+    "section_order": ["summary", "education", "experience", "projects", "skills", "languages"],
+    "tone_notes": "Formal, respectful, highlighting institution names, degrees, and language proficiencies.",
+    "visa_terms": ["citizen", "work permit", "khmer speaker", "local hire"]
+  },
+  "SG": {
+    "country_code": "SG",
+    "name": "Singapore",
+    "max_pages": 2,
+    "photo_recommended": false,
+    "include_personal_details": false,
+    "date_format": "MMM YYYY (e.g., Jan 2023)",
+    "section_order": ["summary", "experience", "skills", "projects", "education"],
+    "tone_notes": "Direct, metrics-focused, concise, emphasizing specific tech stack and project outcomes.",
+    "visa_terms": ["employment pass", "ep", "s pass", "visa sponsorship", "relocation support", "local candidates only"]
+  },
+  "JP": {
+    "country_code": "JP",
+    "name": "Japan",
+    "max_pages": 2,
+    "photo_recommended": true,
+    "include_personal_details": true,
+    "date_format": "YYYY/MM",
+    "section_order": ["education", "experience", "skills", "projects", "languages"],
+    "tone_notes": "Highly structured, detailed institutional and technical context, JLPT level where applicable.",
+    "visa_terms": ["visa sponsorship available", "work visa", "engineer visa", "japanese requirement", "jlpt"]
+  },
+  "US": {
+    "country_code": "US",
+    "name": "United States (Remote)",
+    "max_pages": 1,
+    "photo_recommended": false,
+    "include_personal_details": false,
+    "date_format": "Month YYYY",
+    "section_order": ["experience", "projects", "skills", "education"],
+    "tone_notes": "Impact-driven, active action verbs, quantifiable achievements, strict 1-page format for entry level.",
+    "visa_terms": ["u.s. citizen", "green card", "h1b", "authorization to work in the u.s.", "w2", "1099", "remote us"]
+  },
+  "AU": {
+    "country_code": "AU",
+    "name": "Australia",
+    "max_pages": 2,
+    "photo_recommended": false,
+    "include_personal_details": false,
+    "date_format": "MMM YYYY (e.g., Jan 2023)",
+    "section_order": ["summary", "experience", "skills", "education", "projects"],
+    "tone_notes": "Direct, achievement-oriented, highlighting clear outcomes and key responsibilities.",
+    "visa_terms": ["working holiday visa", "subclass 482", "tss visa", "visa sponsorship", "permanent residency", "pr", "full working rights"]
+  }
+}
+

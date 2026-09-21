@@ -1,0 +1,16 @@
+{
+  "forbidden_words": [
+    "employed",
+    "employment",
+    "worked at",
+    "working at",
+    "years of experience",
+    "professional experience",
+    "lead engineer at",
+    "engineer at",
+    "developer at",
+    "manager at",
+    "full-time employee",
+    "staff engineer"
+  ]
+}

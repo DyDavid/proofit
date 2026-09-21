@@ -33,6 +33,17 @@ here — F5 output reaches the UI as ``Match.hidden_strengths``.
 
 from __future__ import annotations
 
-#: Nothing public yet. Populated in Phase 3 (F5). Deliberately empty rather than
-#: stubbed: no name here should promise behaviour that does not exist.
-__all__: list[str] = []
+from engine.rewrite.detector import detect_hidden_strengths
+from engine.rewrite.generator import generate_rewrite
+from engine.rewrite.rejection_log import clear_rejection_logs, get_rejection_logs, log_rejection
+from engine.rewrite.validator import ValidationResult, validate_rewrite
+
+__all__ = [
+    "detect_hidden_strengths",
+    "generate_rewrite",
+    "validate_rewrite",
+    "ValidationResult",
+    "log_rejection",
+    "get_rejection_logs",
+    "clear_rejection_logs",
+]

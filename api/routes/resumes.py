@@ -45,5 +45,7 @@ async def upload_resume(file: UploadFile = File(...)) -> dict:  # noqa: B008 (Fa
         filename=file.filename or "resume",
         content_type=file.content_type,
         size=len(body),
+        data=body,
     )
     return {"resume_id": record.id}
+
