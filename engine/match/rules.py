@@ -116,6 +116,121 @@ def calculate_coverage(
     return coverage_score, coverage_required_only
 
 
+def _classify_action_category(req: Requirement) -> str:
+    """Classify a requirement into one of the 4 actionable recommendation categories:
+    1. 'experience': Experience & Tenures
+    2. 'tools': Tools, Software & Certifications
+    3. 'soft_skills': Soft Skills & Behavioral Traits
+    4. 'domain': Domain Knowledge & Preferences
+    """
+    cat = req.category
+    text = req.text.lower()
+    skill = (req.normalized_skill or "").lower()
+    combined = f"{text} {skill}"
+
+    # 3. Soft skills check (check early to avoid false positive on "experience with teamwork" etc.)
+    soft_indicators = [
+        "detail", "attention to detail", "desire to learn", "accuracy", "commitment",
+        "communication", "interpersonal", "teamwork", "collaboration", "problem solving",
+        "problem-solving", "critical thinking", "leadership", "work ethic", "adaptability",
+        "time management", "fast learner", "motivated", "enthusiastic", "integrity",
+        "organized", "organisational", "passion", "analytical thinking", "proactive",
+        "negotiation", "presentation", "conflict resolution", "multitask", "self-starter",
+        "punctual", "punctuality", "positive attitude", "willingness to learn",
+    ]
+    if cat == "soft_skill" or any(s in combined for s in soft_indicators):
+        return "soft_skills"
+
+    # 1. Experience & Tenures check
+    exp_indicators = [
+        "year of experience", "years of experience", "years experience", "year experience",
+        "yr of exp", "yrs of exp", "years' experience", "internship", "intern",
+        "past role", "past roles", "tenure", "work history", "entry-level", "track record",
+        "previous experience", "working experience", "hands-on experience", "proven experience",
+        "0-1 year", "1-2 year", "2-3 year", "3-5 year", "5+ year", "prior role", "prior work",
+    ]
+    if cat == "experience" or any(e in combined for e in exp_indicators):
+        return "experience"
+
+    # 2. Tools, Software & Certifications check
+    tool_indicators = [
+        "quickbooks", "excel", "ms excel", "sap", "xero", "word", "ms word", "office",
+        "ms office", "powerpoint", "suite", "software", "system", "systems", "tool", "tools",
+        "app", "certified", "certification", "cpa", "acca", "cfa", "erp", "crm", "sql",
+        "python", "java", "javascript", "typescript", "react", "vue", "angular", "node",
+        "git", "docker", "figma", "jira", "computerized", "computerised", "tableau",
+        "power bi", "pos", "photoshop", "illustrator", "sage", "peachtree", "odoo",
+    ]
+    if cat == "certification" or any(t in combined for t in tool_indicators):
+        return "tools"
+
+    # 4. Domain Knowledge & Preferences (default for education, tax, standards, language, other)
+    return "domain"
+
+
+def _generate_action_recommendation(
+    req: Requirement,
+    verdict: Verdict,
+    potential_gain: float,
+) -> str:
+    category_type = _classify_action_category(req)
+    skill_label = req.normalized_skill or req.text
+    if len(skill_label) > 60:
+        skill_label = skill_label[:57].rstrip() + "..."
+
+    combined_text = f"{req.text} {req.normalized_skill or ''}".lower()
+
+    if category_type == "experience":
+        # Strategy 1: Experience & Tenures
+        # Never recommend building a portfolio or project.
+        if "intern" in combined_text:
+            rec = "Add previous internship or work entries covering relevant roles, or highlight student consulting and volunteer experience."
+        else:
+            rec = f"Add previous internship or work entries covering '{skill_label}', or highlight relevant student consulting / volunteer roles."
+
+    elif category_type == "tools":
+        # Strategy 2: Tools, Software & Certifications
+        # Do not recommend vague capstone projects.
+        # Suggest listing practical usage: specific modules used (e.g. AP/AR, bank reconciliation), certifications, or coursework labs.
+        if any(w in combined_text for w in ["quickbooks", "accounting system", "ledger", "bookkeeping"]):
+            rec = f"List specific {skill_label} tasks performed (e.g., ledger entries, invoice reconciliation) or add relevant software certification."
+        elif any(w in combined_text for w in ["excel", "spreadsheet", "office"]):
+            rec = f"List specific {skill_label} tasks performed (e.g., pivot tables, VLOOKUP/XLOOKUP, formulas) or add relevant software certification."
+        elif "sap" in combined_text or "erp" in combined_text:
+            rec = f"List specific {skill_label} modules used (e.g., AP/AR, general ledger) or add relevant system certification."
+        elif "certif" in combined_text or req.category == "certification":
+            rec = f"List completed {skill_label} credentials, exam progress, or relevant specialized coursework labs."
+        else:
+            rec = f"List specific practical tasks performed with '{skill_label}' (e.g., core workflows, module usage) or add relevant software certification."
+
+    elif category_type == "soft_skills":
+        # Strategy 3: Soft Skills & Behavioral Traits
+        # Never suggest 'technical outcomes' for non-technical soft skills.
+        # Suggest grounding the trait in verifiable resume metrics: audit error reduction rates, quality control steps, or self-directed continuous learning/courses.
+        if any(w in combined_text for w in ["detail", "accuracy", "error", "commit"]):
+            rec = "Quantify this trait in your existing bullets (e.g., audited records with 0% error rate, completed quality control steps)."
+        elif any(w in combined_text for w in ["learn", "desire", "growth", "curiosity"]):
+            rec = "Quantify this trait in your existing bullets (e.g., completed self-paced learning modules, self-directed tax training)."
+        else:
+            rec = "Quantify this trait in your existing bullets (e.g., audit error reduction rates, quality control steps, or self-directed coursework)."
+
+    else:
+        # Strategy 4: Domain Knowledge & Preferences
+        # Suggest citing specific local tax codes, academic coursework modules, or specialized case studies analyzed.
+        if any(w in combined_text for w in ["tax", "taxation", "vat", "withholding"]):
+            rec = "Mention specific coursework or self-study in local tax laws (e.g., monthly VAT returns, withholding tax basics)."
+        elif any(w in combined_text for w in ["standard", "gaap", "ifrs", "audit", "compliance", "regulation"]):
+            rec = f"Cite specific coursework modules, accounting standards (e.g., IFRS/GAAP), or compliance case studies analyzed for '{skill_label}'."
+        elif req.category == "education" or any(w in combined_text for w in ["degree", "major", "bachelor", "diploma"]):
+            rec = f"Highlight relevant academic degree coursework, academic honors, or specialized modules in '{skill_label}'."
+        elif req.category == "language" or any(w in combined_text for w in ["english", "khmer", "language"]):
+            rec = f"List language proficiency levels, standardized scores (e.g., IELTS, TOEFL), or bilingual workplace communication experience for '{skill_label}'."
+        else:
+            rec = f"Mention specific coursework, academic modules, or specialized case studies analyzed for '{skill_label}'."
+
+    return f"+{potential_gain}% Match Boost: {rec} ({req.priority.capitalize()})"
+
+
 def generate_quantified_priority_actions(
     results: list[MatchResult],
     job: Job,
@@ -140,20 +255,7 @@ def generate_quantified_priority_actions(
         # Potential gain if upgraded to proven (1.0)
         potential_gain = round(((1.0 - current_score) * weight / total_weight) * 100.0, 1)
 
-        skill_label = req.normalized_skill or req.text
-        if len(skill_label) > 60:
-            skill_label = skill_label[:57] + "..."
-
-        if res.verdict == "missing":
-            if req.category == "experience":
-                action_text = f"+{potential_gain}% Match Boost: Build a project or portfolio piece demonstrating '{skill_label}' ({req.priority.capitalize()})"
-            elif req.category == "education":
-                action_text = f"+{potential_gain}% Match Boost: Highlight relevant degree or specialized coursework in '{skill_label}' ({req.priority.capitalize()})"
-            else:
-                action_text = f"+{potential_gain}% Match Boost: Add coursework or capstone project evidence for '{skill_label}' ({req.priority.capitalize()})"
-        else:  # partial
-            action_text = f"+{potential_gain}% Match Boost: Strengthen '{skill_label}' bullet points with specific technical outcomes ({req.priority.capitalize()})"
-
+        action_text = _generate_action_recommendation(req, res.verdict, potential_gain)
         action_candidates.append((potential_gain, action_text))
 
     # Sort descending by % boost
