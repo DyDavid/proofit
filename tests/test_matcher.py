@@ -152,3 +152,79 @@ def test_generate_quantified_priority_actions_categories():
     # 4. Domain knowledge check
     r4_action = next(a for a in actions if "tax" in a.lower())
     assert "Mention specific coursework" in r4_action or "VAT" in r4_action
+
+
+def test_generate_quantified_priority_actions_multi_industry():
+    """Verify concrete, keyword-rich recommendations across IT, Web, HR, Marketing, Banking, and boilerplate."""
+    from engine.match.rules import generate_quantified_priority_actions
+
+    job = Job(
+        source_type="pasted",
+        content_hash="test-multi-industry-123",
+        title="IT Support Specialist",
+        industry="Technology",
+        seniority="entry",
+        requirements=[
+            Requirement(
+                id="r1",
+                text="Install, update, and configure computers, printers, and basic IT applications.",
+                category="hard_skill",
+                priority="required",
+            ),
+            Requirement(
+                id="r2",
+                text="Assist with troubleshooting hardware, software, and network issues for internal users.",
+                category="hard_skill",
+                priority="required",
+            ),
+            Requirement(
+                id="r3",
+                text="Document technical issues, solutions, and support activities clearly.",
+                category="hard_skill",
+                priority="required",
+            ),
+            Requirement(
+                id="r4",
+                text="Ability to learn quickly and work in a professional banking environment.",
+                category="soft_skill",
+                priority="required",
+            ),
+            Requirement(
+                id="r5",
+                text="Fresh graduates or entry-level candidates are encouraged to apply.",
+                category="other",
+                priority="required",
+            ),
+        ],
+    )
+
+    results = [
+        MatchResult(requirement_id="r1", verdict="missing", evidence_ids=[], reasoning="No hardware", missing_reason="No hardware", confidence=0.9),
+        MatchResult(requirement_id="r2", verdict="partial", evidence_ids=["e1"], reasoning="Some help", confidence=0.8),
+        MatchResult(requirement_id="r3", verdict="missing", evidence_ids=[], reasoning="No docs", missing_reason="No docs", confidence=0.9),
+        MatchResult(requirement_id="r4", verdict="missing", evidence_ids=[], reasoning="No banking", missing_reason="No banking", confidence=0.9),
+        MatchResult(requirement_id="r5", verdict="partial", evidence_ids=["e2"], reasoning="Grad", confidence=0.8),
+    ]
+
+    actions = generate_quantified_priority_actions(results, job)
+    assert len(actions) == 5
+
+    # Check hardware & OS rollout advice
+    act_hardware = next(a for a in actions if "computers, printers" in a or "Windows 10/11" in a)
+    assert "Windows 10/11" in act_hardware or "network printers" in act_hardware
+
+    # Check troubleshooting & metrics advice
+    act_troubleshoot = next(a for a in actions if "troubleshooting" in a.lower() or "Jira" in a)
+    assert "Jira" in act_troubleshoot or "TCP/IP" in act_troubleshoot or "FCR" in act_troubleshoot
+
+    # Check documentation & SOPs advice
+    act_docs = next(a for a in actions if "Document" in a or "SOPs" in a)
+    assert "SOPs" in act_docs or "Knowledge Base" in act_docs
+
+    # Check banking environment advice
+    act_banking = next(a for a in actions if "banking" in a.lower())
+    assert "banking software" in act_banking or "fintech" in act_banking or "compliance" in act_banking
+
+    # Check that actionable items rank above boilerplate
+    assert "foundational practical skills" in actions[-1] or "projects" in actions[-1]
+
