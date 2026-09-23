@@ -49,7 +49,7 @@ docker compose -f deploy/docker-compose.yml up --build
 
 # In a second terminal — the two acceptance checks from §5 Phase 0 task 3:
 curl -s http://localhost:8000/api/health      # → {"status":"ok","engine_mode":"mock",...}
-open http://localhost:3000                    # → bilingual landing shell, locale switcher
+open http://localhost:3000                    # → landing shell
 
 # Follow logs / stop / wipe.
 docker compose -f deploy/docker-compose.yml logs -f api
@@ -261,9 +261,8 @@ Then, in the browser:
 4. Open the Supabase dashboard and confirm the project shows **Active**, not
    Paused. If paused, click Restore and wait for it to come back — this can take
    a couple of minutes, which is exactly why this happens 30 minutes early.
-5. Switch the locale to **km** and back. Check the Khmer glyphs are not clipped.
-6. **Leave the results tab open.** A warm tab is your fastest fallback.
-7. Do not push to `main` after this point. Auto-deploy would rebuild the service
+5. **Leave the results tab open.** A warm tab is your fastest fallback.
+6. Do not push to `main` after this point. Auto-deploy would rebuild the service
    and hand you a cold start on stage.
 
 ---
@@ -321,7 +320,7 @@ build context set to `./api` instead of `.`.
 | Job | What it guards |
 |---|---|
 | `python` | `ruff check` + `pytest` — engine and API correctness |
-| `web` | `tsc --noEmit`, `next build`, and `scripts/i18n-check.mjs` (fails on any key present in `en.json` but missing from `km.json`, or vice versa) |
+| `web` | `tsc --noEmit` and `next build` |
 | `types` | regenerates `web/lib/types.ts` via `scripts/gen-types.sh` and fails if it differs from what is committed |
 
 The `types` job is the schema-drift guard from `PERSON_B_PLAN_v2.md` §5 Phase 1

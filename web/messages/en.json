@@ -2,13 +2,6 @@
   "common": {
     "appName": "Proofit",
     "tagline": "Prove your fit",
-    "locale": {
-      "en": "EN",
-      "km": "ខ្មែរ"
-    },
-    "localeSwitcher": {
-      "label": "Language"
-    },
     "nav": {
       "home": "Home",
       "analyze": "Analyze",

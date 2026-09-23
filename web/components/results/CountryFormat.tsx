@@ -36,6 +36,23 @@ const OTHER_KEY = "other";
  */
 const KNOWN_ERROR_CODES = ["INTERNAL"] as const;
 
+/**
+ * `results.country.destinations` keys that have a translated label in
+ * `en.json`. The `<option>` list below is seeded from a live
+ * `GET /api/countries` response, so `key` is not guaranteed to be one of
+ * these — a country added to `engine/country/rules.json` without a matching
+ * `en.json` entry would otherwise make `t()` throw at render time, with no
+ * error boundary in this app to catch it. Same allowlist-then-fallback
+ * convention as `isLocalizedCode` (`AnalyzeForm.tsx`) and `FAILED_CODES`
+ * (`ResultsById.tsx`): an unrecognised code falls back to the raw value
+ * instead of a blind translation lookup.
+ */
+const DESTINATION_KEYS = ["KH", "SG", "JP", "AU", "REMOTE", OTHER_KEY] as const;
+
+function isDestinationKey(key: string): key is (typeof DESTINATION_KEYS)[number] {
+  return (DESTINATION_KEYS as readonly string[]).includes(key);
+}
+
 function BulletList({ items }: { items: readonly string[] }) {
   return (
     <ul className="grid gap-1.5">
@@ -316,7 +333,7 @@ export function CountryFormat({ match }: CountryFormatProps) {
             >
               {[...countries.map((c) => c.code), OTHER_KEY].map((key) => (
                 <option key={key} value={key}>
-                  {t(`destinations.${key}`)}
+                  {isDestinationKey(key) ? t(`destinations.${key}`) : key}
                 </option>
               ))}
             </select>

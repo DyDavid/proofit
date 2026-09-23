@@ -20,7 +20,7 @@ AUPP Final Year Project, 2026.
 | `engine/` | The analysis engine: normalize → match → rewrite, importable, no web code |
 | `data/` | Fixtures, collected job descriptions, anonymized resumes |
 | `deploy/` | Docker Compose, Render blueprint, the deployment runbook |
-| `scripts/` | Schema/type generation, i18n parity check |
+| `scripts/` | Schema/type generation |
 | `tests/`, `eval/` | Automated tests and the human evaluation protocol |
 
 See `PROJECT_SPEC.md` for the product spec, `PERSON_B_PLAN_v2.md` for the build plan

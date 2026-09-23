@@ -1,10 +1,8 @@
 # `scripts/`
 
-Build-time tooling for the two contracts that break silently if nobody checks them:
-
-1. the **schema contract** between Person A's Python engine and Person B's TypeScript UI
-   (PERSON_B_PLAN_v2.md §2, point 1);
-2. the **i18n contract** between `en` and `km` (PERSON_B_PLAN_v2.md §7).
+Build-time tooling for the schema contract between Person A's Python engine and
+Person B's TypeScript UI (PERSON_B_PLAN_v2.md §2, point 1) — the contract that
+breaks silently if nobody checks it.
 
 Nothing here is imported at runtime. These scripts run on a developer's machine
 and in CI, and they produce or verify files that the app then consumes.
@@ -110,46 +108,6 @@ cases fails the build.
 
 ---
 
-## `i18n-check.mjs`
-
-Compares `web/messages/en.json` and `web/messages/km.json` after flattening both to
-dotted key paths (`common.appName`, `results.verdict.proven`, …).
-
-```bash
-node scripts/i18n-check.mjs
-```
-
-Output is one finding per line behind a fixed, greppable token:
-
-| Token | Severity | Meaning |
-|---|---|---|
-| `NOFILE` | error | a message file does not exist |
-| `BADJSON` | error | file is empty, not an object, or not valid JSON |
-| `MISSING` | error | key present in one locale, absent from the other |
-| `EMPTY` | error | value is an empty or whitespace-only string |
-| `WARN untranslated` | warning | `km` value is byte-identical to `en` |
-
-Ends with a summary line and a literal `OK` or `FAIL`.
-
-**Exit codes:** `1` if any error was reported, `0` otherwise. Warnings never fail
-the build.
-
-Why the severities are split that way:
-
-- A **missing** key is not cosmetic. `next-intl` throws at render time, so a Khmer
-  user hits an error boundary where a label should be.
-- An **empty** value is worse than a missing one — it renders as a blank button and
-  nothing fails loudly.
-- **Untranslated** is only a warning because plenty of values are legitimately
-  identical across locales: the brand name `Proofit`, and any value that is just a
-  number (§7.5 keeps Arabic numerals in both locales, so numeric-looking values are
-  not flagged at all).
-
-Missing or malformed files are reported as a clear one-line finding and a `FAIL`,
-never as a Node stack trace, so the CI log stays readable.
-
----
-
 ## When CI runs these
 
 Add to `.github/workflows/ci.yml`. Both jobs are cheap and should run on every push
@@ -175,18 +133,6 @@ never to edit `types.ts`.
 
 This is what catches Person A's CP1 schema replacement immediately instead of at
 demo time.
-
-### Job: locales are in parity
-
-PERSON_B_PLAN_v2.md §5 Phase 1.6 and §7 rule 1.
-
-```yaml
-- name: i18n parity
-  run: node scripts/i18n-check.mjs
-```
-
-Runs on every push and pull request that touches `web/`. It has no dependencies
-beyond Node, so it needs no `npm ci` step.
 
 ---
 
