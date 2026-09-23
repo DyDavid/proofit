@@ -1,9 +1,7 @@
 # Proofit — Brand
 
 > Phase 0, task 1 (`PERSON_B_PLAN_v2.md` §5). This file is the single source of
-> truth for the product name, the colour tokens, and the Khmer verdict vocabulary.
-> Plan §7.3 requires the Khmer verdict words below to be used **identically** in the
-> UI, in any export, and on the defense slides. Change them here first, everywhere else second.
+> truth for the product name and the colour tokens.
 
 ---
 
@@ -16,12 +14,9 @@ never "Proof It", never "PROOFIT" outside of a wordmark lockup.
 
 ### Tagline
 
-| Locale | Tagline |
-|---|---|
-| English (`en`) | **Prove your fit** |
-| Khmer (`km`) | **បញ្ជាក់ភាពសក្តិសមរបស់អ្នក** |
+**Prove your fit**
 
-The English tagline is three words and stays three words. Do not extend it to
+The tagline is three words and stays three words. Do not extend it to
 "Prove your fit, faster" or any variant — the whole point is that the claim is small
 and literal.
 
@@ -83,7 +78,6 @@ explicitly warns that it "may exist" as an existing trademark.
 | 6 | Instagram `@proofit` | ☐ NOT CHECKED | Person B | |
 | 7 | Facebook page name | ☐ NOT CHECKED | Person B | The dominant social platform for the Cambodian audience. |
 | 8 | GitHub org / repo name | ☐ NOT CHECKED | Person B | Repo is currently a local git repo only. |
-| 9 | Khmer tagline reviewed by a Khmer first-language speaker | ☐ NOT CHECKED | Person B | The Khmer strings in this file were not written by a Khmer first-language speaker. Plan §1 and §5 Phase 5.1 both require a native review. Treat every Khmer string as provisional until that session happens. |
 
 **Consequence if a check fails:** a rename is a find-and-replace across `web/messages/*.json`,
 this file, `README.md`, and the slides. It is cheap now and expensive after Week 12's feature
@@ -207,73 +201,18 @@ The paper-and-ink system needs the editorial contrast a single sans can't give i
 | Body / UI | Kantumruy Pro | `--font-sans` | Everything else: body copy, buttons, nav, form controls |
 | Data / label | IBM Plex Mono | `--font-mono` | Eyebrows, timestamps, verdict pills, stamps, confidence figures |
 
-All three load via `next/font/google` in the locale layout. **Fraunces and IBM Plex Mono have
-no Khmer glyphs.** Kantumruy Pro is the only one of the three that covers both scripts, which is
-exactly why it — not Fraunces — still carries every word of Khmer UI text. Concretely: the
-`font-serif` and `font-mono` Tailwind utilities silently fall back to Kantumruy Pro SemiBold
-whenever `<html lang="km">`, via a single rule in `globals.css` (`html[lang="km"] .font-serif,
-html[lang="km"] .font-mono { font-family: var(--font-sans); font-weight: 600; letter-spacing:
-0; }`). A component author never writes a Khmer-specific class — using `font-serif` or
-`font-mono` is enough, and the fallback is automatic and centrally maintained, the same
-"inherit by default" pattern the Khmer line-height rule below already uses.
+All three load via `next/font/google` in the root layout.
 
-### The Khmer rules — both are non-negotiable
+### Body copy
 
-1. **Body line-height ≥ 1.7.** Khmer script stacks subscript consonants (ជើង) below the
-   baseline and vowel signs above it. At the 1.4–1.5 line-height that looks correct for Latin
-   text, those glyphs are clipped by the line box or collide with the line beneath. Body copy
-   uses `leading-[1.75]`. This is a legibility requirement, not a preference — plan §7.4.
-2. **Never `text-xs` for Khmer.** At 12px, Khmer diacritics become indistinguishable smudges.
-   The floor for Khmer text is `text-sm` (14px), and `text-base` (16px) for anything a user
-   has to read rather than glance at. If a design needs `text-xs` to fit, the design is wrong.
+**Line-height stays relaxed (`leading-[1.75]`) and never drops to `text-xs`.** This is a
+general legibility choice for the editorial system, not tied to any particular script.
 
-Both rules are enforced through a base class applied to Khmer body copy rather than being
-re-applied per component, so a new component inherits them by default.
+### Generated content
 
-### Numbers
-
-**Numbers stay Arabic numerals (0–9) in both locales.** Not Khmer numerals (០–៩). Khmer
-readers read Arabic numerals fluently, and Khmer numerals measurably hurt scanability for
-figures like `72%` or `4 months`. Plan §7.5. This applies to coverage percentages, durations,
-team sizes, dates, and counts.
-
-### Generated content is not translated
-
-Requirement text, evidence lines, and rewrites are displayed **as-is in English regardless of
-the UI locale**, because they are quoted verbatim from an English JD or an English resume.
-Translating a quotation would break rule 3's traceability — the highlighted source line must
-match the document the user uploaded, character for character. Each such block carries a
-subtle "from your resume" / "from the job post" label so the user understands why it did not
-switch languages. Plan §7.6.
-
----
-
-## 5. Khmer verdict vocabulary — FIXED
-
-Plan §7.3: these words are fixed here and used identically in the UI, in exports, and on the
-slides. Do not let a translation tool, a teammate, or a later refactor introduce a synonym.
-Inconsistent verdict vocabulary is the fastest way to make a bilingual UI read as
-machine-translated.
-
-| Verdict | Schema value | English | Khmer | Literal sense |
-|---|---|---|---|---|
-| Proven | `proven` | Proven | **បានបញ្ជាក់** | "has been confirmed" — the evidence is explicit and cited |
-| Partial | `partial` | Partial | **បញ្ជាក់មួយផ្នែក** | "partly confirmed" — adjacent or transferable evidence exists |
-| Missing | `missing` | Missing | **គ្មានភស្តុតាង** | "no evidence" — nothing in the resume supports it |
-
-The schema values in column 2 are the `Verdict` literals in `engine/normalize/schema.py`. They
-are lowercase English identifiers and never change; only the display strings are localized,
-via the i18n keys `results.verdict.proven` / `.partial` / `.missing`.
-
-Note that the Khmer for `missing` is "គ្មានភស្តុតាង" — *no evidence* — and not a word meaning
-"failed" or "unqualified". That is deliberate and it matters: a missing verdict is a statement
-about the resume, not about the person. The English word carries that neutrality already; the
-Khmer had to be chosen to carry it too.
-
-**Pending native review.** Per §2 check 9, these three strings have not been validated by a
-Khmer first-language speaker. The Phase 5.1 Khmer QA session (two Khmer-first classmates, not
-on the team, 45 minutes) is where they get confirmed or corrected. If they change, they change
-here first and then in `web/messages/km.json`.
+Requirement text, evidence lines, and rewrites are displayed **exactly as they appear in the
+source document** — quoted verbatim from the JD or resume. Each such block carries a subtle
+"from your resume" / "from the job post" label so the user understands it's a direct quote.
 
 ---
 
@@ -293,8 +232,7 @@ credibility rests on not overclaiming, so the copy cannot overclaim either.
 - **Treat non-work evidence as real evidence, without inflating it.** A project is a project.
   It is worth something. It is not a job.
 - **Address the user directly**, second person. "You can prove 7 of 11 requirements."
-- **Use plain words in both languages.** If the Khmer needs a loan word to stay clear, use the
-  loan word.
+- **Use plain words.** If a technical term needs a loan word to stay clear, use the loan word.
 
 ### Never
 
