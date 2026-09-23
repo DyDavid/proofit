@@ -76,8 +76,7 @@ class _ForbiddenBase(BaseModel):
 
 class ForbiddenPhrase(_ForbiddenBase):
     phrase: str = Field(..., min_length=1)
-    reason_en: str = Field(..., min_length=1)
-    reason_km: str = Field(..., min_length=1)
+    reason: str = Field(..., min_length=1)
 
 
 class ForbiddenConfig(_ForbiddenBase):
@@ -145,7 +144,7 @@ def precheck_scope_inflation(
 
     haystack = rewrite.suggested_phrasing.lower()
     violations = [
-        Violation(claim=entry.phrase, reason=entry.reason_en)
+        Violation(claim=entry.phrase, reason=entry.reason)
         for entry in config.forbidden_phrases
         if re.search(rf"\b{re.escape(entry.phrase.lower())}", haystack)
     ]
