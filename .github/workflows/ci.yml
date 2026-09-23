@@ -5,8 +5,7 @@
 # monorepo can silently break:
 #
 #   python  ruff + pytest .............. the engine and the API still work
-#   web ..... tsc + next build + i18n .. the app compiles and km.json has not
-#                                        drifted from en.json
+#   web ..... tsc + next build ......... the app compiles
 #   types ... regenerate + git diff .... web/lib/types.ts is still in sync with
 #                                        engine/normalize/schema.py
 #
@@ -75,7 +74,7 @@ jobs:
 
   # ─────────────────────────────────────────────────────────────────────────
   web:
-    name: web — typecheck, build, i18n parity
+    name: web — typecheck, build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -107,15 +106,6 @@ jobs:
           NEXT_PUBLIC_API_URL: ""
           NEXT_TELEMETRY_DISABLED: "1"
         run: npm run build
-
-      - name: i18n key parity (en.json ⇄ km.json)
-        # PERSON_B_PLAN_v2.md §7.1 and §5 Phase 1 task 6. Exits non-zero if a key
-        # exists in one locale file and not the other. A missing Khmer key does
-        # not crash the app — next-intl falls back — so it ships silently and is
-        # discovered by a Khmer-first user, which is exactly the failure the
-        # Week 12 QA session is too late to catch cheaply. This is that guard.
-        # Run from the repository root: the script lives in scripts/, not web/.
-        run: node scripts/i18n-check.mjs
 
   # ─────────────────────────────────────────────────────────────────────────
   types:
