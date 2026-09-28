@@ -167,6 +167,14 @@
       "required": "Required",
       "preferred": "Preferred"
     },
+    "filter": {
+      "label": "Filter requirements",
+      "all": "All",
+      "proven": "Proven",
+      "partial": "Partial",
+      "missing": "Missing",
+      "empty": "No requirements in this category."
+    },
     "group": {
       "missing": "No evidence",
       "partial": "Partly proven",

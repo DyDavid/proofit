@@ -22,6 +22,8 @@ export interface ResultsInteractiveProps {
 }
 
 const GROUP_ORDER: Verdict[] = ["missing", "partial", "proven"];
+const FILTER_KEYS = ["all", "proven", "partial", "missing"] as const;
+type FilterKey = (typeof FILTER_KEYS)[number];
 const VERDICT_TONE: Record<Verdict, BadgeTone> = {
   proven: "proven",
   partial: "partial",
@@ -42,6 +44,53 @@ function ConfidenceBar({ confidence, label }: { confidence: number; label: strin
       aria-label={label}
     >
       <div className="h-full rounded-pill bg-ink-2" style={{ width: `${pct}%` }} />
+    </div>
+  );
+}
+
+/** Sliding-pill All/Proven/Partial/Missing filter (the source design's
+ * `.seg`), a toggle-button group rather than a tablist — the requirement
+ * list stays a single page, this just narrows which groups render. */
+function FilterPills({
+  filter,
+  onChange,
+  counts,
+  label,
+}: {
+  filter: FilterKey;
+  onChange: (key: FilterKey) => void;
+  counts: Record<FilterKey, number>;
+  label: string;
+}) {
+  const t = useTranslations("results.filter");
+  const activeIndex = FILTER_KEYS.indexOf(filter);
+
+  return (
+    <div
+      role="group"
+      aria-label={label}
+      className="relative mb-6 grid max-w-md grid-cols-4 rounded-pill border border-rule p-1"
+    >
+      <span
+        aria-hidden="true"
+        className="absolute inset-y-1 left-1 w-[calc(25%-4px)] rounded-pill bg-accent transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]"
+        style={{ transform: `translateX(${activeIndex * 100}%)` }}
+      />
+      {FILTER_KEYS.map((key) => (
+        <button
+          key={key}
+          type="button"
+          aria-pressed={filter === key}
+          onClick={() => onChange(key)}
+          className={cn(
+            "relative z-10 flex min-h-9 items-center justify-center gap-1.5 rounded-pill text-[13px] font-medium transition-colors",
+            filter === key ? "text-paper" : "text-ink-2 hover:text-ink",
+          )}
+        >
+          {t(key)}
+          <span className="font-mono text-[11px] opacity-70">{counts[key]}</span>
+        </button>
+      ))}
     </div>
   );
 }
@@ -189,19 +238,22 @@ function RequirementRow({
 
 /**
  * Requirement list (grouped Missing → Partial → Proven, required before
- * preferred within each group) plus the sticky priority-actions rail.
+ * preferred within each group), an All/Proven/Partial/Missing filter that
+ * narrows which groups render, plus the sticky priority-actions rail.
  *
  * Client component because the rail's "jump to requirement" links must open
- * the target's `<details>` and scroll to it. Carries the keyword-baseline
- * comparison toggle when a `baseline` is supplied (Phase 2); the
- * hidden-strengths section is still Phase 4 scope. Switching that toggle on
- * reveals the matcher's aggregate coverage score beside the real one, and its
- * per-requirement verdict as a muted badge on each row.
+ * the target's `<details>` and scroll to it (clearing the filter first, so
+ * the target row is guaranteed to be in the DOM). Carries the
+ * keyword-baseline comparison toggle when a `baseline` is supplied (Phase 2);
+ * the hidden-strengths section is still Phase 4 scope. Switching that toggle
+ * on reveals the matcher's aggregate coverage score beside the real one, and
+ * its per-requirement verdict as a muted badge on each row.
  */
 export function ResultsInteractive({ match, baseline }: ResultsInteractiveProps) {
   const t = useTranslations("results");
   const [openIds, setOpenIds] = React.useState<Set<string>>(new Set());
   const [showBaseline, setShowBaseline] = React.useState(false);
+  const [filter, setFilter] = React.useState<FilterKey>("all");
 
   const requirementById = React.useMemo(() => {
     const map = new Map<string, Requirement>();
@@ -239,11 +291,27 @@ export function ResultsInteractive({ match, baseline }: ResultsInteractiveProps)
     }).filter((g) => g.items.length > 0);
   }, [match.results, requirementById]);
 
+  const filterCounts = React.useMemo(() => {
+    const counts: Record<FilterKey, number> = { all: 0, proven: 0, partial: 0, missing: 0 };
+    for (const r of match.results ?? []) {
+      counts.all += 1;
+      counts[r.verdict] += 1;
+    }
+    return counts;
+  }, [match.results]);
+
+  const visibleGroups = filter === "all" ? groups : groups.filter((g) => g.verdict === filter);
+
   function openRequirement(id: string) {
     setOpenIds((prev) => new Set(prev).add(id));
-    document
-      .getElementById(`req-${id}`)
-      ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    // The target row may be hidden by an active filter — clear it first so
+    // `req-${id}` is guaranteed to exist in the DOM before scrolling to it.
+    setFilter("all");
+    requestAnimationFrame(() => {
+      document
+        .getElementById(`req-${id}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
   }
 
   function toggle(id: string, open: boolean) {
@@ -300,38 +368,52 @@ export function ResultsInteractive({ match, baseline }: ResultsInteractiveProps)
             </p>
           </div>
         ) : null}
-        {groups.map((group) => (
-          <div key={group.verdict} className="mb-8">
-            <div className="mb-1 flex items-baseline justify-between border-b border-ink pb-2">
-              <h3
-                className={cn(
-                  "font-mono text-xs font-semibold uppercase tracking-wider",
-                  VERDICT_TEXT_CLASS[group.verdict],
-                )}
-              >
-                {t(`group.${group.verdict}`)}
-              </h3>
-              <span className="font-mono text-xs text-ink-3">
-                {t("group.count", {
-                  count: group.items.length,
-                  required: group.requiredCount,
-                })}
-              </span>
+
+        <FilterPills
+          filter={filter}
+          onChange={setFilter}
+          counts={filterCounts}
+          label={t("filter.label")}
+        />
+
+        {visibleGroups.length === 0 ? (
+          <p className="py-8 text-sm text-ink-3">{t("filter.empty")}</p>
+        ) : (
+          visibleGroups.map((group) => (
+            <div key={group.verdict} className="mb-8">
+              {filter === "all" ? (
+                <div className="mb-1 flex items-baseline justify-between border-b border-ink pb-2">
+                  <h3
+                    className={cn(
+                      "font-mono text-xs font-semibold uppercase tracking-wider",
+                      VERDICT_TEXT_CLASS[group.verdict],
+                    )}
+                  >
+                    {t(`group.${group.verdict}`)}
+                  </h3>
+                  <span className="font-mono text-xs text-ink-3">
+                    {t("group.count", {
+                      count: group.items.length,
+                      required: group.requiredCount,
+                    })}
+                  </span>
+                </div>
+              ) : null}
+              {group.items.map((result) => (
+                <RequirementRow
+                  key={result.requirement_id}
+                  result={result}
+                  requirement={requirementById.get(result.requirement_id)}
+                  evidenceById={evidenceById}
+                  isOpen={openIds.has(result.requirement_id)}
+                  onToggle={(open) => toggle(result.requirement_id, open)}
+                  baselineResult={baselineByRequirement.get(result.requirement_id)}
+                  showBaseline={showBaseline}
+                />
+              ))}
             </div>
-            {group.items.map((result) => (
-              <RequirementRow
-                key={result.requirement_id}
-                result={result}
-                requirement={requirementById.get(result.requirement_id)}
-                evidenceById={evidenceById}
-                isOpen={openIds.has(result.requirement_id)}
-                onToggle={(open) => toggle(result.requirement_id, open)}
-                baselineResult={baselineByRequirement.get(result.requirement_id)}
-                showBaseline={showBaseline}
-              />
-            ))}
-          </div>
-        ))}
+          ))
+        )}
       </div>
 
       {match.priority_actions?.length ? (
