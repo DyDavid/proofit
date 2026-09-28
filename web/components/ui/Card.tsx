@@ -62,7 +62,7 @@ export const Card = React.forwardRef<HTMLDivElement, CardProps>(function Card(
       {...rest}
     >
       {header ? (
-        <div className={cn("border-b border-rule", BAND_PADDING[padding])}>
+        <div className={cn("rounded-t-card border-b border-rule", BAND_PADDING[padding])}>
           {header}
         </div>
       ) : null}
@@ -71,7 +71,10 @@ export const Card = React.forwardRef<HTMLDivElement, CardProps>(function Card(
 
       {footer ? (
         <div
-          className={cn("border-t border-rule bg-paper-2", BAND_PADDING[padding])}
+          className={cn(
+            "rounded-b-card border-t border-rule bg-paper-2",
+            BAND_PADDING[padding],
+          )}
         >
           {footer}
         </div>

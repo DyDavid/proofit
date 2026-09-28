@@ -135,7 +135,7 @@ function RequirementRow({
           </p>
         ) : (
           evidenceRecords.map((evidence) => (
-            <div key={evidence.id} className="border border-rule bg-surface-raised p-4">
+            <div key={evidence.id} className="rounded-2xl border border-rule bg-surface-raised p-4">
               <div className="mb-2.5 flex items-center justify-between font-mono text-[11px] uppercase tracking-wide text-ink-3">
                 <span>{t("evidence.from")}</span>
                 <Badge tone="muted">{t(`evidenceType.${evidence.evidence_type}`)}</Badge>
@@ -336,7 +336,7 @@ export function ResultsInteractive({ match, baseline }: ResultsInteractiveProps)
 
       {match.priority_actions?.length ? (
         <aside className="lg:sticky lg:top-24">
-          <div className="border border-rule bg-surface-raised p-5">
+          <div className="rounded-card border border-rule bg-surface-raised p-5">
             <h3 className="mb-3 font-serif text-xl text-ink">{t("actions.title")}</h3>
             <ol className="grid gap-3">
               {match.priority_actions.map((action, i) => (
@@ -344,7 +344,7 @@ export function ResultsInteractive({ match, baseline }: ResultsInteractiveProps)
                   key={i}
                   className="flex gap-3 border-t border-dashed border-rule pt-3 first:border-t-0 first:pt-0"
                 >
-                  <span className="font-serif text-2xl font-light leading-none text-lac">
+                  <span className="font-serif text-2xl font-light leading-none text-accent">
                     {i + 1}
                   </span>
                   <span className="text-sm leading-[1.6] text-ink">

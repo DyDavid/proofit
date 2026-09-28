@@ -4,6 +4,7 @@ import { CountryFormat } from "@/components/results/CountryFormat";
 import { HiddenStrengths } from "@/components/results/HiddenStrengths";
 import { ResultsInteractive } from "@/components/results/ResultsInteractive";
 import { CoverageStat, type CoverageTile } from "@/components/results/CoverageStat";
+import { CoverageRing } from "@/components/results/CoverageRing";
 import type { StampTone } from "@/components/ui/Stamp";
 import { Stamp } from "@/components/ui/Stamp";
 import type { BaselineMatch, Match } from "@/lib/types";
@@ -67,54 +68,51 @@ export function ResultsView({ match, baseline, analysisId }: ResultsViewProps) {
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 sm:py-14">
-      <div className="mb-10 grid gap-6 border-b border-ink pb-8 sm:grid-cols-[1fr_auto] sm:items-start">
+      <div className="mb-10 grid gap-8 border-b border-rule pb-10 sm:grid-cols-[1fr_auto] sm:items-center">
         <div>
-          <p className="mb-2 flex flex-wrap items-center gap-2 font-mono text-xs text-ink-3">
-            <span className="uppercase tracking-wide">{t("eyebrow")}</span>
+          <p className="mb-2 flex flex-wrap items-center gap-2 font-mono text-xs uppercase tracking-[0.14em] text-accent">
+            <span>{t("eyebrow")}</span>
             {job?.company ? (
               <>
-                <span aria-hidden="true">·</span>
-                <span>{job.company}</span>
-              </>
-            ) : null}
-            {job?.country ? (
-              <>
-                <span aria-hidden="true">·</span>
-                <span className="rounded-pill border border-rule px-2.5 py-0.5 text-ink-2">
-                  {job.country} · {COUNTRY_NAME[job.country] ?? job.country}
+                <span aria-hidden="true" className="text-ink-3">
+                  ·
                 </span>
-              </>
-            ) : null}
-            {match.generated_at ? (
-              <>
-                <span aria-hidden="true">·</span>
-                <span>{formatDate(match.generated_at)}</span>
+                <span className="normal-case text-ink-3">{job.company}</span>
               </>
             ) : null}
           </p>
-          <h1 className="font-serif text-4xl text-ink sm:text-5xl">{job?.title}</h1>
+          <h1 className="font-serif text-5xl font-extrabold uppercase leading-[0.92] text-ink sm:text-6xl">
+            {job?.title}
+          </h1>
+          <div className="mt-5 flex flex-wrap items-center gap-2.5 text-sm">
+            {job?.country ? (
+              <span className="rounded-pill border border-rule px-3.5 py-1 text-ink">
+                {job.country} · {COUNTRY_NAME[job.country] ?? job.country}
+              </span>
+            ) : null}
+            {match.generated_at ? (
+              <span className="rounded-pill border border-rule px-3.5 py-1 text-ink-2">
+                {formatDate(match.generated_at)}
+              </span>
+            ) : null}
+          </div>
           {match.realism_explanation ? (
-            <p className="mt-3 max-w-2xl text-base leading-[1.7] text-ink-2">
+            <p className="mt-5 max-w-2xl text-base leading-[1.7] text-ink-2">
               {match.realism_explanation}
             </p>
           ) : null}
+          <div className="mt-5 flex items-center gap-3">
+            <Stamp tone={REALISM_TONE[match.realism_verdict] ?? "partial"}>
+              {t(`realism.${match.realism_verdict}`)}
+            </Stamp>
+            <span className="font-mono text-xs text-ink-3">{t("realismLabel")}</span>
+          </div>
         </div>
-        <div className="flex flex-col items-start gap-2 pt-1 sm:items-end">
-          <Stamp tone={REALISM_TONE[match.realism_verdict] ?? "partial"}>
-            {t(`realism.${match.realism_verdict}`)}
-          </Stamp>
-          <span className="font-mono text-xs text-ink-3">{t("realismLabel")}</span>
-        </div>
+
+        <CoverageRing value={match.coverage_score} tiles={tiles} label={t("coverage.all")} />
       </div>
 
-      <div className="mb-12 grid gap-10 border-b border-rule pb-10 sm:grid-cols-2">
-        <CoverageStat
-          label={t("coverage.all")}
-          helpLabel={t("coverage.tooltip")}
-          value={match.coverage_score}
-          tiles={tiles}
-          underlineLabel={t("coverage.underline")}
-        />
+      <div className="mb-12 border-b border-rule pb-10">
         <CoverageStat
           label={t("coverage.required")}
           helpLabel={t("coverage.tooltip")}

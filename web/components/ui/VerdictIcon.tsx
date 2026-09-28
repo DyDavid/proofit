@@ -17,19 +17,54 @@ export interface VerdictIconProps
 }
 
 /**
- * The mark drawn inside the shared circle. Distinct SHAPES, not just distinct
- * colours — PERSON_B_PLAN_v2.md Phase 0.5: a verdict is never colour alone.
+ * check-circle / half-fill-circle / dashed-circle, matching the source
+ * design's own three verdict marks exactly: DISTINCT SHAPES, not just
+ * distinct colours — PERSON_B_PLAN_v2.md Phase 0.5: a verdict is never
+ * colour alone. `currentColor` drives the shape so a parent's `text-proven`
+ * / `text-partial-ink` / `text-missing` still controls it (see Badge/Stamp);
+ * the proven checkmark itself is drawn in the paper colour for contrast
+ * against its own solid fill.
  */
-const MARK: Record<Verdict, React.ReactNode> = {
-  proven: <path d="m8.25 12.25 2.5 2.5 5-5.5" />,
-  partial: <path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none" />,
-  missing: <path d="m9 9 6 6m0-6-6 6" />,
-};
+function Mark({ verdict }: { verdict: Verdict }) {
+  switch (verdict) {
+    case "proven":
+      return (
+        <>
+          <circle cx="12" cy="12" r="9" fill="currentColor" />
+          <path
+            d="m7.2 12.4 3.1 3.1 6.5-7.4"
+            fill="none"
+            stroke="var(--color-paper)"
+            strokeWidth="2"
+          />
+        </>
+      );
+    case "partial":
+      return (
+        <>
+          <circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" strokeWidth="1.7" />
+          <path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor" />
+        </>
+      );
+    case "missing":
+      return (
+        <circle
+          cx="12"
+          cy="12"
+          r="8.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeDasharray="3 3"
+        />
+      );
+  }
+}
 
 /**
- * check-circle / minus-circle / x-circle, drawn inline so the app needs no icon
- * library. Inherits `currentColor`, and is `aria-hidden` because the verdict
- * word always travels beside it (see Badge).
+ * Drawn inline so the app needs no icon library. Inherits `currentColor`,
+ * and is `aria-hidden` because the verdict word always travels beside it
+ * (see Badge).
  */
 export const VerdictIcon = React.forwardRef<SVGSVGElement, VerdictIconProps>(
   function VerdictIcon({ verdict, size = "1.25em", className, ...rest }, ref) {
@@ -39,18 +74,12 @@ export const VerdictIcon = React.forwardRef<SVGSVGElement, VerdictIconProps>(
         width={size}
         height={size}
         viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={2}
-        strokeLinecap="round"
-        strokeLinejoin="round"
         aria-hidden="true"
         focusable="false"
         className={cn("shrink-0", className)}
         {...rest}
       >
-        <circle cx="12" cy="12" r="9" />
-        {MARK[verdict]}
+        <Mark verdict={verdict} />
       </svg>
     );
   },

@@ -23,40 +23,66 @@
   },
   "landing": {
     "hero": {
-      "eyebrow": "For Cambodian graduates · any job, anywhere",
-      "title": "Prove your <em>fit</em>, requirement by requirement.",
-      "subtitle": "Proofit reads a job post and your resume, then tells you which requirements you have already proven, which you have partly proven, and which you have no evidence for — quoting the exact line from your resume behind every verdict.",
-      "cta": "Analyze my resume",
-      "ctaSecondary": "Try a sample analysis"
+      "eyebrowResume": "Resume × Job description",
+      "eyebrowPlace": "Cambodia → Anywhere",
+      "eyebrowAudience": "For first-job seekers",
+      "rotatingPrefix": "Your",
+      "rotatingSuffix": "is",
+      "experienceWord": "Experience.",
+      "subtitle": "Proofit reads your resume against a real job description, one requirement at a time, and finds the proof in your classes, projects and part-time work.",
+      "cta": "Upload your resume",
+      "ctaSecondary": "See a sample result",
+      "scrollCue": "Scroll"
     },
-    "diff": {
-      "evidence": {
-        "title": "Coursework and projects count as evidence",
-        "body": "Most tools only look for job history, so a fresh graduate is marked missing on everything. Proofit reads coursework, class projects, part-time work, volunteering and competitions as real evidence — and says honestly how far that evidence goes."
-      },
-      "local": {
-        "title": "Built for the job posts you actually apply to",
-        "body": "Paste a post from CamHR, Bongthom, or any job board in the world. If a page cannot be fetched, paste the text instead — the analysis is exactly the same."
-      },
-      "crossborder": {
-        "title": "Apply abroad without guessing",
-        "body": "Pick Singapore, Japan or remote-US and Proofit adapts the resume conventions it checks, then tells you what the post actually says about visa sponsorship."
-      }
+    "marquee": {
+      "caption": "all of it counts as evidence"
+    },
+    "scene": {
+      "eyebrow": "Sample match · Junior Data Analyst",
+      "title": "Evidence in.",
+      "titleAccent": "verdict out.",
+      "body": "Each line joins something you have done to something the job asks for. Solid lines are proven. Faint lines are partial. Dashed lines are still waiting for evidence.",
+      "resumeLabel": "Your resume",
+      "jobLabel": "The job",
+      "countLabel": "5 requirements checked",
+      "coverageLabel": "Requirement coverage",
+      "proven": "{count} proven",
+      "partial": "{count} partial",
+      "missing": "{count} missing",
+      "weightingNote": "Proven counts in full. Partial counts half.",
+      "cta": "See the full result"
     },
     "how": {
       "eyebrow": "How it works",
+      "title": "Three steps.",
+      "titleAccent": "zero keyword stuffing.",
+      "intro": "From upload to verdict in one pass. Every step shows its work, so you can check it before an employer does.",
       "step1": {
-        "title": "Upload your resume",
-        "body": "PDF or DOCX. Every line becomes evidence — coursework, projects and part-time work included, not just employment."
+        "title": "Upload",
+        "body": "PDF or Word. Classes, projects and part-time roles are read as evidence."
       },
       "step2": {
-        "title": "Paste the job post",
-        "body": "Text or a link. Each requirement is read out on its own, with its priority."
+        "title": "Add a job",
+        "body": "Paste it, or a link, or skip it and match every saved listing."
       },
       "step3": {
-        "title": "Read your coverage",
-        "body": "Proven, partial or missing for every requirement, with the resume line that decided it."
+        "title": "Read the verdict",
+        "body": "Proven, partial or missing, with the resume line behind each one and a rewrite where you undersell yourself."
       }
+    },
+    "why": {
+      "eyebrow": "Why Proofit",
+      "title": "Made for the resume that doesn't have a job title",
+      "titleAccent": "yet.",
+      "point1": {
+        "title": "Evidence beyond job titles",
+        "body": "A database course, a capstone, a weekend support job. Most matching tools score these as zero. Proofit maps each one to the requirement it actually satisfies."
+      },
+      "point2": {
+        "title": "Job posts from anywhere",
+        "body": "Local job boards, company career pages, any post you can paste. If you can read the job, Proofit can read it."
+      },
+      "cta": "Check your first match"
     }
   },
   "analyze": {

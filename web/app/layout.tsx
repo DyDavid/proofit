@@ -1,34 +1,44 @@
 import type { Metadata } from "next";
-import { Fraunces, IBM_Plex_Mono, Kantumruy_Pro } from "next/font/google";
+import { Archivo, Geist, Geist_Mono, Newsreader } from "next/font/google";
 import type { ReactNode } from "react";
 import Footer from "@/components/layout/Footer";
 import Header from "@/components/layout/Header";
 import { getTranslations } from "@/lib/copy";
 import "./globals.css";
 
-/** Kantumruy Pro is the single UI font (BRAND.md §4). */
-const kantumruyPro = Kantumruy_Pro({
+/** Geist is the single UI font. */
+const geist = Geist({
   subsets: ["latin"],
   weight: ["300", "400", "500", "600", "700"],
-  variable: "--font-kantumruy",
+  variable: "--font-geist",
   display: "swap",
 });
 
-/** Display face for headlines and the big coverage numbers (BRAND.md §4). */
-const fraunces = Fraunces({
+/** Display face for headlines and the big coverage numbers: a variable
+ * grotesque, used uppercase and condensed (font-serif token — see
+ * globals.css for why the token name stays "serif"). */
+const archivo = Archivo({
   subsets: ["latin"],
-  weight: ["300", "400", "500", "600"],
-  style: ["normal", "italic"],
-  variable: "--font-fraunces",
+  weight: ["400", "500", "600", "700", "800", "900"],
+  variable: "--font-archivo",
+  display: "swap",
+});
+
+/** Decorative italic accent face for a single emphasised word per section. */
+const newsreader = Newsreader({
+  subsets: ["latin"],
+  weight: ["300", "400", "500"],
+  style: ["italic"],
+  variable: "--font-newsreader",
   display: "swap",
 });
 
 /** Label/data face: eyebrows, timestamps, verdict pills, stamps, confidence
- * figures (BRAND.md §4). */
-const ibmPlexMono = IBM_Plex_Mono({
+ * figures. */
+const geistMono = Geist_Mono({
   subsets: ["latin"],
   weight: ["400", "500"],
-  variable: "--font-plex-mono",
+  variable: "--font-geist-mono",
   display: "swap",
 });
 
@@ -52,11 +62,11 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html
       lang="en"
-      className={`${kantumruyPro.variable} ${fraunces.variable} ${ibmPlexMono.variable}`}
+      className={`${geist.variable} ${archivo.variable} ${newsreader.variable} ${geistMono.variable}`}
       data-scroll-behavior="smooth"
     >
       <body
-        className={`${kantumruyPro.className} flex min-h-screen flex-col bg-paper leading-[1.75] text-ink antialiased`}
+        className={`${geist.className} flex min-h-screen flex-col bg-paper leading-[1.7] text-ink antialiased`}
       >
         <Header />
         <main id="main" className="flex-1">

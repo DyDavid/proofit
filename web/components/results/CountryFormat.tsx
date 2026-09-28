@@ -179,7 +179,7 @@ function VisaLine({
       : null;
 
   return (
-    <div className="mt-6 border border-rule bg-surface-raised p-4">
+    <div className="mt-6 rounded-card border border-rule bg-surface-raised p-4">
       <p className="mb-2 font-mono text-[11px] uppercase tracking-wide text-ink-3">
         {t("title")}
       </p>
@@ -329,7 +329,7 @@ export function CountryFormat({ match }: CountryFormatProps) {
               id="country-format-destination"
               value={destination}
               onChange={(e) => setDestination(e.target.value)}
-              className="min-h-9 border border-rule bg-paper px-3 text-[14px] text-ink"
+              className="min-h-9 rounded-control border border-rule bg-paper px-3 text-[14px] text-ink"
             >
               {[...countries.map((c) => c.code), OTHER_KEY].map((key) => (
                 <option key={key} value={key}>
@@ -341,7 +341,7 @@ export function CountryFormat({ match }: CountryFormatProps) {
             <select
               id="country-format-destination"
               disabled
-              className="min-h-9 border border-rule bg-paper px-3 text-[14px] text-ink-3"
+              className="min-h-9 rounded-control border border-rule bg-paper px-3 text-[14px] text-ink-3"
             >
               <option>{tc("loading")}</option>
             </select>
@@ -351,7 +351,7 @@ export function CountryFormat({ match }: CountryFormatProps) {
       <p className="mb-5 max-w-2xl text-[15px] leading-[1.6] text-ink-2">{t("intro")}</p>
 
       {otherErrorMessage ? (
-        <p role="alert" className="mb-6 text-sm leading-[1.6] text-missing">
+        <p role="alert" className="mb-6 text-sm leading-[1.6] text-danger">
           {otherErrorMessage}
         </p>
       ) : null}

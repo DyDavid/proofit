@@ -28,7 +28,7 @@ export default async function ProgressPage({ searchParams }: ProgressPageProps) 
           {t("title")}
         </p>
         {cached === "1" ? (
-          <Badge tone="lac" className="mb-3">
+          <Badge tone="accent" className="mb-3">
             {t("cachedBadge")}
           </Badge>
         ) : null}

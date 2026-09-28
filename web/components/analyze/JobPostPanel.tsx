@@ -20,18 +20,32 @@ export interface JobPostPanelProps {
 }
 
 const FIELD_CLASS = cn(
-  "min-h-11 w-full border border-rule bg-paper px-3.5 py-2.5 text-[15px] leading-[1.6] text-ink",
+  "min-h-11 w-full rounded-control border border-rule bg-paper px-3.5 py-2.5 text-[15px] leading-[1.6] text-ink",
   "placeholder:text-ink-3",
 );
 
-/** Paste-text / paste-URL tabs for the job post input. */
+const MODES = ["text", "url"] as const;
+
+/** Paste-text / paste-URL tabs for the job post input — a sliding-pill
+ * segmented control (the source design's `.seg`), `role="tablist"`/`"tab"`
+ * semantics unchanged underneath. */
 export function JobPostPanel({ value, onChange, error }: JobPostPanelProps) {
   const t = useTranslations("analyze.jd");
+  const activeIndex = MODES.indexOf(value.mode);
 
   return (
     <div>
-      <div role="tablist" aria-label={t("label")} className="mb-4 flex gap-1 border-b border-rule">
-        {(["text", "url"] as const).map((mode) => (
+      <div
+        role="tablist"
+        aria-label={t("label")}
+        className="relative mb-4 grid grid-cols-2 rounded-pill border border-rule p-1"
+      >
+        <span
+          aria-hidden="true"
+          className="absolute inset-y-1 left-1 w-[calc(50%-4px)] rounded-pill bg-accent transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]"
+          style={{ transform: `translateX(${activeIndex * 100}%)` }}
+        />
+        {MODES.map((mode) => (
           <button
             key={mode}
             type="button"
@@ -39,10 +53,8 @@ export function JobPostPanel({ value, onChange, error }: JobPostPanelProps) {
             aria-selected={value.mode === mode}
             onClick={() => onChange({ ...value, mode })}
             className={cn(
-              "-mb-px min-h-11 border-b-2 px-3 text-sm font-medium",
-              value.mode === mode
-                ? "border-ink text-ink"
-                : "border-transparent text-ink-3 hover:text-ink",
+              "relative z-10 min-h-9 rounded-pill text-sm font-medium transition-colors",
+              value.mode === mode ? "text-paper" : "text-ink-2 hover:text-ink",
             )}
           >
             {t(`tab.${mode}`)}
@@ -80,7 +92,7 @@ export function JobPostPanel({ value, onChange, error }: JobPostPanelProps) {
         </>
       )}
       {error ? (
-        <p role="alert" className="mt-2 text-sm text-missing">
+        <p role="alert" className="mt-2 text-sm text-danger">
           {error}
         </p>
       ) : null}

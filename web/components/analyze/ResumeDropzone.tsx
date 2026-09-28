@@ -50,8 +50,8 @@ export function ResumeDropzone({ file, onChange, serverError }: ResumeDropzonePr
   if (file) {
     return (
       <div className="grid gap-2">
-        <div className="flex items-center gap-3.5 border border-rule bg-paper p-3.5">
-          <div className="relative flex h-12 w-10 shrink-0 items-center justify-center border border-ink bg-surface-raised">
+        <div className="flex items-center gap-3.5 rounded-control border border-rule bg-surface-raised p-3.5">
+          <div className="relative flex h-12 w-10 shrink-0 items-center justify-center rounded-md border border-ink bg-paper">
             <span className="absolute bottom-1 left-0 right-0 text-center font-mono text-[9px] tracking-wide text-ink">
               {file.name.split(".").pop()?.toUpperCase()}
             </span>
@@ -65,7 +65,7 @@ export function ResumeDropzone({ file, onChange, serverError }: ResumeDropzonePr
           </Button>
         </div>
         {(error ?? serverError) ? (
-          <p role="alert" className="text-sm text-missing">
+          <p role="alert" className="text-sm text-danger">
             {error ?? serverError}
           </p>
         ) : null}
@@ -97,8 +97,8 @@ export function ResumeDropzone({ file, onChange, serverError }: ResumeDropzonePr
         }}
         aria-label={t("dropzone")}
         className={cn(
-          "flex min-h-[220px] cursor-pointer flex-col items-center justify-center gap-2.5 border-[1.5px] border-dashed border-ink-3 bg-paper p-6 text-center transition-colors",
-          isDragOver && "border-ink bg-paper-2",
+          "flex min-h-[220px] cursor-pointer flex-col items-center justify-center gap-2.5 rounded-control border-[1.5px] border-dashed border-rule-2 bg-surface-raised p-6 text-center transition-colors",
+          isDragOver && "border-accent bg-paper-2",
         )}
       >
         <svg
@@ -111,7 +111,7 @@ export function ResumeDropzone({ file, onChange, serverError }: ResumeDropzonePr
           strokeWidth={1.5}
           strokeLinecap="round"
           strokeLinejoin="round"
-          className="text-ink-2"
+          className="motion-safe:animate-bob text-accent"
         >
           <path d="M12 16V4m0 0-4 4m4-4 4 4" />
           <path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" />
@@ -129,7 +129,7 @@ export function ResumeDropzone({ file, onChange, serverError }: ResumeDropzonePr
         />
       </div>
       {(error ?? serverError) ? (
-        <p role="alert" className="text-sm text-missing">
+        <p role="alert" className="text-sm text-danger">
           {error ?? serverError}
         </p>
       ) : null}

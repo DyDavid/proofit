@@ -4,79 +4,529 @@
    Proofit — design system
    "Prove your fit"
 
-   Warm paper-and-ink editorial system (BRAND.md §3/§4, revised 12 Sep 2026).
-   Tailwind v4: there is NO tailwind.config.ts. Every design token lives here,
-   once, inside @theme.
+   Evidence-forward editorial system, redesigned from the "Spean" design
+   canvas (2026-09-28). Tailwind v4: there is NO tailwind.config.ts. Every
+   design token lives here, once, inside @theme.
 
-   This system has no dark mode. The reference it matches (a working
-   prototype predating this file) has none either — a paper background does
-   not have a natural dark inverse, and inventing one un-reviewed would be
-   guessing at a look nobody has approved. If dark mode is wanted later it
-   gets its own design pass, not a mechanical colour inversion here.
+   This system has no dark mode. A paper background does not have a natural
+   dark inverse, and inventing one un-reviewed would be guessing at a look
+   nobody has approved. If dark mode is wanted later it gets its own design
+   pass, not a mechanical colour inversion here.
 
    Accessibility (PERSON_B_PLAN_v2.md Phase 0.5): a verdict is NEVER colour
-   alone. Components pair every verdict tone with an inline SVG icon and the
-   word itself — see components/ui/VerdictIcon.tsx.
+   alone. Components pair every verdict tone with an inline SVG icon whose
+   SHAPE differs per verdict, plus the word itself — see
+   components/ui/VerdictIcon.tsx. That invariant survives this redesign even
+   though the verdict → colour mapping itself changed (proven is now the
+   accent blue, partial is ink, missing is muted grey) to match the source
+   design's own verdict language.
+
+   Every animation utility below is declared as a Tailwind v4 `--animate-*`
+   token paired with a `@keyframes` block, and is always applied with the
+   `motion-safe:` variant at the call site — never bare — so
+   `prefers-reduced-motion: reduce` disables all of it for free, matching the
+   source design's own reduced-motion kill-switch.
    ========================================================================== */
 
 @theme {
   /* ---- Paper and ink. Nothing here is pure white or pure black. --------- */
-  --color-paper: #f3eee4;
-  --color-paper-2: #eae3d5;
-  --color-paper-3: #e0d7c4;
-  --color-surface-raised: #fbf8f1;
-  --color-ink: #1b1915;
-  --color-ink-2: #4a453c;
-  /* Adjusted from the prototype's #7A7364 (4.07:1 on paper, under AA).
-     This shade clears 4.86:1 — see BRAND.md §3. */
-  --color-ink-3: #6d675a;
-  --color-rule: #cfc6b2;
+  --color-paper: #f3f0e8;
+  --color-paper-2: #eae5d8;
+  --color-paper-3: #e3ddcd;
+  --color-surface-raised: #fbfaf6;
+  --color-ink: #141412;
+  --color-ink-2: #55524a;
+  /* Nearly identical to the prototype's own AA-checked #6d675a — kept at
+     4.86:1+ on paper. See the contrast note in the base layer below. */
+  --color-ink-3: #6d695f;
+  --color-rule: #d9d4c8;
+  --color-rule-2: #c2bcad;
+  /* Decorative-only: oversized outline type, distribution-bar fill. Never
+     used for body text (fails AA on paper). */
+  --color-faint: #a39d8f;
+  /* Donut/ring track background — distinct from paper, from the source. */
+  --color-track: #e6e2d8;
 
-  /* ---- Brand / accent: lacquer red. Doubles as the `missing` verdict —
-         deliberate, see BRAND.md §3. ------------------------------------- */
-  --color-lac: #b4301c;
-  --color-lac-2: #8f2415;
-  --color-lac-tint: #f2dcd5;
-  --color-missing: #b4301c;
-  --color-missing-tint: #f2dcd5;
+  /* ---- Brand / accent: a saturated blue. Replaces the old lacquer red. -- */
+  --color-accent: #2b36e8;
+  --color-accent-2: #1f2ac0;
+  --color-accent-tint: #e4e6fc;
+  --color-accent-tint-2: #d3d6fa;
 
-  /* ---- Verdict: proven (forest green). Safe as text at 5.53:1. --------- */
-  --color-proven: #2c6b3f;
-  --color-proven-tint: #dde9db;
+  /* ---- Verdict colours. Re-mapped from the source design: proven doubles
+         as the accent (deliberate, mirrors the old "missing doubles as lac"
+         choice), partial reads in ink, missing in muted grey. Icon SHAPE
+         still carries the distinction — see VerdictIcon.tsx. ------------- */
+  --color-proven: #2b36e8;
+  --color-proven-tint: #e4e6fc;
+  --color-partial: #a39d8f;
+  --color-partial-ink: #141412;
+  --color-partial-tint: #e5e1d4;
+  --color-missing: #6d695f;
+  --color-missing-tint: #e7e3d8;
 
-  /* ---- Verdict: partial (olive). `-ink` is the text-safe shade; `partial`
-         itself is for icons/swatches only — see BRAND.md §3. -------------- */
-  --color-partial: #9a6a08;
-  --color-partial-ink: #8a5f07;
-  --color-partial-tint: #f1e4c0;
-
-  /* ---- Highlight, behind a <mark>-ed resume excerpt only. --------------- */
+  /* ---- Highlight, behind a <mark>-ed resume excerpt only. Unchanged. ---- */
   --color-hl: #f4e27e;
 
-  /* ---- Shape: sharp content surfaces, pill controls (BRAND.md §3). ------ */
-  --radius-card: 0px;
-  --radius-control: 0px;
-  --radius-tag: 3px;
+  /* ---- Danger: the old lacquer-red accent, narrowed to this one semantic
+         now that "missing" no longer reads as an alert colour. ------------ */
+  --color-danger: #b4301c;
+  --color-danger-2: #8f2415;
+
+  /* ---- Shape: rounded cards, pill controls (source design's own radii). - */
+  --radius-card: 28px;
+  --radius-control: 20px;
+  --radius-tag: 999px;
   --radius-pill: 9999px;
 
-  /* ---- Type: display / body / data, one role each (BRAND.md §4). ------- */
+  /* ---- Type: display / accent-italic / body / data, one role each. ------
+         Token NAMES are kept stable (font-serif/font-mono are used as
+         Tailwind utilities in ~20 files); only the underlying typefaces
+         change, matching the source design's Archivo/Geist/Geist Mono. --- */
   --font-serif:
-    var(--font-fraunces), "Iowan Old Style", "Palatino Linotype", Georgia,
-    serif;
+    var(--font-archivo), "Archivo", ui-sans-serif, system-ui, sans-serif;
   --font-sans:
-    var(--font-kantumruy), "Kantumruy Pro", ui-sans-serif, system-ui,
-    -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    var(--font-geist), "Geist", ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono:
-    var(--font-plex-mono), "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas,
+    var(--font-geist-mono), "Geist Mono", "SFMono-Regular", Menlo, Consolas,
     monospace;
+  /* New role: the decorative italic accent word (the source design's `.it`),
+     distinct from the display face. */
+  --font-accent:
+    var(--font-newsreader), "Iowan Old Style", "Palatino Linotype", Georgia,
+    serif;
 
-  /* Relaxed body-copy leading (BRAND.md §4). */
-  --leading-body: 1.75;
+  /* Relaxed body-copy leading. */
+  --leading-body: 1.7;
 
   /* ---- Spacing. Tailwind's 0.25rem base step is kept; these are the two
          rhythm values the page shells reuse so sections line up. ------------ */
   --spacing-section: 4rem;
   --spacing-gutter: 1.5rem;
+
+  /* ==========================================================================
+     Animation tokens. Each pairs with a @keyframes block below and is always
+     invoked with the `motion-safe:` variant, e.g. `motion-safe:animate-fade`.
+     ========================================================================== */
+  --animate-fade: fade 0.8s ease-out both;
+  --animate-rise: rise 1s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-line-reveal: line-reveal 1.1s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-letter-morph: letter-morph 1.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-word-carousel: word-carousel 12.5s cubic-bezier(0.76, 0, 0.24, 1)
+    1.8s infinite;
+  --animate-drift: drift 26s ease-in-out infinite alternate;
+  --animate-scroll-cue: scroll-cue 2.2s cubic-bezier(0.76, 0, 0.24, 1) infinite;
+  --animate-marquee: marquee 36s linear infinite;
+  --animate-marquee-reverse: marquee-reverse 48s linear infinite;
+  --animate-slide-in-left: slide-in-left 1s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-slide-in-right: slide-in-right 1s cubic-bezier(0.22, 1, 0.36, 1)
+    both;
+  --animate-draw: draw 1.2s cubic-bezier(0.76, 0, 0.24, 1) both;
+  --animate-pop: pop 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-flash: flash 1.8s ease-out both;
+  --animate-grow-x: grow-x 1.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-progress-run: progress-run 4.8s cubic-bezier(0.65, 0, 0.35, 1)
+    infinite;
+  --animate-ring: ring 1.6s ease-out infinite;
+  --animate-line-loop: line-loop 3.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  --animate-up-loop: up-loop 1.9s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  --animate-scan: scan 2.2s ease-in-out infinite alternate;
+  --animate-blink: blink 1.6s ease-in-out infinite;
+  --animate-badge-spin: badge-spin 22s linear infinite;
+  --animate-ring-spin: badge-spin 40s linear infinite;
+  --animate-breathe: breathe 4.2s ease-in-out infinite;
+  --animate-arc-draw: arc-draw 1.4s cubic-bezier(0.76, 0, 0.24, 1) both;
+  --animate-slide-dot: slide-dot 2.4s cubic-bezier(0.65, 0, 0.35, 1) infinite
+    both;
+  --animate-ants-x: ants-x 1s linear infinite;
+  --animate-ants-y: ants-y 1s linear infinite;
+  --animate-marching-ants: marching-ants 1s linear infinite;
+  --animate-typewriter: typewriter 1.1s steps(28) both;
+  --animate-caret-blink: caret-blink 1s steps(1) infinite;
+  --animate-panel-in: panel-in 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-check-draw: check-draw 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-bob: bob 2.4s ease-in-out infinite;
+  --animate-descend: descend 2.4s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+  --animate-dot-descend: dot-descend 1.8s cubic-bezier(0.65, 0, 0.35, 1)
+    infinite both;
+  --animate-grow-y: grow-y 0.6s cubic-bezier(0.76, 0, 0.24, 1) both;
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes line-reveal {
+  from {
+    clip-path: inset(0 0 100% 0);
+    transform: translateY(45%);
+  }
+  to {
+    clip-path: inset(-10% -5% -25% -5%);
+    transform: none;
+  }
+}
+@keyframes letter-morph {
+  from {
+    opacity: 0;
+    transform: translateY(40%);
+    font-variation-settings:
+      "wdth" 125,
+      "wght" 150;
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    font-variation-settings:
+      "wdth" 75,
+      "wght" 800;
+  }
+}
+/* Each word span is exactly 1em tall (leading-[1]), so every stop is a whole
+   em multiple — must stay in lockstep with RotatingWord's own line-height. */
+@keyframes word-carousel {
+  0%,
+  17% {
+    transform: translateY(0);
+  }
+  20%,
+  37% {
+    transform: translateY(-1em);
+  }
+  40%,
+  57% {
+    transform: translateY(-2em);
+  }
+  60%,
+  77% {
+    transform: translateY(-3em);
+  }
+  80%,
+  97% {
+    transform: translateY(-4em);
+  }
+  100% {
+    transform: translateY(-5em);
+  }
+}
+@keyframes drift {
+  from {
+    transform: translateX(0) rotate(-4deg);
+  }
+  to {
+    transform: translateX(-14%) rotate(2deg);
+  }
+}
+@keyframes scroll-cue {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(100%);
+  }
+}
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+@keyframes marquee-reverse {
+  from {
+    transform: translateX(-50%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+@keyframes slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-56px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(56px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes draw {
+  from {
+    stroke-dashoffset: 700;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes flash {
+  0% {
+    border-color: var(--color-rule);
+    box-shadow: 0 0 0 0 rgba(43, 54, 232, 0);
+  }
+  35% {
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 8px rgba(43, 54, 232, 0.16);
+  }
+  100% {
+    border-color: rgba(43, 54, 232, 0.5);
+    box-shadow: 0 0 0 0 rgba(43, 54, 232, 0);
+  }
+}
+@keyframes grow-x {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+@keyframes progress-run {
+  from {
+    transform: translateX(-200px);
+  }
+  to {
+    transform: translateX(1300px);
+  }
+}
+@keyframes ring {
+  0% {
+    box-shadow: 0 0 0 0 rgba(43, 54, 232, 0.55);
+  }
+  100% {
+    box-shadow: 0 0 0 14px rgba(43, 54, 232, 0);
+  }
+}
+@keyframes line-loop {
+  0% {
+    transform: scaleX(0);
+  }
+  28% {
+    transform: scaleX(1);
+  }
+  85% {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scaleX(1);
+    opacity: 0;
+  }
+}
+@keyframes up-loop {
+  0% {
+    transform: translateY(14px);
+    opacity: 0;
+  }
+  25% {
+    opacity: 1;
+  }
+  75% {
+    transform: translateY(-10px);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-18px);
+    opacity: 0;
+  }
+}
+@keyframes scan {
+  0% {
+    transform: translateY(0);
+  }
+  100% {
+    transform: translateY(96px);
+  }
+}
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+@keyframes badge-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes breathe {
+  0%,
+  100% {
+    font-variation-settings:
+      "wdth" 62,
+      "wght" 900;
+  }
+  50% {
+    font-variation-settings:
+      "wdth" 125,
+      "wght" 200;
+  }
+}
+@keyframes arc-draw {
+  from {
+    stroke-dashoffset: var(--arc-length, 500);
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes slide-dot {
+  0% {
+    transform: translateX(0);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(104px);
+    opacity: 0;
+  }
+}
+@keyframes ants-x {
+  to {
+    background-position: 24px 0;
+  }
+}
+@keyframes ants-y {
+  to {
+    background-position: 0 12px;
+  }
+}
+@keyframes marching-ants {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+@keyframes typewriter {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 -2px 0 0);
+  }
+}
+@keyframes caret-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes check-draw {
+  from {
+    stroke-dashoffset: 24;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+@keyframes descend {
+  0% {
+    transform: translateY(0);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(120px);
+    opacity: 0;
+  }
+}
+@keyframes dot-descend {
+  0% {
+    transform: translateY(0);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(30px);
+    opacity: 0;
+  }
+}
+@keyframes grow-y {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
 }
 
 /* ==========================================================================
@@ -99,7 +549,6 @@
     background-color: var(--color-paper);
     color: var(--color-ink);
     font-family: var(--font-sans);
-    /* Relaxed body leading — BRAND.md §4. */
     line-height: var(--leading-body);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -130,7 +579,7 @@
   h4,
   h5,
   h6 {
-    line-height: 1.15;
+    line-height: 1.05;
     text-wrap: balance;
   }
 
@@ -138,9 +587,9 @@
     text-wrap: pretty;
   }
 
-  /* Single source of truth for the focus ring, matching the reference. */
+  /* Single source of truth for the focus ring. */
   :focus-visible {
-    outline: 2px solid var(--color-lac);
+    outline: 2px solid var(--color-accent);
     outline-offset: 2px;
   }
 
@@ -183,5 +632,57 @@
     );
     color: inherit;
     padding: 0 2px;
+  }
+
+  /* Two-line hover-swap link (the source design's `.roll`): a fixed-height
+     window over two stacked copies of the label, the second in the accent
+     colour, that slide up on hover/focus. Usage:
+       <a className="link-roll"><span className="link-roll-track">
+         <span>Label</span><span aria-hidden="true">Label</span>
+       </span></a>
+  */
+  .link-roll {
+    display: inline-block;
+    height: 1.3em;
+    line-height: 1.3em;
+    overflow: hidden;
+    text-decoration: none;
+    vertical-align: top;
+  }
+  .link-roll-track {
+    display: flex;
+    flex-direction: column;
+    transition: transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .link-roll:hover .link-roll-track,
+  .link-roll:focus-visible .link-roll-track {
+    transform: translateY(-1.3em);
+  }
+  .link-roll-track > span:last-child {
+    color: var(--color-accent);
+  }
+
+  /* The Button "arrow circle" (components/ui/Button.tsx): two overlapping
+     arrow glyphs that swap places on hover, so the arrow appears to travel
+     continuously right. `--arrow-travel` (set inline, per Button size) must
+     be at least the circle's own diameter or both arrows show at once. */
+  .arrow-glyph-a,
+  .arrow-glyph-b {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transition: transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .arrow-glyph-a {
+    transform: translate(-50%, -50%);
+  }
+  .arrow-glyph-b {
+    transform: translate(calc(-50% - var(--arrow-travel, 30px)), -50%);
+  }
+  .group:hover .arrow-glyph-a {
+    transform: translate(calc(-50% + var(--arrow-travel, 30px)), -50%);
+  }
+  .group:hover .arrow-glyph-b {
+    transform: translate(-50%, -50%);
   }
 }

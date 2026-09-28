@@ -25,7 +25,9 @@ export const Stamp = React.forwardRef<HTMLSpanElement, StampProps>(
       <span
         ref={ref}
         className={cn(
-          "relative inline-block -rotate-3 rounded-tag border-[1.5px] px-3 py-1.5 font-mono text-xs font-medium uppercase tracking-[0.18em]",
+          // Deliberately not rounded-tag: that token is now a full pill (for
+          // Badge's verdict chips) but the stamp reads as a small rotated box.
+          "relative inline-block -rotate-3 rounded-[4px] border-[1.5px] px-3 py-1.5 font-mono text-xs font-medium uppercase tracking-[0.18em]",
           "before:absolute before:inset-[2px] before:rounded-[2px] before:border before:border-current before:opacity-35",
           TONE_CLASS[tone],
           className,

@@ -150,8 +150,8 @@ export function AnalyzeForm() {
           <h2 className="mb-1 font-serif text-xl text-ink">{t("resume.label")}</h2>
           <p className="mb-4 text-sm text-ink-3">{t("resume.dropzoneHint")}</p>
           {!file && rememberedResume ? (
-            <div className="flex items-center gap-3.5 border border-rule bg-paper p-3.5">
-              <div className="relative flex h-12 w-10 shrink-0 items-center justify-center border border-ink bg-surface-raised">
+            <div className="flex items-center gap-3.5 rounded-control border border-rule bg-surface-raised p-3.5">
+              <div className="relative flex h-12 w-10 shrink-0 items-center justify-center rounded-md border border-ink bg-paper">
                 <span className="absolute bottom-1 left-0 right-0 text-center font-mono text-[9px] tracking-wide text-ink">
                   {rememberedResume.filename.split(".").pop()?.toUpperCase()}
                 </span>
@@ -207,7 +207,7 @@ export function AnalyzeForm() {
             id="country"
             value={country}
             onChange={(e) => setCountry(e.target.value as (typeof COUNTRY_KEYS)[number])}
-            className="min-h-11 w-full border border-rule bg-paper px-3.5 text-[15px] text-ink"
+            className="min-h-11 w-full rounded-control border border-rule bg-paper px-3.5 text-[15px] text-ink"
           >
             {COUNTRY_KEYS.map((key) => (
               <option key={key} value={key}>
@@ -216,7 +216,7 @@ export function AnalyzeForm() {
             ))}
           </select>
         </div>
-        <Button type="submit" size="lg" disabled={!canSubmit} loading={submitting}>
+        <Button type="submit" size="lg" icon="arrow" disabled={!canSubmit} loading={submitting}>
           {t("submit")}
         </Button>
       </div>
@@ -224,7 +224,7 @@ export function AnalyzeForm() {
         <p className="-mt-4 font-mono text-sm text-ink-3">{t("submitHint")}</p>
       ) : null}
       {formError ? (
-        <p role="alert" className="-mt-4 text-sm text-missing">
+        <p role="alert" className="-mt-4 text-sm text-danger">
           {formError}
         </p>
       ) : null}

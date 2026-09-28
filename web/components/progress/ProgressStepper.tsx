@@ -217,7 +217,7 @@ export function ProgressStepper({ analysisId }: ProgressStepperProps) {
               className={cn(
                 "flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-pill border-[1.5px]",
                 isDone && "border-ink bg-ink text-paper",
-                isActive && "border-lac border-t-transparent animate-spin",
+                isActive && "border-accent border-t-transparent animate-spin",
                 !isDone && !isActive && "border-rule",
               )}
             >

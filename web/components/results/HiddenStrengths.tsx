@@ -166,7 +166,7 @@ function HiddenStrengthCard({
   }
 
   return (
-    <div className="border border-rule bg-surface-raised p-5">
+    <div className="rounded-card border border-rule bg-surface-raised p-5">
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <p className="mb-1.5 font-mono text-[11px] uppercase tracking-wide text-ink-3">
@@ -282,7 +282,7 @@ export function HiddenStrengths({ match, analysisId }: HiddenStrengthsProps) {
       ) : null}
 
       {errorMessage ? (
-        <p role="alert" className="mb-6 text-sm leading-[1.6] text-missing">
+        <p role="alert" className="mb-6 text-sm leading-[1.6] text-danger">
           {errorMessage}
         </p>
       ) : null}

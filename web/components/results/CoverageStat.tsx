@@ -1,8 +1,9 @@
 import * as React from "react";
 
 import type { Verdict } from "@/components/ui/VerdictIcon";
-import { cn } from "@/lib/utils";
 
+/** Kept exported: `ResultsView.tsx` still builds this shape for
+ * `CoverageRing`'s proven/partial arc-share calculation. */
 export interface CoverageTile {
   verdict: Verdict;
   required: boolean;
@@ -12,31 +13,15 @@ export interface CoverageStatProps {
   label: string;
   helpLabel: string;
   value: number;
-  /** Per-requirement tile row (the reference's `.tiles.lg`). Omit for the
-   * required-only column, which shows `note` instead. */
-  tiles?: CoverageTile[];
-  underlineLabel?: string;
   note?: string;
 }
 
-const TILE_CLASS: Record<Verdict, string> = {
-  proven: "bg-proven",
-  partial: "bg-partial",
-  missing: "bg-missing",
-};
-
 /**
- * Big serif percentage + optional colour-tile requirement bar, replacing a
- * circular gauge — the reference has no ring gauge at all, just this.
+ * The secondary (required-only) coverage figure: a plain big number plus a
+ * caption. The primary figure is `CoverageRing` — this one stays a number
+ * because the source design shows only one ring, not two.
  */
-export function CoverageStat({
-  label,
-  helpLabel,
-  value,
-  tiles,
-  underlineLabel,
-  note,
-}: CoverageStatProps) {
+export function CoverageStat({ label, helpLabel, value, note }: CoverageStatProps) {
   const rounded = Math.round(value);
 
   return (
@@ -51,37 +36,12 @@ export function CoverageStat({
           ?
         </span>
       </p>
-      <p className="font-serif text-6xl leading-none tracking-tight text-ink">
+      <p className="font-serif text-6xl font-extrabold leading-none tracking-tight text-ink">
         {rounded}
-        <span className="ml-0.5 font-mono text-sm uppercase tracking-wide text-ink-3">
-          %
-        </span>
+        <span className="ml-0.5 text-[0.5em] text-accent">%</span>
       </p>
 
-      {tiles ? (
-        <>
-          <div className="mt-4 flex gap-1.5" aria-hidden="true">
-            {tiles.map((tile, i) => (
-              <span
-                key={i}
-                className={cn(
-                  "relative h-[22px] flex-1 rounded-[3px]",
-                  TILE_CLASS[tile.verdict],
-                  tile.required &&
-                    "after:absolute after:inset-x-0 after:-bottom-1.5 after:h-0.5 after:bg-ink-3 after:opacity-60",
-                )}
-              />
-            ))}
-          </div>
-          {underlineLabel ? (
-            <p className="mt-2 font-mono text-xs text-ink-3">{underlineLabel}</p>
-          ) : null}
-        </>
-      ) : null}
-
-      {note ? (
-        <p className="mt-3.5 max-w-[42ch] text-sm text-ink-2">{note}</p>
-      ) : null}
+      {note ? <p className="mt-3.5 max-w-[42ch] text-sm text-ink-2">{note}</p> : null}
     </div>
   );
 }

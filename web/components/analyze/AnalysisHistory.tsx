@@ -45,7 +45,7 @@ export function AnalysisHistory() {
           <li key={row.analysis_id}>
             <Link
               href={`/results?id=${row.analysis_id}`}
-              className="flex flex-wrap items-center justify-between gap-3 border border-rule bg-paper p-3.5 transition-colors hover:bg-paper-2"
+              className="flex flex-wrap items-center justify-between gap-3 rounded-control border border-rule bg-paper p-3.5 transition-colors hover:bg-paper-2"
             >
               <div className="min-w-0">
                 <p className="truncate font-medium text-ink">
