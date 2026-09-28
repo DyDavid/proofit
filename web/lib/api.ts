@@ -55,6 +55,18 @@ export async function submitJob(
   return res.json();
 }
 
+export async function fetchJobFromUrl(
+  url: string,
+): Promise<{ text: string; url: string; word_count: number }> {
+  const res = await fetch("/api/jobs/fetch-url", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+  if (!res.ok) throw await toApiError(res);
+  return res.json();
+}
+
 export interface CreateAnalysisInput {
   resume_id: string;
   job_id: string;
@@ -135,6 +147,7 @@ export async function getAnalysisHistory(resumeId: string): Promise<AnalysisSumm
  * (PERSON_B_PLAN_v2.md §2), and F6's config model lives in
  * `engine/country/rules.py`, a separate module never bundled into it.
  */
+
 export interface CountryRules {
   code: string;
   display_name: string;

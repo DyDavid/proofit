@@ -35,6 +35,51 @@ class JobIn(BaseModel):
     url: str | None = None
 
 
+class FetchUrlIn(BaseModel):
+    url: str
+
+
+@router.post("/jobs/fetch-url")
+async def fetch_job_url(payload: FetchUrlIn) -> dict:
+    url = payload.url.strip()
+    if not url.startswith("http://") and not url.startswith("https://"):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "INVALID_URL",
+                "message": "Please enter a valid URL starting with http:// or https://.",
+            },
+        )
+
+    from engine.ingest.cache import save_cached_text
+    from engine.ingest.scraper import scrape_job_url
+
+    try:
+        raw_text = scrape_job_url(url)
+        save_cached_text(url, raw_text)
+        return {
+            "url": url,
+            "text": raw_text,
+            "word_count": len(raw_text.split()),
+        }
+    except ValueError as val_err:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "JOB_URL_BLOCKED",
+                "message": str(val_err),
+            },
+        ) from val_err
+    except Exception as err:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "JOB_FETCH_FAILED",
+                "message": f"Could not fetch job from URL: {err}",
+            },
+        ) from err
+
+
 @router.post("/jobs")
 async def submit_job(payload: JobIn) -> dict:
     # Stripped once, up front: a blank or whitespace-only field counts as "not

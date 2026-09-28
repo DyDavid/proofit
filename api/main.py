@@ -7,7 +7,10 @@ server-side, so the browser only ever talks to its own origin
 
 from __future__ import annotations
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
+
+load_dotenv()
 
 from api.config import settings
 from api.errors import install_error_handlers

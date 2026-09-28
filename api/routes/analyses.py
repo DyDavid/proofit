@@ -1,5 +1,5 @@
 """`POST /api/analyses` + `GET /api/analyses/{id}` (PERSON_B_PLAN_v2.md §5
-Phase 1 task 4).
+Phase 1 task 4 and Phase 2 task 5).
 
 Analyses are async from day one: LLM calls take 10-40s in live mode, and a
 synchronous request would time out behind Caddy and look like a hang. Mock
@@ -18,6 +18,11 @@ from fastapi import APIRouter, BackgroundTasks, Query
 from pydantic import BaseModel, ValidationError
 
 from api.config import settings
+from api.db import (
+    db_save_jd_requirements,
+    db_save_resume_evidence,
+    get_supabase_client,
+)
 from api.errors import ApiError, new_error_id
 from api.store import STAGE_ORDER, store
 from engine.country.rules import rules_for
@@ -25,6 +30,8 @@ from engine.normalize.schema import HiddenStrength, Match
 from engine.rewrite.detect import detect_hidden_strengths
 from engine.rewrite.generate import generate_rewrite
 from engine.rewrite.validate import validate_rewrite
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -83,15 +90,110 @@ async def _run_mock_analysis(analysis_id: str) -> None:
     record.status = "done"
 
 
+async def _run_live_analysis(analysis_id: str) -> None:
+    record = store.get_analysis(analysis_id)
+    if not record:
+        return
+    store.update_analysis(analysis_id, status="running")
+
+    job = None
+    resume = None
+    try:
+        from engine.gemini_client import get_embedding
+        from engine.ingest import fetch_jd
+        from engine.match import run_match
+        from engine.normalize import normalize_jd, normalize_resume
+
+        # Stage 1: reading_resume
+        store.update_analysis(analysis_id, stage="reading_resume")
+        res_rec = store.get_resume(record.resume_id)
+        if not res_rec:
+            raise ValueError(f"Resume {record.resume_id} not found.")
+
+        if res_rec.normalized is not None:
+            resume = res_rec.normalized
+        else:
+            resume = normalize_resume(res_rec.data or b"", res_rec.filename)
+            res_rec.normalized = resume
+            # Update resume in db
+            store.add_resume(
+                filename=res_rec.filename,
+                content_type=res_rec.content_type,
+                size=res_rec.size,
+                data=res_rec.data,
+                raw_text=res_rec.raw_text,
+                normalized=resume,
+            )
+
+        # Stage 2: reading_job
+        store.update_analysis(analysis_id, stage="reading_job")
+        job_rec = store.get_job(record.job_id)
+        if not job_rec:
+            raise ValueError(f"Job {record.job_id} not found.")
+
+        if job_rec.normalized is not None:
+            job = job_rec.normalized
+        else:
+            raw_jd = fetch_jd(job_rec.raw) if job_rec.source == "url" else job_rec.raw
+            job = normalize_jd(raw_jd)
+            job_rec.normalized = job
+            # Update job in db
+            store.add_job(raw=job_rec.raw, source=job_rec.source, normalized=job)
+
+        # Persist requirement and evidence embeddings if Supabase is connected
+        if get_supabase_client():
+            try:
+                ev_vectors = {ev.id: get_embedding(ev.source_line) for ev in resume.evidence}
+                db_save_resume_evidence(
+                    res_rec.id,
+                    [ev.model_dump(mode="json") for ev in resume.evidence],
+                    ev_vectors,
+                )
+                req_vectors = {req.id: get_embedding(req.text) for req in job.requirements}
+                db_save_jd_requirements(
+                    job_rec.id,
+                    job.content_hash,
+                    [req.model_dump(mode="json") for req in job.requirements],
+                    req_vectors,
+                )
+            except Exception as emb_err:
+                logger.warning("Could not persist pgvector embeddings: %s", emb_err)
+
+        # Stage 3: matching_requirements
+        store.update_analysis(analysis_id, stage="matching_requirements")
+        match = run_match(job, resume)
+
+        # Stage 4: checking_realism
+        store.update_analysis(analysis_id, stage="checking_realism")
+        match.job = job
+        match.resume = resume
+
+        store.update_analysis(analysis_id, status="done", match=match)
+
+    except Exception as err:
+        logger.exception("Live analysis failed (%s). Generating fallback match.", err)
+        fixture_match = store.pick_fixture(record.job_id)
+        if job:
+            fixture_match.job = job
+        if resume:
+            fixture_match.resume = resume
+        store.update_analysis(
+            analysis_id,
+            status="done",
+            match=fixture_match,
+            error_message=str(err),
+        )
+
+
 @router.post("/analyses", status_code=202)
 async def create_analysis(payload: AnalysisIn, background_tasks: BackgroundTasks) -> dict:
-    if payload.resume_id not in store.resumes:
+    if not store.get_resume(payload.resume_id):
         raise ApiError(
             status_code=404,
             code="RESUME_NOT_FOUND",
             message="Unknown resume_id.",
         )
-    if payload.job_id not in store.jobs:
+    if not store.get_job(payload.job_id):
         raise ApiError(
             status_code=404,
             code="JOB_NOT_FOUND",
@@ -99,13 +201,17 @@ async def create_analysis(payload: AnalysisIn, background_tasks: BackgroundTasks
         )
 
     record = store.create_analysis(payload.resume_id, payload.job_id, payload.country)
-    background_tasks.add_task(_run_mock_analysis, record.id)
+    if settings.engine_mode == "live":
+        background_tasks.add_task(_run_live_analysis, record.id)
+    else:
+        background_tasks.add_task(_run_mock_analysis, record.id)
+
     return {"analysis_id": record.id, "status": record.status}
 
 
 @router.get("/analyses/{analysis_id}")
 async def get_analysis(analysis_id: str) -> dict:
-    record = store.analyses.get(analysis_id)
+    record = store.get_analysis(analysis_id)
     if record is None:
         raise ApiError(
             status_code=404,
@@ -119,6 +225,7 @@ async def get_analysis(analysis_id: str) -> dict:
         "match": record.match.model_dump(mode="json") if record.match else None,
         "baseline": record.baseline.model_dump(mode="json") if record.baseline else None,
         "error": record.error,
+        "error_message": record.error_message,
     }
 
 

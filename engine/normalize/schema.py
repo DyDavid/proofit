@@ -41,7 +41,7 @@ the database, the API response, or the screen.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from pydantic import (
@@ -89,7 +89,7 @@ SCHEMA_VERSION = "0.1.0-provisional"
 
 def utcnow() -> datetime:
     """Timezone-aware UTC now. Never use naive datetimes — Supabase stores tz-aware."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 # ── Literal aliases ───────────────────────────────────────────────────────────
