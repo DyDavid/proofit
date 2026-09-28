@@ -117,12 +117,59 @@ function UploadDiagram() {
     <svg width="140" height="120" viewBox="0 0 220 190" fill="none" aria-hidden="true">
       <path d="M78 18h48l16 16v100H78z" stroke="var(--color-ink)" strokeWidth="1.5" fill="var(--color-paper)" />
       <path d="M126 18v16h16" stroke="var(--color-ink)" strokeWidth="1.5" />
-      <rect x="90" y="52" width="40" height="4" rx="2" fill="var(--color-faint)" />
-      <rect x="90" y="66" width="30" height="4" rx="2" fill="var(--color-accent)" />
-      <rect x="90" y="80" width="42" height="4" rx="2" fill="var(--color-faint)" />
-      <rect x="90" y="94" width="26" height="4" rx="2" fill="var(--color-accent)" />
-      <rect x="90" y="108" width="36" height="4" rx="2" fill="var(--color-faint)" />
-      <path d="M110 178V152M99 163l11-11 11 11" stroke="var(--color-accent)" strokeWidth="2" />
+      <rect
+        x="90"
+        y="52"
+        width="40"
+        height="4"
+        rx="2"
+        fill="var(--color-faint)"
+        className="motion-safe:animate-line-loop"
+        style={{ transformOrigin: "0 50%" }}
+      />
+      <rect
+        x="90"
+        y="66"
+        width="30"
+        height="4"
+        rx="2"
+        fill="var(--color-accent)"
+        className="motion-safe:animate-line-loop"
+        style={{ transformOrigin: "0 50%", animationDelay: "0.15s" }}
+      />
+      <rect
+        x="90"
+        y="80"
+        width="42"
+        height="4"
+        rx="2"
+        fill="var(--color-faint)"
+        className="motion-safe:animate-line-loop"
+        style={{ transformOrigin: "0 50%", animationDelay: "0.3s" }}
+      />
+      <rect
+        x="90"
+        y="94"
+        width="26"
+        height="4"
+        rx="2"
+        fill="var(--color-accent)"
+        className="motion-safe:animate-line-loop"
+        style={{ transformOrigin: "0 50%", animationDelay: "0.45s" }}
+      />
+      <rect
+        x="90"
+        y="108"
+        width="36"
+        height="4"
+        rx="2"
+        fill="var(--color-faint)"
+        className="motion-safe:animate-line-loop"
+        style={{ transformOrigin: "0 50%", animationDelay: "0.6s" }}
+      />
+      <g className="motion-safe:animate-up-loop" style={{ transformOrigin: "center" }}>
+        <path d="M110 178V152M99 163l11-11 11 11" stroke="var(--color-accent)" strokeWidth="2" />
+      </g>
     </svg>
   );
 }
@@ -139,8 +186,16 @@ function JobPostDiagram() {
       <rect x="74" y="104" width="50" height="4" rx="2" fill="var(--color-rule-2)" />
       <rect x="74" y="118" width="62" height="4" rx="2" fill="var(--color-rule-2)" />
       <rect x="74" y="132" width="40" height="4" rx="2" fill="var(--color-rule-2)" />
-      <rect x="54" y="38" width="112" height="22" fill="var(--color-accent)" fillOpacity=".08" />
-      <rect x="54" y="58" width="112" height="2" fill="var(--color-accent)" />
+      <g className="motion-safe:animate-scan">
+        <rect x="54" y="38" width="112" height="22" fill="var(--color-accent)" fillOpacity=".08" />
+        <rect x="54" y="58" width="112" height="2" fill="var(--color-accent)" />
+      </g>
+      <g className="motion-safe:animate-blink" stroke="var(--color-accent)" strokeWidth="2">
+        <path d="M48 26V12h14" />
+        <path d="M158 12h14v14" />
+        <path d="M172 164v14h-14" />
+        <path d="M62 178H48v-14" />
+      </g>
     </svg>
   );
 }
@@ -148,12 +203,56 @@ function JobPostDiagram() {
 function VerdictDiagram() {
   return (
     <svg width="140" height="120" viewBox="0 0 220 190" fill="none" aria-hidden="true">
-      <circle cx="62" cy="55" r="11" fill="var(--color-accent)" />
-      <rect x="86" y="52" width="82" height="6" rx="3" fill="var(--color-accent)" />
-      <path d="M62 84a11 11 0 0 1 0 22z" fill="var(--color-ink)" />
-      <circle cx="62" cy="95" r="11" stroke="var(--color-ink)" strokeWidth="1.5" fill="none" />
-      <rect x="86" y="92" width="44" height="6" rx="3" fill="var(--color-ink)" />
-      <circle cx="62" cy="135" r="11" stroke="var(--color-ink-3)" strokeWidth="1.5" strokeDasharray="3 3" />
+      <circle cx="62" cy="55" r="11" stroke="var(--color-ink)" strokeWidth="1.5" />
+      <rect x="86" y="52" width="82" height="6" rx="3" fill="var(--color-rule)" />
+      <circle
+        cx="62"
+        cy="55"
+        r="11"
+        fill="var(--color-accent)"
+        className="motion-safe:animate-v-loop"
+        style={{ transformOrigin: "center" }}
+      />
+      <rect
+        x="86"
+        y="52"
+        width="82"
+        height="6"
+        rx="3"
+        fill="var(--color-accent)"
+        className="motion-safe:animate-line-loop"
+        style={{ transformOrigin: "0 50%", animationDelay: "0.1s", animationDuration: "3.6s" }}
+      />
+
+      <circle cx="62" cy="95" r="11" stroke="var(--color-ink)" strokeWidth="1.5" />
+      <rect x="86" y="92" width="82" height="6" rx="3" fill="var(--color-rule)" />
+      <path
+        d="M62 84a11 11 0 0 1 0 22z"
+        fill="var(--color-ink)"
+        className="motion-safe:animate-v-loop"
+        style={{ transformOrigin: "center", animationDelay: "0.5s" }}
+      />
+      <rect
+        x="86"
+        y="92"
+        width="44"
+        height="6"
+        rx="3"
+        fill="var(--color-ink)"
+        className="motion-safe:animate-line-loop"
+        style={{ transformOrigin: "0 50%", animationDelay: "0.6s", animationDuration: "3.6s" }}
+      />
+
+      <circle
+        cx="62"
+        cy="135"
+        r="11"
+        stroke="var(--color-ink-3)"
+        strokeWidth="1.5"
+        strokeDasharray="3 3"
+        className="motion-safe:animate-blink"
+        style={{ animationDuration: "1.4s" }}
+      />
       <rect x="86" y="132" width="82" height="6" rx="3" fill="none" stroke="var(--color-rule-2)" strokeDasharray="3 3" />
     </svg>
   );

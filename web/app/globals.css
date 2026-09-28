@@ -151,6 +151,7 @@
   --animate-dot-descend: dot-descend 1.8s cubic-bezier(0.65, 0, 0.35, 1)
     infinite both;
   --animate-grow-y: grow-y 0.6s cubic-bezier(0.76, 0, 0.24, 1) both;
+  --animate-v-loop: v-loop 3.6s cubic-bezier(0.22, 1, 0.36, 1) infinite;
 }
 
 @keyframes fade {
@@ -526,6 +527,27 @@
   }
   to {
     transform: scaleY(1);
+  }
+}
+@keyframes v-loop {
+  0% {
+    transform: scale(0);
+    opacity: 0;
+  }
+  10% {
+    transform: scale(1.25);
+    opacity: 1;
+  }
+  16% {
+    transform: scale(1);
+  }
+  86% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 0;
   }
 }
 
