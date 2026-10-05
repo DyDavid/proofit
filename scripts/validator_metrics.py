@@ -6,7 +6,7 @@ Measures `engine.rewrite.validate.precheck_scope_inflation` and
 `precheck_rewrite` — the two zero-cost, zero-network layers — against the 30
 labelled cases in `tests/rewrite_cases.py`. It does **not** measure the third
 layer, `_call_llm_validator`, by default: doing so would require a live
-`ANTHROPIC_API_KEY` and network access, and a table that silently folded a
+`GEMINI_API_KEY` and network access, and a table that silently folded a
 mocked LLM's verdicts into "the validator's" precision/recall would misreport
 what actually runs for free. Every number this script prints without `--live`
 comes from regex and a wordlist, nothing else.
@@ -83,7 +83,7 @@ def deterministic_predicts_reject(case: ValidatorCase) -> bool:
 def live_predicts_reject(case: ValidatorCase) -> bool:
     """True if the *full* three-layer `validate_rewrite` — including a real
     network call to `_call_llm_validator` — rejects `case`. Only ever invoked
-    when `--live` is passed and `ANTHROPIC_API_KEY` is set."""
+    when `--live` is passed and `GEMINI_API_KEY` is set."""
     evidence = [_evidence_for(case)]
     rewrite = _rewrite_for(case)
     return not validate_rewrite(rewrite, evidence).ok
@@ -150,7 +150,7 @@ def main() -> int:
         action="store_true",
         help=(
             "Additionally run the real LLM layer (_call_llm_validator) over all 30 "
-            "cases. Requires ANTHROPIC_API_KEY; skipped with a message if unset."
+            "cases. Requires GEMINI_API_KEY; skipped with a message if unset."
         ),
     )
     args = parser.parse_args()
@@ -162,7 +162,7 @@ def main() -> int:
     print(
         "IMPORTANT: the table below measures the two DETERMINISTIC layers only —\n"
         "precheck_scope_inflation and precheck_rewrite. No LLM is called to produce\n"
-        "it, no ANTHROPIC_API_KEY is read, and no network request is made. A case\n"
+        "it, no GEMINI_API_KEY is read, and no network request is made. A case\n"
         "labelled caught_by=\"llm\" in tests/rewrite_cases.py is *expected* to show up\n"
         "as a false negative here — the whole reason engine/rewrite/validate.py has a\n"
         "third layer is that these two cannot see that class of failure. This table\n"
@@ -190,9 +190,9 @@ def main() -> int:
     print()
 
     if args.live:
-        if not os.environ.get("ANTHROPIC_API_KEY"):
+        if not os.environ.get("GEMINI_API_KEY"):
             print(
-                "--live was passed but ANTHROPIC_API_KEY is not set in the environment; "
+                "--live was passed but GEMINI_API_KEY is not set in the environment; "
                 "skipping the live LLM run. No network call was made."
             )
         else:

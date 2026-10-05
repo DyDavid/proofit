@@ -30,7 +30,7 @@
 > URL fetching — but has not yet had its deliberate-force screenshot pass. The remaining three
 > codes cannot be forced from here yet: `RESUME_UNREADABLE` needs Person A's normalizer (mock
 > mode never parses file content), `JOB_FETCH_FAILED` needs the Phase 3 URL fetcher
-> (unimplemented until CP2), and `RATE_LIMITED` is only reachable against the real Anthropic
+> (unimplemented until CP2), and `RATE_LIMITED` is only reachable against the real Gemini API
 > API at CP2.
 
 ---
@@ -183,7 +183,7 @@ Khmer strings marked **provisional** — see §4.
 
 | | |
 |---|---|
-| **Trigger** | Two distinct sources, one code. (a) The Anthropic API returns 429 to our engine — the likely case, and the one that will bite during a demo if several people run analyses at once. (b) Our own per-client throttle rejects a request. **Can arrive synchronously on any POST, or inside a polled `failed` analysis** when (a) happens mid-job. |
+| **Trigger** | Two distinct sources, one code. (a) The Gemini API returns 429 to our engine — the likely case, and the one that will bite during a demo if several people run analyses at once. (b) Our own per-client throttle rejects a request. **Can arrive synchronously on any POST, or inside a polled `failed` analysis** when (a) happens mid-job. |
 | **English** | Too many requests right now. Wait about a minute and try again. |
 | **Khmer** | មានសំណើច្រើនពេកនៅពេលនេះ។ សូមរង់ចាំប្រហែលមួយនាទី រួចព្យាយាមម្តងទៀត។ |
 | **Recovery** | Retry button, disabled for 60 s with a visible countdown so the user is not invited to hammer a limit that is already exceeded. Honour a `Retry-After` header when the upstream sends one. |
@@ -244,7 +244,7 @@ awkward machine-translated label — review these first in that session, ahead o
 - [x] Add `errors.*` keys for all eleven codes to `web/messages/en.json` and `web/messages/km.json`.
 - [x] Add a typed `ApiError` in `web/lib/api.ts` that surfaces `code` (and `error_id`) to callers.
 - [x] Map every *mock-mode-reachable* code to a UI presentation: `RESUME_BAD_TYPE`/`RESUME_TOO_LARGE` inline under the dropzone, `JOB_EMPTY` inline under the JD tabs, `ANALYSIS_NOT_FOUND` full-page, `ENGINE_FAILED` as an error card with Retry + copyable error_id.
-- [ ] **Force each of the eleven failures deliberately and screenshot both locales.** Done for the four reachable in mock mode today: `RESUME_BAD_TYPE` (upload a `.txt`), `RESUME_TOO_LARGE` (upload a >5MB file), `JOB_EMPTY` (submit blank/neither/both), `ANALYSIS_NOT_FOUND` (hand-edit an id), `ENGINE_FAILED` (tests/test_analyses_baseline_and_retry.py's monkeypatch demonstrates the path; a manual screenshot still needs taking). `JOB_URL_BLOCKED` has been forceable and reachable since Phase 3 task 1/2 (`6f98eb7`, `7950538`) — it is a pure host-string check on the submitted URL and never needed the URL fetcher; still needs its deliberate-force screenshot pass. **Still blocked:** `RESUME_UNREADABLE` (mock mode doesn't parse file content at all — needs Person A's normalizer), `JOB_FETCH_FAILED` (needs the Phase 3 URL fetcher, unimplemented until CP2), `RATE_LIMITED` (only reachable against the real Anthropic API, CP2).
+- [ ] **Force each of the eleven failures deliberately and screenshot both locales.** Done for the four reachable in mock mode today: `RESUME_BAD_TYPE` (upload a `.txt`), `RESUME_TOO_LARGE` (upload a >5MB file), `JOB_EMPTY` (submit blank/neither/both), `ANALYSIS_NOT_FOUND` (hand-edit an id), `ENGINE_FAILED` (tests/test_analyses_baseline_and_retry.py's monkeypatch demonstrates the path; a manual screenshot still needs taking). `JOB_URL_BLOCKED` has been forceable and reachable since Phase 3 task 1/2 (`6f98eb7`, `7950538`) — it is a pure host-string check on the submitted URL and never needed the URL fetcher; still needs its deliberate-force screenshot pass. **Still blocked:** `RESUME_UNREADABLE` (mock mode doesn't parse file content at all — needs Person A's normalizer), `JOB_FETCH_FAILED` (needs the Phase 3 URL fetcher, unimplemented until CP2), `RATE_LIMITED` (only reachable against the real Gemini API API, CP2).
 - [ ] Re-word `ANALYSIS_NOT_FOUND` after Supabase persistence lands at CP2.
 - [ ] Confirm every message obeys the `BRAND.md` §6 voice rules — no blame, no jargon, and a concrete next action in every single one. *(English strings were copied verbatim from this document's own §2, which was already written to that standard — this line is asking for a second read with fresh eyes before the Phase 5 Khmer QA session, not a rewrite.)*
 

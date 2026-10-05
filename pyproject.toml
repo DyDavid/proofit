@@ -16,7 +16,7 @@ authors = [{ name = "Proofit team" }]
 # an API call instead — see PERSON_B_PLAN_v2.md §9 "Render OOM on embeddings".
 dependencies = [
   "pydantic>=2.9,<3",
-  "google-genai>=0.1.0",
+  "google-genai>=1.30",
   "google-generativeai>=0.8.0",
   "scikit-learn>=1.4.0",
 ]
@@ -30,8 +30,7 @@ api = [
   "python-multipart>=0.0.12",
   "httpx>=0.27,<1",
   "supabase>=2.9,<3",
-  "google-genai>=0.1.0",
-  "anthropic>=0.40",
+  "google-genai>=1.30",
 ]
 
 # Resume and JD text extraction. Person A owns the normalizers; these are the
@@ -98,5 +97,5 @@ plugins = ["pydantic.mypy"]
 files = ["engine", "api", "tests"]
 
 [[tool.mypy.overrides]]
-module = ["supabase.*", "anthropic.*", "pdfminer.*", "docx.*"]
+module = ["supabase.*", "pdfminer.*", "docx.*"]
 ignore_missing_imports = true

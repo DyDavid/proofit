@@ -73,7 +73,7 @@ Open `http://localhost:3000/results` or click **"Try a Sample Analysis"** on the
 ```ini
 ENGINE_MODE=live
 APP_VERSION=0.1.0
-ANTHROPIC_API_KEY=sk-ant-...
+GEMINI_API_KEY=...        # matching, embeddings AND rewrites
 SUPABASE_URL=https://<project-id>.supabase.co
 SUPABASE_KEY=eyJ...
 ```
@@ -88,7 +88,7 @@ Then, in the browser:
 1. Open the site. Click **Try a sample** — this must render a full result with
    zero uploads and zero LLM calls.
 2. Run **one real analysis** (a real resume + a real JD) all the way to results.
-   This is what actually proves Anthropic, Supabase and the engine are alive.
+   This is what actually proves Gemini, Supabase and the engine are alive.
 3. Open the Render dashboard → Logs, and confirm your request appears there.
 4. Open the Supabase dashboard and confirm the project shows **Active**, not
    Paused. If paused, click Restore and wait for it to come back — this can take

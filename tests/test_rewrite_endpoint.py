@@ -398,3 +398,28 @@ def test_rewrites_endpoint_works_when_destination_has_no_country_rules() -> None
     body = res.json()
     assert body["rejected_count"] == 0
     assert len(body["hidden_strengths"]) == 1
+
+
+# ── Error bodies must not carry provider internals ───────────────────────────
+def test_rewrite_failure_returns_a_generic_message_not_the_raw_error() -> None:
+    """The 500 body is shown in the browser; a provider error can echo keys/URLs."""
+    secret = "https://internal.example/v1?key=AIzaSy-SECRET"
+    analysis_id = _seed_done_analysis("an_test_rewrites_err_leak")
+    with patch("api.routes.analyses.detect_hidden_strengths", side_effect=RuntimeError(secret)):
+        res = client.post(f"/api/analyses/{analysis_id}/rewrites")
+    assert res.status_code == 500
+    assert res.json()["error"]["code"] == "ENGINE_FAILED"
+    assert "AIza" not in res.text and "internal.example" not in res.text
+
+
+def test_rewrite_rate_limit_maps_to_429_with_a_friendly_message() -> None:
+    from engine.rewrite.llm import RateLimitedError
+
+    analysis_id = _seed_done_analysis("an_test_rewrites_429")
+    with patch(
+        "api.routes.analyses.detect_hidden_strengths", side_effect=RateLimitedError("quota 123")
+    ):
+        res = client.post(f"/api/analyses/{analysis_id}/rewrites")
+    assert res.status_code == 429
+    assert res.json()["error"]["code"] == "RATE_LIMITED"
+    assert "123" not in res.text

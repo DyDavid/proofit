@@ -13,7 +13,6 @@ import asyncio
 import logging
 import time
 
-import anthropic
 from fastapi import APIRouter, BackgroundTasks, Query
 from pydantic import BaseModel, ValidationError
 
@@ -29,6 +28,7 @@ from engine.country.rules import rules_for
 from engine.normalize.schema import HiddenStrength, Match
 from engine.rewrite.detect import detect_hidden_strengths
 from engine.rewrite.generate import generate_rewrite
+from engine.rewrite.llm import RateLimitedError as RewriteRateLimitedError
 from engine.rewrite.validate import validate_rewrite
 
 logger = logging.getLogger(__name__)
@@ -301,8 +301,8 @@ def create_rewrites(analysis_id: str) -> dict:
 
     Deliberately a plain `def`, not `async def`: every call inside this
     function (`detect_hidden_strengths`, `generate_rewrite`,
-    `validate_rewrite`) is synchronous and ultimately blocks on the Anthropic
-    SDK's `client.messages.create()` — 10-40s in live mode, per this module's
+    `validate_rewrite`) is synchronous and ultimately blocks on the Gemini
+    SDK's `generate_content()` — 10-40s in live mode, per this module's
     own docstring. An `async def` route runs directly on the event loop, so a
     blocking call here would freeze every other in-flight request, including
     the `GET /api/analyses/{id}` poll the Progress screen depends on. FastAPI
@@ -411,10 +411,22 @@ def create_rewrites(analysis_id: str) -> dict:
             # before the outcome is actually known would misreport it.
             if first_failure is not None:
                 first_failure.retry_succeeded = True
-    except anthropic.RateLimitError as exc:
-        raise ApiError(status_code=429, code="RATE_LIMITED", message=str(exc)) from exc
+    except RewriteRateLimitedError as exc:
+        logger.warning("Rewrite request rate-limited: %s", exc)
+        raise ApiError(
+            status_code=429,
+            code="RATE_LIMITED",
+            message="The rewrite service is busy. Try again in a minute.",
+        ) from exc
     except Exception as exc:
-        raise ApiError(status_code=500, code="ENGINE_FAILED", message=str(exc)) from exc
+        # Generic on purpose: provider errors can echo keys or URLs, and this
+        # message is returned to the browser. The real error is in the log.
+        logger.exception("Rewrite generation failed")
+        raise ApiError(
+            status_code=500,
+            code="ENGINE_FAILED",
+            message="The analysis didn't finish. Try again.",
+        ) from exc
 
     record.match = match
     return {
