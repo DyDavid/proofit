@@ -73,6 +73,35 @@ jobs:
         run: pytest
 
   # ─────────────────────────────────────────────────────────────────────────
+  # Mirrors api/Dockerfile: only the `api` + `parse` extras, a non-editable
+  # install, and `api/` copied in next to the installed `engine`. The python job
+  # above installs `dev` and runs from the checkout, so it cannot see a dependency
+  # that is imported but never declared (anthropic was exactly that; Render
+  # failed to start for it while every test here passed).
+  image-imports:
+    name: api image — imports with declared deps only
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install like the Dockerfile
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[api,parse]"
+
+      - name: Import the app away from the checkout
+        run: |
+          mkdir "$RUNNER_TEMP/run"
+          # api/ and data/ are what the Dockerfile copies next to the installed engine.
+          cp -r api data "$RUNNER_TEMP/run/"
+          cd "$RUNNER_TEMP/run"
+          python -c "import api.main; print('api.main imports cleanly')"
+
+  # ─────────────────────────────────────────────────────────────────────────
   web:
     name: web — typecheck, build
     runs-on: ubuntu-latest
