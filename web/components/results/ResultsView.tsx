@@ -1,6 +1,5 @@
 import { useTranslations } from "@/lib/copy";
 
-import { CountryFormat } from "@/components/results/CountryFormat";
 import { HiddenStrengths } from "@/components/results/HiddenStrengths";
 import { ResultsInteractive } from "@/components/results/ResultsInteractive";
 import { CoverageStat, type CoverageTile } from "@/components/results/CoverageStat";
@@ -125,7 +124,6 @@ export function ResultsView({ match, baseline, analysisId }: ResultsViewProps) {
 
       <HiddenStrengths match={match} analysisId={analysisId} />
 
-      <CountryFormat match={match} />
     </div>
   );
 }
