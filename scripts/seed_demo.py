@@ -5,7 +5,6 @@ Run with: python scripts/seed_demo.py
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -29,7 +28,6 @@ def seed_demo_data() -> list[str]:
             print(f"Skipping {name}: file not found.")
             continue
 
-        raw = json.loads(path.read_text(encoding="utf-8"))
         match = store.pick_fixture(name)
 
         # Create store records

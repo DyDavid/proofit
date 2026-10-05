@@ -13,6 +13,7 @@ Enforces non-negotiable rules from PROJECT_SPEC.md §9:
 from __future__ import annotations
 
 import logging
+import re
 
 from engine.normalize.schema import (
     Job,
@@ -113,9 +114,6 @@ def calculate_coverage(
     )
 
     return coverage_score, coverage_required_only
-
-
-import re
 
 
 def _has_kw(text: str, keywords: list[str]) -> bool:

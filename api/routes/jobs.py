@@ -8,6 +8,7 @@ stored as-is, not retrieved.
 
 from __future__ import annotations
 
+import logging
 from urllib.parse import urlparse
 
 from fastapi import APIRouter
@@ -15,6 +16,8 @@ from pydantic import BaseModel
 
 from api.errors import ApiError
 from api.store import store
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -42,13 +45,14 @@ class FetchUrlIn(BaseModel):
 @router.post("/jobs/fetch-url")
 async def fetch_job_url(payload: FetchUrlIn) -> dict:
     url = payload.url.strip()
-    if not url.startswith("http://") and not url.startswith("https://"):
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "code": "INVALID_URL",
-                "message": "Please enter a valid URL starting with http:// or https://.",
-            },
+    # Same two codes docs/errors.md §2 defines for URLs we cannot use. The
+    # underlying exception is logged, never returned: scraper errors echo URLs
+    # and upstream response details, and this body goes to the browser.
+    if not url.startswith(("http://", "https://")):
+        raise ApiError(
+            status_code=502,
+            code="JOB_FETCH_FAILED",
+            message="Please enter a valid URL starting with http:// or https://.",
         )
 
     from engine.ingest.cache import save_cached_text
@@ -63,20 +67,18 @@ async def fetch_job_url(payload: FetchUrlIn) -> dict:
             "word_count": len(raw_text.split()),
         }
     except ValueError as val_err:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "code": "JOB_URL_BLOCKED",
-                "message": str(val_err),
-            },
+        logger.warning("Job URL refused (%s): %s", url, val_err)
+        raise ApiError(
+            status_code=422,
+            code="JOB_URL_BLOCKED",
+            message="We can't open that link. Paste the job description text instead.",
         ) from val_err
     except Exception as err:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "code": "JOB_FETCH_FAILED",
-                "message": f"Could not fetch job from URL: {err}",
-            },
+        logger.warning("Job URL fetch failed (%s): %s", url, err)
+        raise ApiError(
+            status_code=502,
+            code="JOB_FETCH_FAILED",
+            message="We couldn't open that link. Paste the job description text instead.",
         ) from err
 
 

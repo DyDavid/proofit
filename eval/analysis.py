@@ -24,7 +24,7 @@ def cohen_kappa_3class(rater1: list[str], rater2: list[str]) -> float:
     # Build confusion matrix
     matrix = [[0] * 3 for _ in range(3)]
     po_count = 0
-    for r1, r2 in zip(rater1, rater2):
+    for r1, r2 in zip(rater1, rater2, strict=False):
         if r1 in cat_to_idx and r2 in cat_to_idx:
             i, j = cat_to_idx[r1], cat_to_idx[r2]
             matrix[i][j] += 1
@@ -75,7 +75,7 @@ def run_agreement_analysis() -> None:
         for b_res in base_m.get("results", []):
             base_verdicts.append(b_res.get("verdict"))
 
-    agree_count = sum(1 for s, b in zip(sys_verdicts, base_verdicts) if s == b)
+    agree_count = sum(1 for s, b in zip(sys_verdicts, base_verdicts, strict=False) if s == b)
     percent_agree = (agree_count / len(sys_verdicts)) * 100 if sys_verdicts else 0.0
     kappa = cohen_kappa_3class(sys_verdicts, base_verdicts)
 

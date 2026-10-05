@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from unittest.mock import MagicMock
+
 import pytest
 
 from engine.ingest import fetch_jd

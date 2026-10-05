@@ -14,7 +14,7 @@ import secrets
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 from api.db import (
     db_create_analysis,
@@ -22,7 +22,6 @@ from api.db import (
     db_get_job,
     db_get_job_by_hash,
     db_get_resume,
-    db_list_analyses,
     db_update_analysis_stage,
     db_upsert_job,
     db_upsert_resume,

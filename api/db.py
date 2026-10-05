@@ -36,7 +36,7 @@ def get_supabase_client() -> Any | None:
         return None
 
     try:
-        from supabase import Client, create_client
+        from supabase import create_client
         _supabase_client = create_client(url, key)
         return _supabase_client
     except Exception as err:

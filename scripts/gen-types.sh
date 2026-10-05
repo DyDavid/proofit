@@ -22,7 +22,15 @@ SCRIPT_PATH="${BASH_SOURCE[0]}"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-PYTHON="$REPO_ROOT/.venv/bin/python"
+# Prefer the repo venv; fall back to whichever `python` is on PATH (CI installs the
+# engine with actions/setup-python and has no .venv). PYTHON=... overrides both.
+if [[ -z "${PYTHON:-}" ]]; then
+  if [[ -x "$REPO_ROOT/.venv/bin/python" ]]; then
+    PYTHON="$REPO_ROOT/.venv/bin/python"
+  else
+    PYTHON="$(command -v python || command -v python3 || true)"
+  fi
+fi
 EXPORT_PY="$SCRIPT_DIR/export_schema.py"
 SCHEMA_JSON="$REPO_ROOT/web/lib/schema.json"
 TYPES_TS="$REPO_ROOT/web/lib/types.ts"
@@ -33,9 +41,9 @@ SOURCE_PY="engine/normalize/schema.py"
 JSON2TS_PKG="json-schema-to-typescript@16"
 
 # ── preflight ────────────────────────────────────────────────────────────────
-if [[ ! -x "$PYTHON" ]]; then
-  echo "gen-types.sh: repo venv interpreter not found at $PYTHON" >&2
-  echo "  The venv is expected at <repo>/.venv (see the project setup notes)." >&2
+if [[ -z "$PYTHON" || ! -x "$PYTHON" ]]; then
+  echo "gen-types.sh: no Python interpreter found (looked for <repo>/.venv, then python on PATH)." >&2
+  echo "  Create the venv at <repo>/.venv or set PYTHON=/path/to/python." >&2
   exit 1
 fi
 

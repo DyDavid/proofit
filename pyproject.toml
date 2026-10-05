@@ -82,6 +82,15 @@ target-version = "py312"
 select = ["E", "F", "I", "UP", "B", "SIM"]
 ignore = ["E501"]
 
+[tool.ruff.lint.per-file-ignores]
+# Imports intentionally follow setup code: load_dotenv() must run before api.config
+# reads the environment; scripts/ and eval/ put the repo root on sys.path first.
+"api/main.py" = ["E402"]
+"scripts/*.py" = ["E402"]
+"eval/*.py" = ["E402"]
+# Person A's scraper uses `l` as a loop variable throughout; not worth churning.
+"engine/ingest/scraper.py" = ["E741"]
+
 [tool.mypy]
 python_version = "3.12"
 strict = true
