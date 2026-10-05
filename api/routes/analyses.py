@@ -99,65 +99,54 @@ async def _run_live_analysis(analysis_id: str) -> None:
     job = None
     resume = None
     try:
+        from concurrent.futures import ThreadPoolExecutor
+
         from engine.gemini_client import get_embedding
         from engine.ingest import fetch_jd
         from engine.match import run_match
         from engine.normalize import normalize_jd, normalize_resume
 
-        # Stage 1: reading_resume
-        store.update_analysis(analysis_id, stage="reading_resume")
         res_rec = store.get_resume(record.resume_id)
         if not res_rec:
             raise ValueError(f"Resume {record.resume_id} not found.")
 
-        if res_rec.normalized is not None:
-            resume = res_rec.normalized
-        else:
-            resume = normalize_resume(res_rec.data or b"", res_rec.filename)
-            res_rec.normalized = resume
-            # Update resume in db
-            store.add_resume(
-                filename=res_rec.filename,
-                content_type=res_rec.content_type,
-                size=res_rec.size,
-                data=res_rec.data,
-                raw_text=res_rec.raw_text,
-                normalized=resume,
-            )
-
-        # Stage 2: reading_job
-        store.update_analysis(analysis_id, stage="reading_job")
         job_rec = store.get_job(record.job_id)
         if not job_rec:
             raise ValueError(f"Job {record.job_id} not found.")
 
-        if job_rec.normalized is not None:
-            job = job_rec.normalized
-        else:
-            raw_jd = fetch_jd(job_rec.raw) if job_rec.source == "url" else job_rec.raw
-            job = normalize_jd(raw_jd)
-            job_rec.normalized = job
-            # Update job in db
-            store.add_job(raw=job_rec.raw, source=job_rec.source, normalized=job)
+        # Stage 1 & 2: Normalize resume and job concurrently in parallel threads
+        store.update_analysis(analysis_id, stage="reading_resume")
 
-        # Persist requirement and evidence embeddings if Supabase is connected
-        if get_supabase_client():
-            try:
-                ev_vectors = {ev.id: get_embedding(ev.source_line) for ev in resume.evidence}
-                db_save_resume_evidence(
-                    res_rec.id,
-                    [ev.model_dump(mode="json") for ev in resume.evidence],
-                    ev_vectors,
-                )
-                req_vectors = {req.id: get_embedding(req.text) for req in job.requirements}
-                db_save_jd_requirements(
-                    job_rec.id,
-                    job.content_hash,
-                    [req.model_dump(mode="json") for req in job.requirements],
-                    req_vectors,
-                )
-            except Exception as emb_err:
-                logger.warning("Could not persist pgvector embeddings: %s", emb_err)
+        def _do_norm_resume():
+            if res_rec.normalized is not None:
+                return res_rec.normalized
+            return normalize_resume(res_rec.data or b"", res_rec.filename)
+
+        def _do_norm_jd():
+            if job_rec.normalized is not None:
+                return job_rec.normalized
+            raw_jd = fetch_jd(job_rec.raw) if job_rec.source == "url" else job_rec.raw
+            return normalize_jd(raw_jd)
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            fut_res = executor.submit(_do_norm_resume)
+            fut_job = executor.submit(_do_norm_jd)
+            resume = fut_res.result()
+            job = fut_job.result()
+
+        res_rec.normalized = resume
+        job_rec.normalized = job
+
+        # Save to db/cache in background
+        store.add_resume(
+            filename=res_rec.filename,
+            content_type=res_rec.content_type,
+            size=res_rec.size,
+            data=res_rec.data,
+            raw_text=res_rec.raw_text,
+            normalized=resume,
+        )
+        store.add_job(raw=job_rec.raw, source=job_rec.source, normalized=job)
 
         # Stage 3: matching_requirements
         store.update_analysis(analysis_id, stage="matching_requirements")
@@ -169,6 +158,33 @@ async def _run_live_analysis(analysis_id: str) -> None:
         match.resume = resume
 
         store.update_analysis(analysis_id, status="done", match=match)
+
+        # Parallel pgvector embeddings persistence in background (non-blocking)
+        if get_supabase_client():
+            try:
+                def _fetch_all_embeddings():
+                    with ThreadPoolExecutor(max_workers=8) as emb_exec:
+                        ev_futures = {ev.id: emb_exec.submit(get_embedding, ev.source_line) for ev in resume.evidence}
+                        req_futures = {req.id: emb_exec.submit(get_embedding, req.text) for req in job.requirements}
+                        ev_vectors = {eid: fut.result() for eid, fut in ev_futures.items()}
+                        req_vectors = {rid: fut.result() for rid, fut in req_futures.items()}
+
+                    db_save_resume_evidence(
+                        res_rec.id,
+                        [ev.model_dump(mode="json") for ev in resume.evidence],
+                        ev_vectors,
+                    )
+                    db_save_jd_requirements(
+                        job_rec.id,
+                        job.content_hash,
+                        [req.model_dump(mode="json") for req in job.requirements],
+                        req_vectors,
+                    )
+
+                with ThreadPoolExecutor(max_workers=1) as bg_writer:
+                    bg_writer.submit(_fetch_all_embeddings)
+            except Exception as emb_err:
+                logger.warning("Could not persist pgvector embeddings: %s", emb_err)
 
     except Exception as err:
         logger.exception("Live analysis failed (%s). Generating fallback match.", err)

@@ -210,7 +210,7 @@ def db_get_analysis(analysis_id: str) -> dict[str, Any] | None:
         return None
 
 
-def db_list_analyses(resume_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+def db_list_analyses(resume_id: str | None = None, limit: int = 50, ids: list[str] | None = None) -> list[dict[str, Any]]:
     client = get_supabase_client()
     if not client:
         return []
@@ -218,6 +218,10 @@ def db_list_analyses(resume_id: str | None = None, limit: int = 50) -> list[dict
         query = client.table("analyses").select("*").order("created_at", desc=True).limit(limit)
         if resume_id:
             query = query.eq("resume_id", resume_id)
+        if ids is not None:
+            if not ids:
+                return []
+            query = query.in_("id", ids)
         res = query.execute()
         return res.data or []
     except Exception as err:

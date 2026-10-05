@@ -15,7 +15,6 @@ from __future__ import annotations
 import logging
 
 from engine.normalize.schema import (
-    NON_EMPLOYMENT_EVIDENCE,
     Job,
     MatchResult,
     RealismVerdict,
@@ -47,7 +46,7 @@ def enforce_no_scope_inflation(
             cited_ev = [resume.evidence_by_id(ev_id) for ev_id in res.evidence_ids]
             valid_ev = [e for e in cited_ev if e is not None]
 
-            if valid_ev and all(e.evidence_type in NON_EMPLOYMENT_EVIDENCE for e in valid_ev):
+            if valid_ev and not any(e.is_employment for e in valid_ev):
                 logger.info(
                     "Rule 2 triggered for requirement %s: non-employment evidence downgraded 'proven' to 'partial'.",
                     req.id,

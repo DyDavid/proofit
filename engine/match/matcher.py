@@ -204,14 +204,15 @@ def run_match_engine(job: Job, resume: Resume) -> Match:
         )
 
     except Exception as err:
+        error_msg = str(err)
         logger.warning("Gemini Matcher failed (%s). Generating fallback match.", err)
         fallback_results: list[MatchResult] = [
             MatchResult(
                 requirement_id=req.id,
                 verdict="missing",
                 evidence_ids=[],
-                reasoning=f"No evidence record found for {req.text}.",
-                missing_reason=f"No evidence record found for {req.text}.",
+                reasoning=f"API Error: {error_msg}. (No evidence record found for {req.text}.)",
+                missing_reason=f"API Error: {error_msg}. (No evidence record found for {req.text}.)",
                 confidence=0.5,
             )
             for req in job.requirements
