@@ -18,11 +18,29 @@ export class ApiError extends Error {
   }
 }
 
+type ErrorFields = { code?: string; message?: string; error_id?: string };
+
+/**
+ * Pulls `{code, message, error_id}` out of an error body. The API's own envelope
+ * is `{"error": {...}}` (api/errors.py). A backend that has not been redeployed
+ * yet, or FastAPI's stock HTTPException, answers `{"detail": {...}}` or
+ * `{"detail": "text"}` instead; reading those too keeps error codes working
+ * (e.g. RESUME_NOT_FOUND clearing a stale remembered resume) while the two
+ * halves are on different versions.
+ */
+function readErrorFields(body: unknown): ErrorFields | undefined {
+  if (typeof body !== "object" || body === null) return undefined;
+  const { error, detail } = body as { error?: unknown; detail?: unknown };
+  if (typeof error === "object" && error !== null) return error as ErrorFields;
+  if (typeof detail === "object" && detail !== null) return detail as ErrorFields;
+  if (typeof detail === "string") return { message: detail };
+  return undefined;
+}
+
 async function toApiError(res: Response): Promise<ApiError> {
-  let error: { code?: string; message?: string; error_id?: string } | undefined;
+  let error: ErrorFields | undefined;
   try {
-    const body = await res.json();
-    error = body?.error;
+    error = readErrorFields(await res.json());
   } catch {
     // Non-JSON error body — fall through to the generic message below.
   }
