@@ -199,7 +199,10 @@ async def _run_live_analysis(analysis_id: str) -> None:
             analysis_id,
             status="done",
             match=fixture_match,
-            error_message=f"Live analysis failed: {type(err).__name__}: {err}",
+            # Generic on purpose: str(err) can carry provider internals (URLs,
+            # keys echoed in SDK errors) and this field is returned to the browser.
+            # The real error is in the log line above.
+            error_message="The live engine could not complete this analysis.",
         )
 
 
