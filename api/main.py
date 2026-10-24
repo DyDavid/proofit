@@ -8,6 +8,7 @@ server-side, so the browser only ever talks to its own origin
 from __future__ import annotations
 
 from pathlib import Path
+
 from dotenv import find_dotenv, load_dotenv
 from fastapi import FastAPI
 

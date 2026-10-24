@@ -7,11 +7,15 @@ A's, wired in when `ENGINE_MODE=live` (Phase 2 CP2).
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, File, UploadFile
 
 from api.config import settings
 from api.errors import ApiError
 from api.store import store
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 

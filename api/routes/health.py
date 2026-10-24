@@ -12,7 +12,6 @@ router = APIRouter()
 
 @router.get("/health")
 async def health() -> dict:
-    import os
     from engine.gemini_client import get_gemini_api_key
     key = get_gemini_api_key()
     return {
