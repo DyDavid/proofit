@@ -316,10 +316,58 @@ def scrape_jobify_job(url: str, timeout: float = 15.0) -> str:
         requirement_raw = get_field("requirement")
         benefits_raw = get_field("employee_benefit")
 
+        # Extract Job details from the right sidebar facts (e.g. Category, Industry, Qualification, Experience, Gender, Age, Language, Required skills)
+        sidebar_facts: list[str] = []
+        fact_matches = re.findall(
+            r'<div class="job-facts__row"[^>]*>\s*<dt[^>]*>(.*?)</dt>\s*<dd[^>]*>(.*?)</dd>',
+            html_text,
+            re.DOTALL,
+        )
+        for dt_raw, dd_raw in fact_matches:
+            dt = _clean_html_text(dt_raw)
+            dd = _clean_html_text(dd_raw)
+            dd = re.sub(r"\s+", " ", dd).strip()
+            if dt and dd:
+                sidebar_facts.append(f"{dt}: {dd}")
+
+        # Fallback to Nuxt state for sidebar fields if HTML did not contain .job-facts__row
+        if not sidebar_facts:
+            cat = get_field("category")
+            ind = get_field("industry")
+            age = get_field("age")
+            gen = get_field("gender")
+            if cat:
+                sidebar_facts.append(f"Category: {cat}")
+            if ind:
+                sidebar_facts.append(f"Industry: {ind}")
+            if qualification:
+                sidebar_facts.append(f"Qualification: {qualification}")
+            if exp_year:
+                sidebar_facts.append(f"Experience: {exp_year}")
+            if gen and gen != "null":
+                sidebar_facts.append(f"Gender: {gen}")
+            if age and age != "null":
+                sidebar_facts.append(f"Age: {age}")
+            skills_match = re.search(r'skills\s*=\s*\[(.*?)\]', nuxt_code)
+            if skills_match:
+                skill_items = re.findall(r'skill:\s*("(?:\\.|[^"\\])*"|[a-zA-Z_]\w*)', skills_match.group(1))
+                resolved_skills = [resolve_val(s) for s in skill_items if resolve_val(s)]
+                if resolved_skills:
+                    sidebar_facts.append(f"Required skills: {', '.join(resolved_skills)}")
+            langs_match = re.search(r'languages\s*=\s*\[(.*?)\]', nuxt_code)
+            if langs_match:
+                lang_pairs = re.findall(
+                    r'language:\s*("(?:\\.|[^"\\])*"|[a-zA-Z_]\w*).*?lang_level:\s*("(?:\\.|[^"\\])*"|[a-zA-Z_]\w*)',
+                    langs_match.group(1),
+                )
+                resolved_langs = [f"{resolve_val(l)} — {resolve_val(lvl)}" for l, lvl in lang_pairs if resolve_val(l)]
+                if resolved_langs:
+                    sidebar_facts.append(f"Language: {', '.join(resolved_langs)}")
+
         lines = []
         if title:
             lines.append(f"Job Title: {title}")
-        if company:
+        if company and company != "null":
             lines.append(f"Company: {company}")
         if location:
             lines.append(f"Location: {location}")
@@ -336,14 +384,20 @@ def scrape_jobify_job(url: str, timeout: float = 15.0) -> str:
 
         lines.append("")
 
-        if responsible_raw:
-            lines.append("Job Responsibilities:")
-            lines.append(_clean_html_text(responsible_raw))
+        if sidebar_facts:
+            lines.append("Job Details & Key Requirements (Right Sidebar):")
+            for f in sidebar_facts:
+                lines.append(f"- {f}")
             lines.append("")
 
         if requirement_raw:
-            lines.append("Job Requirements & Qualifications:")
+            lines.append("Job Requirements & Qualifications (Left Side / Main Body):")
             lines.append(_clean_html_text(requirement_raw))
+            lines.append("")
+
+        if responsible_raw:
+            lines.append("Job Responsibilities:")
+            lines.append(_clean_html_text(responsible_raw))
             lines.append("")
 
         if benefits_raw and benefits_raw != "null":

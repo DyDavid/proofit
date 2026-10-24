@@ -38,11 +38,21 @@ async def upload_resume(file: UploadFile = File(...)) -> dict:  # noqa: B008 (Fa
             message=f"Upload exceeds {settings.max_upload_bytes} bytes.",
         )
 
+    from engine.normalize.parser import parse_resume_bytes
+
+    try:
+        raw_text = parse_resume_bytes(body, file.filename or "resume.pdf")
+    except Exception as err:
+        logger.warning("Resume text extraction failed: %s", err)
+        raw_text = None
+
     record = store.add_resume(
         filename=file.filename or "resume",
         content_type=file.content_type,
         size=len(body),
         data=body,
+        raw_text=raw_text,
     )
     return {"resume_id": record.id}
+
 

@@ -141,8 +141,13 @@ def normalize_jd_text(text: str) -> Job:
     1. title: Extract the specific role/job title (e.g. 'Junior Web Developer', 'Sales Representative', 'Finance Intern'). Infer from duties if not explicitly labeled. Never return 'Not specified'.
     2. company: Company or employer name (e.g. 'TotalEnergies Marketing (Cambodia) Co., Ltd.').
     3. location & country: Location e.g. 'Phnom Penh, Cambodia' and ISO country code 'KH', 'SG', 'US', etc.
-    4. requirements: Extract EVERY requirement, required skill, preferred tool, responsibility, language, education level, and experience mentioned. Quote verbatim or summarize accurately. Extract at least 3-10 distinct requirements.
-    5. priority: Tag as 'required' (must-have/mandatory) or 'preferred' (nice-to-have/plus).
+    4. requirements: Extract the most critical requirements, capped at a MAXIMUM of 10 items (typically 7 to 10 total).
+       CRITICAL FOR DUAL-COLUMN JOB POSTINGS (e.g. Jobify, BongThom, LinkedIn):
+       Select a balanced mix of the most essential criteria from BOTH sections:
+       - From the Sidebar / Job Details: Key structured criteria such as Required Skills, Language proficiency (e.g. 'English — Advanced'), Years of Experience, and Degree/Qualification.
+       - From the Main Body / Job Requirements: Key technical tools, frameworks, methodologies, and core role qualifications.
+       YOU MUST EXTRACT FROM BOTH SECTIONS. Never take all items from only one section. Never exceed 10 requirements total.
+    5. priority: Tag as 'required' (must-have/mandatory) or 'preferred' (nice-to-have/advantage/plus).
     6. category: Classify each as hard_skill, soft_skill, education, certification, experience, or language.
 
     Job Description:
@@ -155,13 +160,13 @@ def normalize_jd_text(text: str) -> Job:
             response_schema=_JobLLM,
             model_name=get_extract_model(),
             temperature=0.0,
-            system_instruction="You are an expert recruitment parser. Extract job description requirements accurately and thoroughly into structured JSON.",
+            system_instruction="You are an expert recruitment parser. Extract at most 10 of the most essential job requirements, balancing key criteria from both the sidebar details and main requirements sections.",
             thinking_budget=0,
         )
 
 
         reqs: list[Requirement] = []
-        for idx, r in enumerate(dto.requirements):
+        for idx, r in enumerate(dto.requirements[:10]):
             category: RequirementCategory = r.category if r.category in (
                 "hard_skill", "soft_skill", "education", "certification", "experience", "language"
             ) else "hard_skill"
@@ -211,9 +216,8 @@ def normalize_jd_text(text: str) -> Job:
         fixture_data = _load_golden_fixture()
         job_data = fixture_data["job"]
         job_data["content_hash"] = content_hash
-        res = Job.model_validate(job_data)
-        _JD_CACHE[content_hash] = res
-        return res
+        return Job.model_validate(job_data)
+
 
 
 def normalize_resume_file(file_bytes: bytes, filename: str) -> Resume:
@@ -323,6 +327,5 @@ def normalize_resume_file(file_bytes: bytes, filename: str) -> Resume:
     except Exception as err:
         logger.warning("Gemini Resume normalizer failed: %s. Using fallback fixture.", err)
         fixture_data = _load_golden_fixture()
-        res = Resume.model_validate(fixture_data["resume"])
-        _RESUME_CACHE[resume_hash] = res
-        return res
+        return Resume.model_validate(fixture_data["resume"])
+

@@ -7,10 +7,14 @@ server-side, so the browser only ever talks to its own origin
 
 from __future__ import annotations
 
-from dotenv import load_dotenv
+from pathlib import Path
+from dotenv import find_dotenv, load_dotenv
 from fastapi import FastAPI
 
-load_dotenv()
+# Always reload .env so that modifications to keys take effect immediately
+env_file = find_dotenv(usecwd=True) or Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(env_file, override=True)
+
 
 from api.config import settings
 from api.errors import install_error_handlers

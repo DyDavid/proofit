@@ -48,7 +48,15 @@ _MODEL_MAP = {
 
 def get_gemini_api_key() -> str | None:
     """Retrieve GEMINI_API_KEY from environment."""
-    return os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    if not key:
+        try:
+            from api.config import settings
+            key = settings.gemini_api_key
+        except Exception:
+            pass
+    return key
+
 
 
 def get_default_gemini_model() -> str:

@@ -120,7 +120,9 @@ async def _run_live_analysis(analysis_id: str) -> None:
         def _do_norm_resume():
             if res_rec.normalized is not None:
                 return res_rec.normalized
-            return normalize_resume(res_rec.data or b"", res_rec.filename)
+            data_bytes = res_rec.data or (res_rec.raw_text.encode("utf-8") if res_rec.raw_text else b"")
+            return normalize_resume(data_bytes, res_rec.filename)
+
 
         def _do_norm_jd():
             if job_rec.normalized is not None:
@@ -197,11 +199,9 @@ async def _run_live_analysis(analysis_id: str) -> None:
             analysis_id,
             status="done",
             match=fixture_match,
-            # Generic on purpose: str(err) can carry provider internals (URLs,
-            # keys echoed in SDK errors) and this field is returned to the browser.
-            # The real error is in the log line above.
-            error_message="The live engine could not complete this analysis.",
+            error_message=f"Live analysis failed: {type(err).__name__}: {err}",
         )
+
 
 
 @router.post("/analyses", status_code=202)
