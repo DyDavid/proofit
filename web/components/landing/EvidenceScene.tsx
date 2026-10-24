@@ -122,6 +122,14 @@ export function EvidenceScene({ strings }: { strings: EvidenceSceneStrings }) {
               />
             </div>
 
+            {/* Phone only: the horizontal connector above is hidden below sm, so draw a
+                short one in the same verdict style (solid / ink / dashed) between the
+                evidence and the requirement. */}
+            <span
+              aria-hidden="true"
+              className={"block h-[1.5px] w-12 sm:hidden " + VERDICT_LINE[row.verdict]}
+            />
+
             <p className="text-base font-medium text-ink sm:text-lg">{row.requirement}</p>
 
             <span
@@ -132,6 +140,8 @@ export function EvidenceScene({ strings }: { strings: EvidenceSceneStrings }) {
               style={inView ? { animationDelay: `${0.5 + i * 0.1}s` } : undefined}
             >
               <VerdictIcon verdict={row.verdict} size="0.9rem" />
+              {/* Phone only: name the verdict next to its icon. */}
+              <span className="sm:hidden">{strings[row.verdict].replace(/\{count\}\s*/, "")}</span>
             </span>
           </li>
         ))}
