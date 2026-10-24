@@ -67,7 +67,7 @@ export function ResultsView({ match, baseline, analysisId }: ResultsViewProps) {
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 sm:py-14">
-      <div className="mb-10 grid gap-8 border-b border-rule pb-10 sm:grid-cols-[1fr_auto] sm:items-center">
+      <div className="mb-10 grid grid-cols-1 gap-8 border-b border-rule pb-10 sm:grid-cols-[1fr_auto] sm:items-center">
         <div>
           <p className="mb-2 flex flex-wrap items-center gap-2 font-mono text-xs uppercase tracking-[0.14em] text-accent">
             <span>{t("eyebrow")}</span>
@@ -80,7 +80,7 @@ export function ResultsView({ match, baseline, analysisId }: ResultsViewProps) {
               </>
             ) : null}
           </p>
-          <h1 className="font-serif text-5xl font-extrabold uppercase leading-[0.92] text-ink sm:text-6xl">
+          <h1 className="font-serif text-4xl font-extrabold uppercase leading-[0.92] text-ink min-[380px]:text-5xl sm:text-6xl">
             {job?.title}
           </h1>
           <div className="mt-5 flex flex-wrap items-center gap-2.5 text-sm">

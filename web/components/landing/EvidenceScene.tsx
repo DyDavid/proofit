@@ -98,7 +98,7 @@ export function EvidenceScene({ strings }: { strings: EvidenceSceneStrings }) {
           <li
             key={row.requirement}
             className={
-              "motion-safe:animate-rise grid grid-cols-1 items-center gap-3 rounded-pill border border-rule bg-surface-raised px-5 py-3 sm:grid-cols-[1fr_2.5rem_1fr_auto] sm:rounded-none sm:border-0 sm:bg-transparent sm:px-0 sm:py-0" +
+              "motion-safe:animate-rise grid grid-cols-1 items-center gap-3 rounded-control border border-rule bg-surface-raised px-5 py-3 sm:grid-cols-[1fr_2.5rem_1fr_auto] sm:rounded-none sm:border-0 sm:bg-transparent sm:px-0 sm:py-0" +
               (inView ? "" : " opacity-0")
             }
             style={inView ? { animationDelay: `${i * 0.08}s` } : undefined}
@@ -108,7 +108,7 @@ export function EvidenceScene({ strings }: { strings: EvidenceSceneStrings }) {
                 {row.source}
               </p>
               {row.evidence ? (
-                <p className="mt-0.5 truncate text-sm text-ink-2">{row.evidence}</p>
+                <p className="mt-0.5 break-words text-sm text-ink-2 sm:truncate">{row.evidence}</p>
               ) : null}
             </div>
 

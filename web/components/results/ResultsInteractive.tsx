@@ -126,18 +126,20 @@ function RequirementRow({
     >
       <summary
         className={cn(
-          "grid cursor-pointer list-none grid-cols-[auto_1fr_auto] items-center gap-4 py-3.5",
+          // Phone: badge + meta share the first line, the requirement text gets the full width
+          // below. From sm up it is the original three-column row.
+          "grid cursor-pointer list-none grid-cols-[1fr_auto] items-center gap-x-3 gap-y-2 py-3.5 sm:grid-cols-[auto_1fr_auto] sm:gap-4",
           "[&::-webkit-details-marker]:hidden",
         )}
       >
-        <Badge tone={VERDICT_TONE[result.verdict]}>
+        <Badge tone={VERDICT_TONE[result.verdict]} className="order-1 justify-self-start sm:order-none">
           <VerdictIcon verdict={result.verdict} />
           {t(`verdict.${result.verdict}`)}
         </Badge>
-        <span className="text-[15.5px] leading-[1.5] text-ink">
+        <span className="order-3 col-span-2 min-w-0 break-words text-[15.5px] leading-[1.5] text-ink sm:order-none sm:col-span-1">
           {requirement?.text ?? result.requirement_id}
         </span>
-        <span className="flex items-center gap-3">
+        <span className="order-2 flex items-center gap-3 sm:order-none">
           {requirement?.priority === "required" ? (
             <span className="font-mono text-[11px] font-medium uppercase tracking-wide text-ink">
               {t("priority.required")}
@@ -323,11 +325,13 @@ export function ResultsInteractive({ match, baseline }: ResultsInteractiveProps)
     });
   }
 
+  // grid-cols-1 is minmax(0,1fr): without it the single mobile column sizes to its
+  // widest child, and one unwrappable row pushes the whole page past the screen.
   return (
-    <div className="grid gap-10 lg:grid-cols-[1fr_320px] lg:items-start">
-      <div>
+    <div className="grid grid-cols-1 gap-10 lg:grid-cols-[1fr_320px] lg:items-start">
+      <div className="min-w-0">
         {baseline ? (
-          <div className="mb-4 flex items-center justify-between">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 className="font-serif text-2xl text-ink">{t("title")}</h2>
             <BaselineToggle
               shown={showBaseline}
