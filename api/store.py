@@ -283,6 +283,38 @@ class Store:
                 return rec
         return None
 
+    def save_normalized_resume(self, resume_id: str, normalized: Resume) -> ResumeRecord | None:
+        rec = self.resumes.get(resume_id)
+        if rec is not None:
+            rec.normalized = normalized
+        if get_supabase_client() and rec is not None:
+            db_upsert_resume(
+                resume_id=rec.id,
+                filename=rec.filename,
+                content_type=rec.content_type,
+                size_bytes=rec.size,
+                raw_text=rec.raw_text,
+                normalized=normalized.model_dump(mode="json"),
+            )
+        return rec
+
+    def save_normalized_job(self, job_id: str, normalized: Job) -> JobRecord | None:
+        rec = self.jobs.get(job_id)
+        if rec is not None:
+            rec.normalized = normalized
+        if get_supabase_client() and rec is not None:
+            db_upsert_job(
+                job_id=rec.id,
+                content_hash=rec.content_hash,
+                source=rec.source,
+                raw=rec.raw,
+                title=normalized.title,
+                company=normalized.company,
+                location=normalized.location,
+                normalized=normalized.model_dump(mode="json"),
+            )
+        return rec
+
     def create_analysis(self, resume_id: str, job_id: str, country: str) -> AnalysisRecord:
         record = AnalysisRecord(
             id=_new_id("an"),
@@ -305,7 +337,7 @@ class Store:
         return record
 
     def create_retry(self, original_id: str) -> AnalysisRecord | None:
-        original = self.analyses.get(original_id)
+        original = self.get_analysis(original_id)
         if original is None:
             return None
         return self.create_analysis(original.resume_id, original.job_id, original.country)
@@ -328,6 +360,7 @@ class Store:
         stage: MatchStage | None = None,
         status: AnalysisStatus | None = None,
         match: Match | None = None,
+        baseline: BaselineMatch | None = None,
         error_message: str | None = None,
     ) -> AnalysisRecord | None:
         """Live-mode (F1 task 5) analysis mutation, with a best-effort Supabase
@@ -342,6 +375,8 @@ class Store:
                 record.status = status
             if match is not None:
                 record.match = match
+            if baseline is not None:
+                record.baseline = baseline
             if error_message is not None:
                 record.error_message = error_message
 
@@ -365,6 +400,14 @@ class Store:
             row = db_get_analysis(analysis_id)
             if row:
                 match_obj = Match.model_validate(row["match"]) if row.get("match") else None
+                baseline_obj: BaselineMatch | None = None
+                if match_obj and match_obj.job and match_obj.resume:
+                    try:
+                        from engine.match import run_baseline
+
+                        baseline_obj = run_baseline(match_obj.job, match_obj.resume)
+                    except Exception:
+                        baseline_obj = None
                 rec = AnalysisRecord(
                     id=row["id"],
                     resume_id=row.get("resume_id") or "",
@@ -373,6 +416,7 @@ class Store:
                     status=row.get("status", "done"),
                     stage=row.get("stage"),
                     match=match_obj,
+                    baseline=baseline_obj,
                     error_message=row.get("error_message"),
                 )
                 self.analyses[rec.id] = rec

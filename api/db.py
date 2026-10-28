@@ -20,6 +20,8 @@ _supabase_client = None
 def get_supabase_client() -> Any | None:
     """Lazily instantiate and cache the Supabase client."""
     global _supabase_client
+    if settings.engine_mode == "mock":
+        return None
     if _supabase_client is not None:
         return _supabase_client
 

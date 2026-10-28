@@ -1,13 +1,17 @@
-# Resume–JD Requirement Matcher — Project Spec
+# Proofit — Project Spec
 
-> Final Year Project. Team of 3. ~15 weeks. Rubric weights working product/demo.
-> Paste this into Claude Code as project context. Work through Phase 0 → Phase 7 in order.
+> Final Year Project, AUPP, 2026. Team of 3. ~15 weeks.
+> This document describes the system **as it is built**. When code and this spec
+> disagree, fix one of them — do not let them drift.
 
 ---
 
 ## 1. One-Line Definition
 
-Resume-to-job-description matching for Cambodian entry-level candidates applying locally or abroad — reads JDs from local boards or any pasted URL/text, matches at requirement level using non-work evidence, and adapts output to destination-country conventions.
+Resume-to-job-description matching for Cambodian entry-level candidates applying
+locally or abroad — reads job posts from local boards or any pasted URL/text, matches
+at requirement level using non-work evidence, and adapts guidance to
+destination-country conventions.
 
 **Cambodia-based, not Cambodia-limited.** Users are Cambodian. Job targets are global.
 
@@ -15,23 +19,28 @@ Resume-to-job-description matching for Cambodian entry-level candidates applying
 
 ## 2. Problem Statement
 
-Existing tools (Teal, Jobscan, Rezi, Careerflow) fail Cambodian entry-level job seekers in three ways:
+Existing tools (Teal, Jobscan, Rezi, Careerflow) fail Cambodian entry-level job seekers
+in three ways:
 
-1. **They assume work history exists.** Match engines look for employment bullet points. A fresh graduate has coursework, group projects, and part-time work. Every requirement returns "Missing." The tool is useless to them.
-2. **They can't reach the JDs.** Teal's Chrome extension covers 40+ boards, none Cambodian. Local JDs live on CamHR and Bongthom — unreadable to every existing tool built for global boards.
-3. **No cross-border guidance.** A Cambodian applying to Singapore or Japan gets no help on resume format conventions or whether the role sponsors visas.
+1. **They assume work history exists.** Match engines look for employment bullet
+   points. A fresh graduate has coursework, group projects, and part-time work. Every
+   requirement returns "Missing."
+2. **They can't reach the job posts.** Teal's supported boards include no Cambodian
+   sources. Local posts live on CamHR, BongThom, JobNet, and Jobify.
+3. **No cross-border guidance.** A Cambodian applying to Singapore or Japan gets no
+   help on resume conventions or whether the role sponsors visas.
 
-Additionally, mainstream tools score by **keyword overlap**, which is shallow. "Coordinated 3 departments on launch" satisfies "cross-functional collaboration" despite zero shared keywords. Keyword matchers report a gap; a human recruiter sees a match.
+Mainstream tools also score by **keyword overlap**, which is shallow. "Coordinated 3
+departments on launch" satisfies "cross-functional collaboration" with zero shared
+keywords.
 
-### Important accuracy note for the report
+### Accuracy notes for the report
 
-Do **not** claim "Teal is USA-only." It is a web app; anyone worldwide can sign up. The accurate claims are:
-- Teal's supported job boards include zero Cambodian sources.
-- Teal's resume conventions are US-default.
-- Teal's matching is keyword-based and shallow (acknowledged in its own user reviews).
-- Teal assumes prior employment.
-
-Also do **not** build the project on "beat the ATS score." Most real ATS platforms (Workday, Greenhouse, Taleo) do not AI-score resumes; recruiters run keyword searches. Use the framing **"requirement coverage analysis"** instead — it is defensible.
+- Do **not** claim "Teal is USA-only." It is a web app anyone can use. Accurate claims:
+  its supported boards include zero Cambodian sources, its resume conventions are
+  US-default, its matching is keyword-based, and it assumes prior employment.
+- Do **not** frame the project as "beat the ATS score." Most ATS platforms do not
+  AI-score resumes. Use **"requirement coverage analysis"**.
 
 ---
 
@@ -40,80 +49,146 @@ Also do **not** build the project on "beat the ATS score." Most real ATS platfor
 Cambodian job seekers, entry-level focus:
 - Fresh graduates with no formal employment
 - Early-career applicants (0–2 years)
-- Applying to local roles **and** abroad (Singapore, Japan, Australia, remote-US)
+- Applying locally **and** abroad (Singapore, Japan, Australia, remote-US)
 
-Evaluation population: AUPP final-year students. Accessible, N≈30 achievable.
+Evaluation population: AUPP final-year students.
+
+The UI is **English only**. Khmer (`km`) localisation and `next-intl` were removed
+(`docs/superpowers/plans/2026-09-21-remove-khmer-i18n.md`); copy lives in
+`web/messages/en.json` and is read through `web/lib/copy.tsx`.
 
 ---
 
-## 4. The Six Features
+## 4. The Six Features — as built
 
-### F1 — Multi-Source JD Ingestion
-Get any job description into the system regardless of format.
-- Paste raw text or URL (any board, any country)
-- Scheduled scraper for CamHR / Bongthom
-- Content-hash caching so the same JD never re-processes
+| # | Feature | Status | Where |
+|---|---|---|---|
+| F1 | Multi-source JD ingestion | **Built** (paste + URL); no scheduled scraper | `engine/ingest/`, `api/routes/jobs.py` |
+| F2 | LLM normalization | **Built** | `engine/normalize/` |
+| F3 | Requirement-level match | **Built** | `engine/match/matcher.py`, `rules.py` |
+| F4 | Non-work evidence mapping | **Built** — enforced in code twice | `engine/match/rules.py`, `schema.py` |
+| F5 | Hidden strengths & rewrite | **Built** — 3-layer validator | `engine/rewrite/`, `POST /analyses/{id}/rewrites` |
+| F6 | Cross-border adaptation | **Built in engine/API**; Results panel hidden for now | `engine/country/`, `api/routes/countries.py` |
 
-### F2 — LLM Normalization Engine
-Turn messy input into one clean structured schema.
-- JD → structured requirement list
-- Resume → same schema plus evidence records
-- Handles inconsistent formatting, mixed phrasing
-- Tags each requirement `required` vs `preferred`
+### F1 — Multi-source JD ingestion
+- User pastes raw text (≥ 40 chars) or a URL. `POST /api/jobs` stores it and dedupes
+  by SHA-256 content hash, returning `{job_id, cached}`.
+- URLs are fetched **during the live analysis** by `engine.ingest.fetch_jd`, which is
+  cache-aware (`data/.cache/*.json`, keyed by URL hash).
+- `scrape_job_url` routes by host: dedicated extractors for **CamHR**, **JobNet**,
+  and **Jobify**; everything else (BongThom, Greenhouse, Lever, Workday, …) goes
+  through a generic extractor that tries schema.org **JSON-LD `JobPosting`** first,
+  then main-content HTML.
+- **LinkedIn and Facebook are refused** (API blocklist + scraper check) with
+  `JOB_URL_BLOCKED`; the user is told to paste the text instead.
+- `POST /api/jobs/fetch-url` returns fetched text for preview.
+- Present but **not wired** to any route: `engine/ingest/ocr.py` (pytesseract
+  screenshot OCR) and `is_url_allowed_by_robots` in `scraper.py`.
+- Real postings were collected offline into `data/jds/*.csv` (CamHR, BongThom,
+  Khmer boards, RemoteOK/Arbeitnow). No scheduled scraper runs in production.
 
-### F3 — Requirement-Level Match Engine
-Not one score — a verdict per requirement.
+### F2 — LLM normalization
+- `normalize_jd(text) -> Job` and `normalize_resume(bytes, filename) -> Resume` call
+  Gemini with a Pydantic `response_schema` (structured JSON output, temperature 0).
+- JD: extracts **at most 10** requirements, balanced across both "details" and
+  "requirements" sections of the post, each tagged `required | preferred` and with a
+  category and canonical `normalized_skill`. Also extracts seniority, years required,
+  education, and the visa signal (`sponsors_visa` + verbatim source line).
+- Resume: text extracted with pdfminer (PDF) / python-docx (DOCX, incl. tables) /
+  UTF-8 fallback, then turned into typed `evidence` records with verbatim
+  `source_line`s.
+- Both normalizers keep an in-process cache keyed by content hash. In the live
+  pipeline, the resume and JD are normalized **in parallel** threads.
+
+### F3 — Requirement-level match engine
+One verdict per requirement, not one score.
 
 | Verdict | Meaning |
 |---|---|
-| **Proven** | Explicit evidence; cite the exact resume line |
-| **Partial** | Adjacent or transferable evidence exists |
-| **Missing** | No evidence found |
+| **Proven** | Explicit evidence; cites the evidence record(s) |
+| **Partial** | Adjacent or transferable evidence (incl. non-work evidence for experience) |
+| **Missing** | No evidence; carries an explicit `missing_reason` |
 
-Coverage % weighted by required vs preferred. Every verdict traceable to a source line.
+- **One batched Gemini call** judges every requirement against every evidence record
+  (`thinking_budget=0`, temperature 0), returning verdict, evidence ids, a reasoning
+  sentence under 15 words, and confidence.
+- Coverage (`engine/match/rules.py`): requirement weight **required = 1.0,
+  preferred = 0.4**; verdict score **proven = 1.0, partial = 0.5, missing = 0.0**.
+  `coverage_score` covers all requirements; `coverage_required_only` is the headline.
+- Realism verdict:
+  - `unrealistic` — JD asks ≥ 4 years and candidate has < 1 year paid work, **or**
+    ≥ 3 required requirements missing, **or** > 40 % of required missing.
+  - `strong_fit` — no required missing and ≥ 60 % of required proven.
+  - `stretch` — otherwise.
+- Priority actions: up to 5, ranked by percentage-point gain in coverage if the gap
+  were closed, with category-specific advice text (e.g. `+8.3% Match Boost: …`).
+- **Baseline**: `run_baseline` is a TF-IDF cosine keyword matcher over the same
+  normalized pair. It exists to be beaten — it powers the "Compare with keyword
+  baseline" toggle and the evaluation comparison column.
+- Embeddings (`gemini-embedding-001`, 768-d) are computed **after** the match and
+  persisted to pgvector for later analysis. They are **not** used to shortlist
+  evidence for the judge.
 
-### F4 — Non-Work Evidence Mapping
-Make the system usable by people with no employment history.
-- Evidence taxonomy: coursework, project, internship, part-time, volunteer, certification, competition
-- Maps academic and personal evidence to professional requirements
-- Example: `"2 yrs web development"` → 3 shipped projects, 4-month team build → **Partial**, framed honestly
+### F4 — Non-work evidence mapping
+- Evidence taxonomy: `employment`, `internship`, `part_time`, `coursework`, `project`,
+  `volunteer`, `certification`, `competition`.
+- Employment-grade: `employment`, `internship`, `part_time`. Non-employment:
+  `coursework`, `project`, `volunteer`, `competition`.
+- An `experience` requirement cited **only** by non-employment evidence is
+  downgraded `proven → partial` by `enforce_no_scope_inflation` (with a
+  `[Scope Rule F4]` reasoning note), and the `Match` model independently rejects any
+  such `proven` verdict at validation time.
+- The Results screen explains *why* a class project counts only partially.
 
-### F5 — Hidden Strengths & Rewrite Assistant
-- Surfaces requirements silently satisfied by badly-phrased resume lines
-- Rewrites bullets into JD language using **existing facts only**
-- Hard constraint: never invents experience, never upgrades a class project into employment
-- Validation pass flags any generated claim not traceable to a source line
+### F5 — Hidden strengths & rewrite assistant
+`POST /api/analyses/{id}/rewrites` (runs on demand from the Results screen):
+1. **Detect** (`detect.py`) — LLM finds `partial`/`missing` requirements that an
+   existing evidence record actually satisfies; candidates citing unknown ids are
+   dropped.
+2. **Generate** (`generate.py`) — input is **evidence records only** plus the
+   requirement wording; output must list `facts_used`. Country `tone_notes` from F6
+   are applied when the destination has rules. Temperature 0.4 so a retry differs.
+3. **Validate** (`validate.py`), three layers in order:
+   1. Deterministic scope-inflation gate — forbidden phrases
+      (`engine/rewrite/forbidden.json`, e.g. "professional", "worked at") when every
+      cited record is non-employment.
+   2. Deterministic pre-check — every number, year, month count, and capitalised
+      proper noun must appear in a cited evidence record.
+   3. Separate LLM validator for quiet overstatement ("led" vs "participated").
+4. One retry on failure. Every rejection is logged
+   (`store.rewrite_rejections`, in-memory) as an evaluation figure.
+5. Accepted rewrites become `HiddenStrength` records (with `changed_words` for the
+   word-level diff) and the whole `Match` is re-validated before saving.
 
-### F6 — Cross-Border Adaptation & Realism Check
-- Destination-country resume conventions (US/CA, UK/AU, DE, JP, SG, remote-first)
-- Visa/sponsorship signal extracted from the JD
-- Realism verdict: flags roles the candidate realistically cannot win
-- Prioritized action list — what to fix first for the biggest coverage gain
+Rewrites always call Gemini, **even in `ENGINE_MODE=mock`**, so they need
+`GEMINI_API_KEY`. Rate limits surface as `RATE_LIMITED` (429).
 
-### Feature dependency chain
+### F6 — Cross-border adaptation & realism
+- Country conventions are config, not code: `engine/country/rules.json` covers
+  **KH, SG, JP, AU, REMOTE (US remote)** — page length, photo, personal details,
+  date format, section order, tone notes, visa terms.
+- `rules_for()` reconciles the three spellings in the codebase (browser keys like
+  `usRemote`, ISO codes like `SG`, long names like "United States"). The UI's
+  "other" destination has no rules by design.
+- Served by `GET /api/countries` and `GET /api/countries/{destination}`; used by F5
+  rewrites for tone.
+- Visa/sponsorship signal is extracted by the JD normalizer into `Job.sponsors_visa`
+  (`yes | no | unstated`) with the verbatim source sentence.
+- The `CountryFormat` Results panel exists but is **hidden for now**.
+
+### Dependency chain
 
 ```
-F1 ingest → F2 normalize → F3 match → F4 evidence expansion
+F1 ingest → F2 normalize → F3 match ⇄ F4 rules
                               ↓
-                    F5 rewrite ← F6 country rules
+                    F5 rewrite ← F6 country rules (tone)
 ```
-
-### Build priority
-
-| Priority | Features | Note |
-|---|---|---|
-| Must | F1 (paste + URL), F2, F3 | No product without these |
-| Must | F4 | No differentiation without it |
-| Should | F5 | Demo value, moderate effort |
-| Could | F6 | Trim to 3 countries if week 12 arrives hot |
-
-If the schedule slips, **cut the scheduled scraper first** — paste and URL fetch cover the same demo.
 
 ---
 
 ## 5. Explicitly Out of Scope
 
-Do not build these. They are commodity features, Teal-dominated, and will eat the semester:
+Commodity, Teal-dominated features that would eat the semester:
 
 - Application tracker / kanban pipeline
 - Networking CRM / contact manager
@@ -124,24 +199,63 @@ Do not build these. They are commodity features, Teal-dominated, and will eat th
 - Mobile app
 - Auto-apply
 - Interview prep
+- User accounts / authentication (resumes are remembered per browser via
+  `localStorage` only)
+- Khmer UI localisation (removed)
 
 ---
 
 ## 6. Architecture
 
 ```
-JD input (scraped | pasted URL/text)
-        ↓
-   LLM normalizer  →  structured JSON schema
-        ↓
-Resume input (PDF/DOCX) → same normalizer → same schema + evidence
-        ↓
-   Match engine — requirement-level, semantic
-        ↓
-Output: per-requirement verdict + evidence citation + rewrite
+Browser (Next.js, same origin)
+   │  /api/*  ──rewrite──▶  FastAPI (api/)
+   │                          │
+   │   POST /resumes ─────────┤ parse text (pdfminer / python-docx) → store
+   │   POST /jobs ────────────┤ content-hash dedupe → store
+   │   POST /analyses ────────┤ BackgroundTask:
+   │                          │   ├─ normalize_resume ┐ (parallel threads)
+   │                          │   ├─ fetch_jd → normalize_jd ┘
+   │                          │   ├─ run_match  (Gemini judge + F4 rules)
+   │                          │   ├─ run_baseline (TF-IDF)
+   │                          │   └─ embeddings → pgvector (best-effort)
+   │   GET /analyses/{id} ◀───┤ poll: status, stage, match, baseline
+   │   POST …/rewrites ───────┘ F5 detect → generate → validate
 ```
 
-**Key design decision:** both JD and resume normalize to one schema. Matching is schema-vs-schema, not text-vs-text. This is the architecture story for the defense — do not deviate from it.
+**Key design decision:** both the JD and the resume normalize to **one schema**
+(`engine/normalize/schema.py`). Matching is schema-vs-schema, not text-vs-text. This
+is the architecture story for the defense.
+
+### Boundaries
+- `api/` calls exactly five engine callables: `normalize_jd`, `normalize_resume`,
+  `fetch_jd`, `run_match`, `run_baseline` — plus the F5/F6 modules owned by the API
+  side (`engine.rewrite.*`, `engine.country.rules`).
+- Nothing in `engine/` imports FastAPI or knows about HTTP.
+- `engine/gemini_client.py` is the single Gemini wrapper (structured JSON, text,
+  embeddings, model aliasing, fallback model list). `engine/rewrite/llm.py` is a thin
+  separate wrapper so rewrites can run in mock mode.
+
+### Engine modes
+- **`mock`** — analyses return a golden fixture from `data/fixtures/` after
+  `MOCK_DELAY_SECONDS`, stepping through the progress stages. No normalizer/matcher
+  LLM calls; Supabase is disabled.
+- **`live`** — the full pipeline above. If the live pipeline throws, the API logs the
+  real error and stores a fallback result with a generic `error_message`
+  ("The live engine could not complete this analysis.") — raw provider errors are
+  never returned to the browser.
+
+### Analysis lifecycle
+`status`: `queued → running → done | failed`
+`stage`: `reading_resume → reading_job → matching_requirements → checking_realism`
+The Progress screen polls `GET /api/analyses/{id}` with a 120 s client-side ceiling
+that offers "keep waiting" rather than discarding work; a failure offers Retry.
+
+### Storage
+`api/store.py` writes through to Supabase when `SUPABASE_URL` is set (and not in
+mock mode), otherwise keeps everything in memory (lost on restart).
+Tables (`data/supabase_schema.sql`): `resumes`, `jobs`, `analyses`,
+`jd_requirements`, `resume_evidence` (the last two hold 768-d pgvector embeddings).
 
 ---
 
@@ -149,269 +263,201 @@ Output: per-requirement verdict + evidence citation + rewrite
 
 | Layer | Choice |
 |---|---|
-| Frontend + app | Streamlit (fast, one language, matches existing proposal) |
-| Database | Supabase (PostgreSQL) + pgvector |
-| DB client | `supabase-py` |
-| Backend logic | Python |
-| Resume parsing | `pdfminer.six` / `python-docx` |
-| JD ingestion | Public ATS APIs + free aggregator APIs + JSON-LD; `requests` + `BeautifulSoup` last resort. See `INGESTION_STRATEGY.md` |
-| LLM | Anthropic API |
-| Charts | Plotly |
+| Frontend | Next.js 15 (App Router, standalone output) · React 19 · TypeScript strict · Tailwind CSS 4 |
+| Backend | Python 3.12 · FastAPI · uvicorn · pydantic v2 / pydantic-settings |
+| LLM | Google Gemini via `google-genai` (legacy `google-generativeai` as fallback SDK) |
+| Default model | `gemini-3.1-flash-lite` (`GEMINI_MODEL`, overridable per stage via `GEMINI_EXTRACT_MODEL`, `GEMINI_ANALYSIS_MODEL`) |
+| Embeddings | `gemini-embedding-001`, 768 dims |
+| Database | Supabase (PostgreSQL + pgvector), `supabase-py`; optional |
+| Resume parsing | `pdfminer.six`, `python-docx` |
+| JD fetch | `httpx` + regex/JSON-LD extraction |
+| Baseline | Custom TF-IDF cosine (`engine/match/baseline.py`) |
+| Types | `scripts/export_schema.py` → JSON Schema → `json-schema-to-typescript` → `web/lib/types.ts` |
+| Quality | pytest, ruff, mypy (strict), `tsc --noEmit`, GitHub Actions |
+| Hosting | Vercel (web) · Render free tier, Singapore, Docker (API) |
 
-### Stack decision to make in Phase 0
+The engine stays thin on purpose: the API runs on a 512 MB Render instance, so no
+local embedding models or torch.
 
-Streamlit ships faster and matches the existing proposal, but limits UI polish — and the rubric weights demo quality. If anyone on the team knows React, consider Next.js + Tailwind for the frontend with a Python FastAPI backend. **Decide once in Phase 0 and do not revisit.**
-
-### Supabase caveats
-- Free tier pauses after ~1 week of inactivity — ping it weekly or the demo dies the morning of.
-- PostgreSQL syntax, not MySQL. `SERIAL`/`IDENTITY`, `TEXT[]`, `JSONB`, `ILIKE`.
-- Enable the `vector` extension before creating embedding columns.
-
-### Team split (3 people)
-1. Ingestion — scraper, caching
-2. Match engine — normalizer, matching, backend
-3. Frontend, UX, evaluation
+### Ownership (see `PERSON_B_PLAN_v2.md` §2)
+- **Person A (Dy David)** — `engine.normalize`, `engine.match`, `engine.ingest`, DB migrations.
+- **Person B** — `web/`, `api/`, `engine.rewrite` (F5), `engine.country` (F6),
+  `data/fixtures/`, `deploy/`, `eval/`.
 
 ---
 
 ## 8. Core Schema
 
-Lock this in Phase 1. Everything downstream depends on it.
+Single source of truth: [`engine/normalize/schema.py`](engine/normalize/schema.py)
+(`SCHEMA_VERSION = "0.1.0-provisional"`). Every model sets `extra="forbid"`.
+TypeScript types are generated, never hand-written; CI fails if they are stale.
 
-```json
-{
-  "job": {
-    "source_url": "string | null",
-    "source_type": "scraped | pasted",
-    "content_hash": "string",
-    "title": "string",
-    "company": "string | null",
-    "location": "string | null",
-    "country": "string | null",
-    "industry": "string",
-    "seniority": "intern | entry | junior | mid | senior",
-    "years_exp_required": "number | null",
-    "education_required": "string | null",
-    "sponsors_visa": "yes | no | unstated",
-    "salary_range": "string | null",
-    "requirements": [
-      {
-        "id": "r1",
-        "text": "verbatim requirement from the JD",
-        "category": "hard_skill | soft_skill | education | certification | experience | language | other",
-        "priority": "required | preferred",
-        "normalized_skill": "canonical name, e.g. 'React'"
-      }
-    ]
-  },
+```text
+Job
+  source_url?, source_type: scraped|pasted, content_hash, title, company?, location?,
+  country? (ISO-2 or REMOTE), industry, seniority: intern|entry|junior|mid|senior,
+  years_exp_required?, education_required?, sponsors_visa: yes|no|unstated,
+  sponsors_visa_source_line?, salary_range?,
+  requirements[]: { id "r\d+", text (verbatim), category, priority: required|preferred,
+                    normalized_skill?, display_order? }
 
-  "resume": {
-    "candidate_summary": "string",
-    "total_years_work": "number",
-    "education": [
-      { "degree": "string", "institution": "string", "year": "number", "gpa": "string | null" }
-    ],
-    "evidence": [
-      {
-        "id": "e1",
-        "source_line": "verbatim line from the resume",
-        "evidence_type": "employment | internship | part_time | coursework | project | volunteer | certification | competition",
-        "skills": ["React", "REST APIs"],
-        "duration_months": "number | null",
-        "team_size": "number | null",
-        "outcome": "string | null"
-      }
-    ]
-  },
+Resume
+  candidate_summary, total_years_work (paid only), education[]: {degree, institution, year?, gpa?},
+  evidence[]: { id "e\d+", source_line (verbatim), evidence_type, skills[],
+                duration_months?, team_size?, outcome? }
 
-  "match": {
-    "coverage_score": "number 0-100",
-    "coverage_required_only": "number 0-100",
-    "realism_verdict": "strong_fit | stretch | unrealistic",
-    "results": [
-      {
-        "requirement_id": "r1",
-        "verdict": "proven | partial | missing",
-        "evidence_ids": ["e3", "e7"],
-        "reasoning": "one sentence",
-        "confidence": "number 0-1"
-      }
-    ],
-    "hidden_strengths": [
-      {
-        "requirement_id": "r4",
-        "evidence_id": "e2",
-        "current_phrasing": "verbatim from resume",
-        "suggested_phrasing": "rewritten, no new facts",
-        "facts_used": ["e2"]
-      }
-    ],
-    "priority_actions": ["ordered list of highest-impact fixes"]
-  }
-}
+Match
+  coverage_score, coverage_required_only, realism_verdict: strong_fit|stretch|unrealistic,
+  realism_explanation?, results[]: { requirement_id, verdict, evidence_ids[], reasoning,
+                                     confidence, missing_reason? },
+  hidden_strengths[]: { requirement_id, evidence_id, current_phrasing, suggested_phrasing,
+                        facts_used[], changed_words[] },
+  priority_actions[]: { text, requirement_id?, coverage_gain? }  (bare strings accepted),
+  engine_version, generated_at, job?, resume?
+
+BaselineMatch
+  method: "tfidf", coverage_score, results[]: { requirement_id, verdict, score, matched_terms[] }
 ```
 
----
-
-## 9. Non-Negotiable Rules
-
-These must be enforced in code, not just prompts. The examiner will test them.
-
-1. **No invented facts.** The rewrite step receives only the candidate's own evidence records. Every generated claim must cite an `evidence_id`. A validation pass rejects any output containing a claim with no traceable source.
-2. **No scope inflation.** A 4-month class project may not be described as "years of professional experience." Reframe wording; never upgrade magnitude, duration, or employment status.
-3. **Every verdict is traceable.** No verdict without either an `evidence_id` or an explicit "missing" reason.
-4. **Cache by content hash.** Never re-normalize the same JD. LLM cost scales with users otherwise.
-5. **Respect robots.txt.** Read it before scraping any board. Rate-limit. Store structured extracts plus a link back, not full JD text copies. Have a written legality answer before the proposal defense.
-6. **Never scrape Facebook or LinkedIn.** Login walls, anti-bot, ToS violation. Out of scope for automated ingestion — a user can still paste the text manually via F1's paste path.
+Validators enforced at parse time:
+- One result per requirement; every requirement has a verdict.
+- Every cited requirement/evidence id resolves to the embedded job/resume.
+- `missing` ⇒ no evidence ids and a non-empty `missing_reason`; `proven`/`partial` ⇒ ≥ 1 evidence id.
+- No `proven` experience requirement backed only by non-employment evidence.
+- A `HiddenStrength` must include its own `evidence_id` in `facts_used`.
 
 ---
 
-## 10. Phased Build Plan
+## 9. Non-Negotiable Rules — and where they are enforced
 
-### Phase 0 — Foundation (Week 1–2)
-**Goal: decisions locked, data collected, nothing built yet.**
+| # | Rule | Enforcement |
+|---|---|---|
+| 1 | **No invented facts.** Rewrites use only the candidate's evidence and cite `facts_used`. | `generate.py` input contract; 3-layer `validate.py`; `HiddenStrength._cites_its_own_evidence`; rejection log |
+| 2 | **No scope inflation.** A class project is never "professional experience." | `rules.enforce_no_scope_inflation`; `Match._enforce_no_scope_inflation`; F5 forbidden-phrase gate |
+| 3 | **Every verdict is traceable.** | `MatchResult._traceable`; `Match._references_resolve` |
+| 4 | **Cache by content hash.** Never re-normalize the same JD. | `store.add_job` dedupe; normalizer in-process cache; `ingest/cache.py` URL cache |
+| 5 | **Respect robots.txt; rate-limit; store extracts with a link back.** | ⚠️ `is_url_allowed_by_robots` exists but is **not called** yet (see §12) |
+| 6 | **Never scrape Facebook or LinkedIn.** | `api/routes/jobs.py` blocklist + `scrape_job_url` refusal → `JOB_URL_BLOCKED` |
 
-1. Confirm the stack decision (Streamlit vs Next.js). Write it down. Do not revisit.
-2. Set up the repo: `/ingest`, `/normalize`, `/match`, `/app`, `/tests`, `/data`.
-3. Create the Supabase project. Enable the `vector` extension.
-4. Store the Anthropic API key in `.env`. Add `.env` to `.gitignore`.
-5. **Hand-collect 30 real job posts** as board HTML or pasted text. This is the test set — everything depends on it.
-6. Collect 5 real anonymized student resumes as PDFs.
-7. Read `robots.txt` for CamHR and Bongthom. Record what is permitted.
-
-**Done when:** repo scaffolded, Supabase reachable from Python, 30 JDs and 5 resumes sitting in `/data`.
-
----
-
-### Phase 1 — Schema + Normalizer (Week 3–4)
-**Goal: messy text in, clean JSON out. No UI, no scraping.**
-
-1. Write the schema as Pydantic models in `/normalize/schema.py`.
-2. Write the JD normalizer prompt. It must:
-   - Extract each requirement verbatim, one record per requirement
-   - Tag `required` vs `preferred` from JD wording ("must have" vs "nice to have")
-   - Normalize skill names to canonical forms
-   - Return JSON only, no prose, no markdown fences
-3. Write the resume normalizer prompt with the same output discipline, producing `evidence` records with `evidence_type`.
-4. Parse the LLM response defensively: strip fences, `json.loads`, validate against Pydantic, retry once on failure.
-5. Run all 30 collected JDs through the normalizer. Manually check 10. Fix prompts until output is consistent.
-6. Design the DB tables and write the migration: `jobs`, `requirements`, `resumes`, `evidence`, `matches`, `match_results`.
-
-**Done when:** any pasted JD or resume PDF produces valid schema-conformant JSON, verified on the full test set.
+Also: raw provider/LLM errors are never returned to the browser — only a stable
+error `code`, a generic message, and an `error_id` (see `docs/errors.md`).
 
 ---
 
-### Phase 2 — Match Engine (Week 5–7)
-**Goal: F3 + F4. The core of the project.**
+## 10. API Contract
 
-1. Build the matcher: for each requirement, find candidate evidence records.
-   - First pass: embedding similarity to shortlist evidence
-   - Second pass: LLM judges `proven` / `partial` / `missing` with reasoning and confidence
-2. Implement the non-work evidence rules (F4):
-   - A `project` or `coursework` record can satisfy a skill requirement → `partial`, never `proven`, when the JD asks for professional experience
-   - Aggregate duration across projects when the JD specifies years
-   - Never let non-employment evidence produce a `proven` verdict on an experience requirement
-3. Compute `coverage_score` and `coverage_required_only`, weighting `required` higher than `preferred`.
-4. Implement `realism_verdict` thresholds.
-5. Build a TF-IDF keyword-overlap baseline matcher in `/match/baseline.py`. This is the comparison for the evaluation chapter — cheap to build, high report value.
+Error envelope everywhere: `{"error": {"code", "message", "error_id"}}`. The UI
+switches on `code`, never on `message`. Codes: `RESUME_BAD_TYPE` (415),
+`RESUME_TOO_LARGE` (413), `RESUME_UNREADABLE` (422, documented), `RESUME_NOT_FOUND`
+(404), `JOB_EMPTY` (422), `JOB_URL_BLOCKED` (422), `JOB_FETCH_FAILED` (502),
+`JOB_NOT_FOUND` (404), `ANALYSIS_NOT_FOUND` (404), `ANALYSIS_NOT_READY` (409),
+`ENGINE_FAILED` (500), `RATE_LIMITED` (429), `COUNTRY_RULES_NOT_FOUND` (404),
+`INTERNAL` (500).
 
-**Done when:** a resume + JD pair produces a full per-requirement verdict list with citations, and the baseline runs on the same input for comparison.
-
----
-
-### Phase 3 — Ingestion (Week 8–9)
-**Goal: F1. Everything beyond paste.**
-
-Follow the tiered strategy in `INGESTION_STRATEGY.md`. Do **not** build a scraper first.
-
-1. ATS API client — Greenhouse, Lever, Ashby. Public JSON, no auth. Curated company token list.
-2. Aggregator client — Arbeitnow (free, no key, has visa-sponsorship flag).
-3. URL path: fetch → try JSON-LD `JobPosting` first → fall back to main-content extraction → normalizer.
-4. Local board module (CamHR/Bongthom) — sitemap/RSS/JSON-LD first, HTML extraction last. Not load-bearing.
-5. Content-hash caching layer in front of every normalizer call.
-
-**Done when:** all input paths reach the same normalizer, and the same JD submitted twice hits the cache.
+| Method & path | Body / query | Returns |
+|---|---|---|
+| `GET /api/health` | — | `status`, `engine_mode`, `app_version`, `has_key` |
+| `POST /api/resumes` | multipart `file` (PDF/DOCX, ≤ `MAX_UPLOAD_BYTES`) | `{resume_id}` |
+| `POST /api/jobs` | exactly one of `{text}` / `{url}` | `{job_id, cached}` |
+| `POST /api/jobs/fetch-url` | `{url}` | `{url, text, word_count}` |
+| `POST /api/analyses` | `{resume_id, job_id, country}` | 202 `{analysis_id, status}` |
+| `GET /api/analyses/{id}` | — | `{status, stage, match, baseline, error, error_message}` |
+| `GET /api/analyses` | `?resume_id=` | `[{analysis_id, job_title, company, coverage, realism_verdict, created_at}]` |
+| `POST /api/analyses/{id}/retry` | — | 202 `{analysis_id, status}` |
+| `POST /api/analyses/{id}/rewrites` | — | `{hidden_strengths[], rejected_count}` |
+| `GET /api/countries` | — | `{countries: [{code, display_name}]}` |
+| `GET /api/countries/{destination}` | — | full `CountryRules` |
 
 ---
 
-### Phase 4 — Rewrite + Cross-Border (Week 10–11)
-**Goal: F5 + F6.**
+## 11. Frontend
 
-1. Hidden-strengths detector: scan `partial` and `missing` verdicts for evidence that satisfies the requirement but is poorly phrased.
-2. Rewrite generator. Input: evidence records only. Output must cite `facts_used`.
-3. **Validation pass** — a separate call that checks the rewrite introduces no claim absent from the source evidence. Reject and retry on failure. Log rejections; they become a report figure.
-4. Country convention rules as a config file (JSON), not hardcoded. Start with 3 countries; add more only if time allows.
-5. Visa/sponsorship extraction from JD text.
-6. Priority action list — sort gaps by impact on `coverage_required_only`.
+Routes (`web/app/`): `/` Landing · `/analyze` · `/progress?id=` · `/results?id=` · `/about`.
 
-**Done when:** a rewrite is produced, the validator catches a deliberately hallucinated test case, and country rules change the output.
-
----
-
-### Phase 5 — Frontend (Week 11–12)
-**Goal: demoable in one screen.**
-
-1. Upload resume → paste JD → results view.
-2. Results view: coverage gauge, per-requirement list grouped by verdict, each expandable to show the cited resume line and reasoning.
-3. Hidden strengths section with before/after phrasing.
-4. Priority actions list.
-5. Country selector affecting F6 output.
-6. Loading states and error handling — a demo that hangs silently loses marks.
-
-**Feature freeze at end of Week 12. No exceptions.**
+- **Analyze** — resume dropzone (remembers the last `resume_id` in `localStorage`),
+  job post tabs (paste text / paste URL), destination selector (Cambodia, Singapore,
+  Japan, US remote, Australia, Other), and analysis history for the remembered resume.
+- **Progress** — stage stepper driven by polling, 120 s ceiling, retry on failure.
+- **Results** — coverage ring + required-only stat, realism stamp, verdict filter
+  pills, requirement rows grouped gaps-first (missing → partial → proven) with cited
+  evidence line, reasoning and confidence, keyword-baseline toggle, priority actions,
+  and the on-demand Hidden Strengths (before/after with changed words highlighted).
+  `/results` with no id renders a built-in sample.
+- Verdict colours are always paired with an icon. Brand and voice: `BRAND.md`.
 
 ---
 
-### Phase 6 — Evaluation (Week 13)
-**Goal: the number the examiner will ask for.**
+## 12. Current Status & Known Gaps
 
-1. Build 20 resume–JD pairs from the collected data.
-2. Have 2–3 local recruiters or career-services staff independently rate each pair's fit.
-3. Compare: your system's verdicts vs recruiter ratings vs the TF-IDF baseline.
-4. Report agreement rate.
-5. Report the hallucination-rejection count from the Phase 4 validator.
+Status as of the latest commits on `main`: all six features exist; the test suite
+(244 tests) passes in mock mode.
 
-**Done when:** you have a table with three columns — human, your system, baseline.
+Known gaps — honest list for the report and for the next work items:
+
+| Area | Gap |
+|---|---|
+| Ingestion | `is_url_allowed_by_robots` is never called, so rule 5 is not enforced in code. No rate limiting on outbound fetches. OCR module unused. |
+| Matcher | If Gemini cites evidence ids that do not exist, the matcher substitutes the resume's first evidence record rather than downgrading the verdict. |
+| Live fallback | On a live-pipeline exception, the stored result is a golden fixture's verdicts with the real job/resume attached, marked `done` (with a generic `error_message`). |
+| Concurrency | `_run_live_analysis` is `async` but performs blocking LLM calls, which can stall other requests (including progress polling) on a single worker. |
+| Persistence | Rewrite rejections are in-memory only. Without Supabase, all data is lost on restart. |
+| F6 UI | `CountryFormat` panel hidden on Results. |
+| Health | `GET /api/health` also returns the first characters of the API key (`key_prefix`); consider removing. |
+| Data | Few real non-Cambodian JDs; most golden fixtures were built from synthetic JDs (`data/jds/source.json`). One anonymized resume. |
+| Schema | Still marked `0.1.0-provisional`. |
 
 ---
 
-### Phase 7 — Polish & Defense (Week 14–15)
-1. README, architecture diagram, setup instructions.
-2. Seed the database so the demo works without live scraping.
-3. Rehearse the demo. Have offline fallback data — never depend on a live scrape or a live API during the presentation.
-4. Prepare answers to the four questions you will definitely be asked (below).
+## 13. Evaluation
+
+- `eval/run_pairs.py` runs resume–JD pairs from `eval/pairs.json` through
+  `run_match` and `run_baseline`, writing `eval/system_outputs.json` (stamped with
+  `SCHEMA_VERSION`).
+- `eval/analysis.py` computes percent agreement and 3-class **Cohen's kappa**
+  between human raters, the system, and the TF-IDF baseline.
+- Target: 20 pairs, 2–3 local recruiters or career-services staff rating independently.
+- Report also: rewrite validator rejection count/rate (from the rejection log).
+- Consent form: `eval/consent_form.md`.
+
+Deliverable: a table with three columns — human, Proofit, baseline.
 
 ---
 
-## 11. Defense Preparation
+## 14. Defense Preparation
 
 **"Why not just use Teal?"**
-> Teal counts keywords and assumes you already have a career. We check whether the candidate's actual evidence — including coursework and projects — satisfies each stated requirement, and we read the JDs Teal cannot reach.
+> Teal counts keywords and assumes you already have a career. We check whether the
+> candidate's actual evidence — including coursework and projects — satisfies each
+> stated requirement, and we read the job boards Teal cannot reach.
 
 **"How do you know the match score is correct?"**
-> Recruiter agreement study, N=20 pairs, compared against a TF-IDF keyword baseline. Results in Chapter 5.
+> Recruiter agreement study compared against a TF-IDF keyword baseline, reported as
+> percent agreement and Cohen's kappa. The baseline is visible in the product itself
+> via the comparison toggle.
 
 **"What stops the AI from making things up?"**
-> The rewrite step receives only the candidate's own evidence records, every claim must cite an evidence ID, and a separate validation pass rejects untraceable claims. Rejection rate logged.
+> Rewrites receive only the candidate's own evidence records, every rewrite must cite
+> its evidence ids, and a three-layer validator (forbidden-phrase gate, literal-token
+> pre-check, separate LLM check) rejects untraceable claims. Rejections are logged.
+> The schema itself refuses untraceable verdicts and scope-inflated `proven` verdicts.
 
 **"Is the scraping legal?"**
-> robots.txt checked and obeyed, rate-limited, structured extracts with source attribution rather than full-text copies, no scraping of platforms that prohibit it. Facebook and LinkedIn are out of scope for automated ingestion; a user can still paste the text manually.
+> URLs are fetched one at a time on a user's request, not crawled. Facebook and
+> LinkedIn are refused outright; the user can paste the text instead. Structured
+> extracts are stored with the source URL. (Wire in the existing robots.txt check
+> before the defense — see §12.)
 
 ---
 
-## 12. Risk Register
+## 15. Risk Register
 
 | Risk | Mitigation |
 |---|---|
-| LLM invents experience | Evidence-only input, citation requirement, validation pass, logged rejections |
-| Weak differentiation at defense | Lead with non-work evidence mapping and local JD reach, never "Teal is USA-only" |
-| Scraper breaks on layout change | Cache aggressively; paste path always works as fallback |
-| Supabase free tier pauses | Weekly ping; seeded local backup before the demo |
-| LLM cost | Content-hash cache, never re-normalize |
-| Scope creep | Section 5 is binding; feature freeze Week 12 |
-
----
-
-## 13. First Command to Run
-
-Start Phase 0, step 5. Collect the 30 job posts and 5 resumes before writing a single line of pipeline code. Every prompt, threshold, and evaluation in this document depends on that data existing first.
+| LLM invents experience | Evidence-only input, `facts_used` citation, 3-layer validator, schema validators, logged rejections |
+| Weak differentiation at defense | Lead with non-work evidence mapping and local board reach |
+| Scraper breaks on layout change | URL cache; paste path always works |
+| Gemini rate limits / quota | Model alias map + fallback list in `gemini_client.py`; `RATE_LIMITED` surfaced cleanly; mock mode for demos |
+| Render free tier sleeps / Supabase pauses | `keepalive.yml` health ping; in-memory fallback; `ENGINE_MODE=mock` offline demo via Docker Compose |
+| LLM cost | Content-hash dedupe and normalizer cache; one batched judge call per analysis |
+| Schema drift between Python and TypeScript | Generated types + CI staleness check |
+| Scope creep | §5 is binding |

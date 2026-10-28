@@ -95,3 +95,63 @@ def test_retry_on_unknown_id_is_analysis_not_found() -> None:
     res = client.post("/api/analyses/an_doesnotexist/retry")
     assert res.status_code == 404
     assert res.json()["error"]["code"] == "ANALYSIS_NOT_FOUND"
+
+
+def test_retry_in_live_mode_dispatches_live_analysis(monkeypatch) -> None:
+    from api.config import settings
+
+    resume_id = client.post(
+        "/api/resumes",
+        files={"file": ("r.pdf", b"%PDF-1.4 fake", "application/pdf")},
+    ).json()["resume_id"]
+    job_id = client.post("/api/jobs", json={"text": "x" * 41}).json()["job_id"]
+    original_id = client.post(
+        "/api/analyses",
+        json={"resume_id": resume_id, "job_id": job_id, "country": "japan"},
+    ).json()["analysis_id"]
+
+    monkeypatch.setattr(settings, "engine_mode", "live")
+    called_ids: list[str] = []
+
+    async def _fake_live(analysis_id: str) -> None:
+        called_ids.append(analysis_id)
+
+    with patch("api.routes.analyses._run_live_analysis", side_effect=_fake_live):
+        retry_res = client.post(f"/api/analyses/{original_id}/retry")
+
+    assert retry_res.status_code == 202
+    assert called_ids == [retry_res.json()["analysis_id"]]
+
+
+def test_live_analysis_populates_baseline_without_duplicating_resume() -> None:
+    import asyncio
+
+    from api.routes.analyses import _run_live_analysis
+
+    fixture = store.pick_fixture("job_seed")
+    assert fixture.job is not None and fixture.resume is not None
+
+    resume_rec = store.add_resume(
+        filename="r.pdf", content_type="application/pdf", size=1, data=b"x"
+    )
+    job_rec, _ = store.add_job(raw="x" * 45, source="text")
+    resumes_before = set(store.resumes.keys())
+
+    record = store.create_analysis(resume_rec.id, job_rec.id, "cambodia")
+    with (
+        patch("engine.normalize.normalize_resume", return_value=fixture.resume),
+        patch("engine.normalize.normalize_jd", return_value=fixture.job),
+        patch("engine.match.run_match", return_value=fixture.model_copy(deep=True)),
+    ):
+        asyncio.run(_run_live_analysis(record.id))
+
+    done = store.get_analysis(record.id)
+    assert done is not None
+    assert done.status == "done"
+    assert done.baseline is not None
+    assert done.baseline.method == "tfidf"
+    # Must update existing resume record in place rather than minting a duplicate ID
+    assert set(store.resumes.keys()) == resumes_before
+    assert store.get_resume(resume_rec.id).normalized is not None
+    assert store.get_job(job_rec.id).normalized is not None
+

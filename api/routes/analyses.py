@@ -103,7 +103,7 @@ async def _run_live_analysis(analysis_id: str) -> None:
 
         from engine.gemini_client import get_embedding
         from engine.ingest import fetch_jd
-        from engine.match import run_match
+        from engine.match import run_baseline, run_match
         from engine.normalize import normalize_jd, normalize_resume
 
         res_rec = store.get_resume(record.resume_id)
@@ -139,27 +139,21 @@ async def _run_live_analysis(analysis_id: str) -> None:
         res_rec.normalized = resume
         job_rec.normalized = job
 
-        # Save to db/cache in background
-        store.add_resume(
-            filename=res_rec.filename,
-            content_type=res_rec.content_type,
-            size=res_rec.size,
-            data=res_rec.data,
-            raw_text=res_rec.raw_text,
-            normalized=resume,
-        )
-        store.add_job(raw=job_rec.raw, source=job_rec.source, normalized=job)
+        # Save normalized structures to existing records & Supabase
+        store.save_normalized_resume(res_rec.id, resume)
+        store.save_normalized_job(job_rec.id, job)
 
         # Stage 3: matching_requirements
         store.update_analysis(analysis_id, stage="matching_requirements")
         match = run_match(job, resume)
+        baseline = run_baseline(job, resume)
 
         # Stage 4: checking_realism
         store.update_analysis(analysis_id, stage="checking_realism")
         match.job = job
         match.resume = resume
 
-        store.update_analysis(analysis_id, status="done", match=match)
+        store.update_analysis(analysis_id, status="done", match=match, baseline=baseline)
 
         # Parallel pgvector embeddings persistence in background (non-blocking)
         if get_supabase_client():
@@ -190,15 +184,26 @@ async def _run_live_analysis(analysis_id: str) -> None:
 
     except Exception as err:
         logger.exception("Live analysis failed (%s). Generating fallback match.", err)
+        fixture_name = store.pick_fixture_name(record.job_id)
         fixture_match = store.pick_fixture(record.job_id)
         if job:
             fixture_match.job = job
         if resume:
             fixture_match.resume = resume
+        if job and resume:
+            try:
+                from engine.match import run_baseline as _run_baseline_fallback
+
+                fallback_baseline = _run_baseline_fallback(job, resume)
+            except Exception:
+                fallback_baseline = store.pick_baseline(fixture_name)
+        else:
+            fallback_baseline = store.pick_baseline(fixture_name)
         store.update_analysis(
             analysis_id,
             status="done",
             match=fixture_match,
+            baseline=fallback_baseline,
             # Generic on purpose: str(err) can carry provider internals (URLs,
             # keys echoed in SDK errors) and this field is returned to the browser.
             # The real error is in the log line above.
@@ -276,7 +281,10 @@ async def retry_analysis(analysis_id: str, background_tasks: BackgroundTasks) ->
     if record is None:
         raise ApiError(status_code=404, code="ANALYSIS_NOT_FOUND", message="Unknown analysis_id.")
 
-    background_tasks.add_task(_run_mock_analysis, record.id)
+    if settings.engine_mode == "live":
+        background_tasks.add_task(_run_live_analysis, record.id)
+    else:
+        background_tasks.add_task(_run_mock_analysis, record.id)
     return {"analysis_id": record.id, "status": record.status}
 
 
@@ -311,7 +319,7 @@ def create_rewrites(analysis_id: str) -> dict:
     the `GET /api/analyses/{id}` poll the Progress screen depends on. FastAPI
     runs a plain `def` route in a threadpool instead, so the LLM I/O blocks
     only that worker thread."""
-    record = store.analyses.get(analysis_id)
+    record = store.get_analysis(analysis_id)
     if record is None:
         raise ApiError(status_code=404, code="ANALYSIS_NOT_FOUND", message="Unknown analysis_id.")
     if record.status != "done" or record.match is None:
@@ -431,7 +439,7 @@ def create_rewrites(analysis_id: str) -> dict:
             message="The analysis didn't finish. Try again.",
         ) from exc
 
-    record.match = match
+    store.update_analysis(analysis_id, match=match)
     return {
         "hidden_strengths": [h.model_dump(mode="json") for h in match.hidden_strengths],
         "rejected_count": rejected_count,

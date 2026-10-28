@@ -61,8 +61,10 @@ services:
         value: mock
 
       # ── Secrets — prompted in the dashboard, never stored in git ──────────
-      - key: ANTHROPIC_API_KEY
+      - key: GEMINI_API_KEY
         sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.1-flash-lite
       - key: SUPABASE_URL
         sync: false
       # Service-role key: full database access. It is safe here ONLY because it

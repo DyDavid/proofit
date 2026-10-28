@@ -423,3 +423,40 @@ def test_rewrite_rate_limit_maps_to_429_with_a_friendly_message() -> None:
     assert res.status_code == 429
     assert res.json()["error"]["code"] == "RATE_LIMITED"
     assert "123" not in res.text
+
+
+def test_rewrites_endpoint_loads_via_get_analysis_and_persists_via_update_analysis() -> None:
+    analysis_id = _seed_done_analysis("an_test_rewrites_persistence")
+    seeded_record = store.analyses.pop(analysis_id)
+
+    call_structured_stub = _dispatch_call_structured(
+        detect_response={"found": True, "evidence_id": "e1", "rationale": "React dashboard fits."},
+        generate_response={
+            "suggested_phrasing": "Built a React dashboard for a university course project.",
+            "facts_used": ["e1"],
+        },
+    )
+
+    def _fake_get_analysis(aid: str):
+        if aid == analysis_id:
+            store.analyses[aid] = seeded_record
+            return seeded_record
+        return None
+
+    with (
+        patch.object(store, "get_analysis", side_effect=_fake_get_analysis) as mock_get,
+        patch.object(store, "update_analysis", wraps=store.update_analysis) as mock_update,
+        patch("engine.rewrite.detect.llm.call_structured", side_effect=call_structured_stub),
+        patch("engine.rewrite.generate.llm.call_structured", side_effect=call_structured_stub),
+        patch(
+            "engine.rewrite.validate._call_llm_validator",
+            return_value=ValidationResult(ok=True, violations=[]),
+        ),
+    ):
+        res = client.post(f"/api/analyses/{analysis_id}/rewrites")
+
+    assert res.status_code == 200
+    assert len(res.json()["hidden_strengths"]) == 1
+    mock_get.assert_called_once_with(analysis_id)
+    mock_update.assert_called_once()
+
