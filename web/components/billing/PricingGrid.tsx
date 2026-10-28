@@ -10,6 +10,7 @@ import {
   type PlanDefinition,
   type SubscriptionSummary,
 } from "@/lib/billing/api";
+import { CheckoutDialog } from "@/components/billing/CheckoutDialog";
 import { PricingCard } from "@/components/billing/PricingCard";
 
 const CAMPUS_CONTACT_EMAIL =
@@ -39,8 +40,15 @@ export function PricingGrid({ onStartCheckout }: PricingGridProps) {
   const [subscription, setSubscription] = useState<SubscriptionSummary | null>(
     null,
   );
-  const [checkoutNotice, setCheckoutNotice] = useState<string | null>(null);
+  const [checkoutPlan, setCheckoutPlan] = useState<PlanDefinition | null>(null);
   const [autoTriggered, setAutoTriggered] = useState<boolean>(false);
+
+  const reloadSubscription = useCallback(async () => {
+    const sub = await fetchSubscription();
+    if (sub) {
+      setSubscription(sub);
+    }
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -97,9 +105,7 @@ export function PricingGrid({ onStartCheckout }: PricingGridProps) {
         onStartCheckout(passPlan);
         return;
       }
-      setCheckoutNotice(
-        `Checkout for ${passPlan.name} (${passPlan.price_display} ${passPlan.price_suffix}) is ready to connect in Phase 4 (Stripe Sandbox & Mock Checkout).`,
-      );
+      setCheckoutPlan(passPlan);
     },
     [onStartCheckout],
   );
@@ -114,7 +120,14 @@ export function PricingGrid({ onStartCheckout }: PricingGridProps) {
         startPassCheckout(passPlan);
       }
     }
-  }, [authChecked, isLoggedIn, autoTriggered, searchParams, plans, startPassCheckout]);
+  }, [
+    authChecked,
+    isLoggedIn,
+    autoTriggered,
+    searchParams,
+    plans,
+    startPassCheckout,
+  ]);
 
   const activePlanId = isLoggedIn ? (subscription?.plan_id ?? "free") : null;
   const isPassActive =
@@ -211,22 +224,6 @@ export function PricingGrid({ onStartCheckout }: PricingGridProps) {
 
   return (
     <div className="space-y-6">
-      {checkoutNotice && (
-        <div
-          role="status"
-          className="flex items-center justify-between gap-4 rounded-xl border border-accent/35 bg-accent-tint/50 px-5 py-4 text-sm text-ink"
-        >
-          <span>{checkoutNotice}</span>
-          <button
-            type="button"
-            onClick={() => setCheckoutNotice(null)}
-            className="shrink-0 rounded-md px-2.5 py-1 text-xs font-semibold text-ink-2 hover:bg-paper-2"
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
-
       <div className="grid grid-cols-1 items-stretch gap-6 md:grid-cols-3">
         {plans.map((plan) => {
           const cfg = getCardConfig(plan);
@@ -243,7 +240,18 @@ export function PricingGrid({ onStartCheckout }: PricingGridProps) {
           );
         })}
       </div>
+
+      {checkoutPlan && (
+        <CheckoutDialog
+          open={Boolean(checkoutPlan)}
+          plan={checkoutPlan}
+          isExtending={isPassActive}
+          onClose={() => setCheckoutPlan(null)}
+          onCompleted={() => {
+            void reloadSubscription();
+          }}
+        />
+      )}
     </div>
   );
 }
-

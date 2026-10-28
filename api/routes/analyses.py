@@ -24,6 +24,7 @@ from api.db import (
     get_supabase_client,
 )
 from api.errors import ApiError, new_error_id
+from api.quota import record_usage, require_quota
 from api.store import STAGE_ORDER, store
 from api.turnstile import verify_turnstile_token
 from engine.country.rules import rules_for
@@ -91,6 +92,7 @@ async def _run_mock_analysis(analysis_id: str) -> None:
             "analysis_slow analysis_id=%s total_ms=%d threshold_ms=60000", analysis_id, total_ms,
         )
     record.status = "done"
+    record_usage(record.user_id, "analysis")
 
 
 async def _run_live_analysis(analysis_id: str) -> None:
@@ -157,6 +159,7 @@ async def _run_live_analysis(analysis_id: str) -> None:
         match.resume = resume
 
         store.update_analysis(analysis_id, status="done", match=match, baseline=baseline)
+        record_usage(record.user_id, "analysis")
 
         # Parallel pgvector embeddings persistence in background (non-blocking)
         if get_supabase_client():
@@ -238,6 +241,7 @@ async def create_analysis(
     background_tasks: BackgroundTasks,
     request: Request,
     user: CurrentUser | None = Depends(get_optional_user),  # noqa: B008
+    _quota: None = Depends(require_quota("analysis")),  # noqa: B008
 ) -> dict:
     res_rec = store.get_resume(payload.resume_id)
     if not res_rec:
@@ -384,6 +388,7 @@ def _append_hidden_strength(match: Match, hidden_strength: HiddenStrength) -> Ma
 def create_rewrites(
     analysis_id: str,
     user: CurrentUser | None = Depends(get_optional_user),  # noqa: B008
+    _quota: None = Depends(require_quota("rewrite")),  # noqa: B008
 ) -> dict:
     """Runs the F5 pipeline for one completed analysis (PERSON_B_PLAN_v2.md §5
     Phase 3 task 6): detect candidates, generate a rewrite for each, validate
@@ -528,6 +533,8 @@ def create_rewrites(
         ) from exc
 
     store.update_analysis(analysis_id, match=match)
+    if candidates:
+        record_usage(user.id if user else record.user_id, "rewrite")
     return {
         "hidden_strengths": [h.model_dump(mode="json") for h in match.hidden_strengths],
         "rejected_count": rejected_count,

@@ -3,6 +3,7 @@
 import { useTranslations } from "@/lib/copy";
 import * as React from "react";
 
+import { UpgradePrompt } from "@/components/billing/UpgradePrompt";
 import { Button } from "@/components/ui/Button";
 import { ApiError, createRewrites } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -256,11 +257,12 @@ export function HiddenStrengths({ match, analysisId }: HiddenStrengthsProps) {
     setLiveMessage(t("rejected"));
   }
 
-  const errorMessage = errorCode
-    ? (KNOWN_ERROR_CODES as readonly string[]).includes(errorCode)
-      ? te(errorCode as (typeof KNOWN_ERROR_CODES)[number])
-      : te("INTERNAL")
-    : null;
+  const errorMessage =
+    errorCode && errorCode !== "quota_exceeded"
+      ? (KNOWN_ERROR_CODES as readonly string[]).includes(errorCode)
+        ? te(errorCode as (typeof KNOWN_ERROR_CODES)[number])
+        : te("INTERNAL")
+      : null;
 
   return (
     <section className="mt-12 border-t border-ink pt-10">
@@ -278,6 +280,15 @@ export function HiddenStrengths({ match, analysisId }: HiddenStrengthsProps) {
           >
             {loading ? t("running") : t("run")}
           </Button>
+        </div>
+      ) : null}
+
+      {errorCode === "quota_exceeded" ? (
+        <div className="mb-6">
+          <UpgradePrompt
+            message="You have used all AI rewrite credits in your current plan. Upgrade to the Job Hunt Pass for 30 AI rewrites."
+            onDismiss={() => setErrorCode(null)}
+          />
         </div>
       ) : null}
 

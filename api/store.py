@@ -194,6 +194,22 @@ class Store:
 
         return record
 
+    def count_user_resumes(self, user_id: str) -> int:
+        client = get_supabase_client()
+        if client is not None:
+            try:
+                res = (
+                    client.table("resumes")
+                    .select("id", count="exact")
+                    .eq("user_id", user_id)
+                    .execute()
+                )
+                if res.count is not None:
+                    return int(res.count)
+            except Exception:
+                pass
+        return sum(1 for r in self.resumes.values() if r.user_id == user_id)
+
     def get_resume(self, resume_id: str) -> ResumeRecord | None:
         if resume_id in self.resumes:
             return self.resumes[resume_id]

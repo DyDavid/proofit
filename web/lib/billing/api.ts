@@ -1,6 +1,8 @@
 import { createClient } from "@/lib/supabase/client";
 
 export type PlanId = "free" | "pass" | "campus";
+export type BillingProviderName = "stripe_sandbox" | "mock";
+export type CheckoutSessionStatus = "pending" | "paid" | "expired" | "canceled";
 
 export interface PlanLimits {
   analyses: number | null;
@@ -38,6 +40,28 @@ export interface SubscriptionSummary {
     analysis: UsageBucket;
     rewrite: UsageBucket;
   };
+}
+
+export interface CheckoutCreatedResponse {
+  session_id: string;
+  provider: BillingProviderName;
+  amount_cents: number;
+  currency: string;
+  expires_at: string;
+  checkout_url: string | null;
+}
+
+export interface CheckoutStatusResponse {
+  session_id: string;
+  provider: BillingProviderName;
+  provider_ref: string | null;
+  plan_id: string;
+  amount_cents: number;
+  currency: string;
+  status: CheckoutSessionStatus;
+  expires_at: string;
+  paid_at: string | null;
+  active_until: string | null;
 }
 
 export const DEFAULT_PLANS: PlanDefinition[] = [
@@ -117,8 +141,10 @@ export const DEFAULT_PLANS: PlanDefinition[] = [
   },
 ];
 
-async function getBearerHeaders(): Promise<Record<string, string>> {
-  const headers: Record<string, string> = {};
+async function getBearerHeaders(
+  extra?: Record<string, string>,
+): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { ...(extra ?? {}) };
   try {
     const supabase = createClient();
     if (supabase) {
@@ -133,6 +159,25 @@ async function getBearerHeaders(): Promise<Record<string, string>> {
     // Proceed without auth header
   }
   return headers;
+}
+
+async function readBillingError(res: Response): Promise<Error> {
+  try {
+    const body = (await res.json()) as {
+      detail?: { message?: string } | string;
+      error?: { message?: string };
+    };
+    if (typeof body.detail === "string") return new Error(body.detail);
+    if (body.detail && typeof body.detail.message === "string") {
+      return new Error(body.detail.message);
+    }
+    if (body.error && typeof body.error.message === "string") {
+      return new Error(body.error.message);
+    }
+  } catch {
+    // Ignore parse error
+  }
+  return new Error(`Request failed (${res.status})`);
 }
 
 export async function fetchPlans(): Promise<PlanDefinition[]> {
@@ -161,3 +206,66 @@ export async function fetchSubscription(): Promise<SubscriptionSummary | null> {
   }
 }
 
+export async function createCheckoutSession(
+  planId: "pass" = "pass",
+): Promise<CheckoutCreatedResponse> {
+  const headers = await getBearerHeaders({ "Content-Type": "application/json" });
+  const res = await fetch("/api/billing/checkout", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ plan_id: planId }),
+  });
+  if (!res.ok) throw await readBillingError(res);
+  return (await res.json()) as CheckoutCreatedResponse;
+}
+
+export async function getCheckoutSession(
+  sessionId: string,
+): Promise<CheckoutStatusResponse> {
+  const headers = await getBearerHeaders();
+  const res = await fetch(
+    `/api/billing/checkout/${encodeURIComponent(sessionId)}`,
+    {
+      headers,
+      cache: "no-store",
+    },
+  );
+  if (!res.ok) throw await readBillingError(res);
+  return (await res.json()) as CheckoutStatusResponse;
+}
+
+export async function getCheckoutSessionByRef(
+  providerRef: string,
+): Promise<CheckoutStatusResponse> {
+  const headers = await getBearerHeaders();
+  const res = await fetch(
+    `/api/billing/checkout/by-ref/${encodeURIComponent(providerRef)}`,
+    {
+      headers,
+      cache: "no-store",
+    },
+  );
+  if (!res.ok) throw await readBillingError(res);
+  return (await res.json()) as CheckoutStatusResponse;
+}
+
+export async function simulateCheckoutPayment(
+  sessionId: string,
+): Promise<CheckoutStatusResponse> {
+  const headers = await getBearerHeaders();
+  const res = await fetch(
+    `/api/billing/checkout/${encodeURIComponent(sessionId)}/simulate`,
+    {
+      method: "POST",
+      headers,
+    },
+  );
+  if (!res.ok) throw await readBillingError(res);
+  return (await res.json()) as CheckoutStatusResponse;
+}
+
+export function notifySubscriptionUpdated(): void {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("proofit:subscription-updated"));
+  }
+}

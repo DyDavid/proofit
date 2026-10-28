@@ -1,4 +1,10 @@
+import path from "node:path";
+import { loadEnvConfig } from "@next/env";
 import type { NextConfig } from "next";
+
+// Also load environment variables from the repo-root `.env` so developers
+// don't have to duplicate NEXT_PUBLIC_* keys into `web/.env.local`.
+loadEnvConfig(path.resolve(__dirname, ".."));
 
 /**
  * PERSON_B_PLAN_v2.md §8.3: the browser only ever talks to its own origin.
@@ -19,6 +25,17 @@ const nextConfig: NextConfig = {
   // fallback at the defense (PERSON_B_PLAN_v2.md §5 Phase 7 task 2b).
   // Vercel ignores this and uses its own build output, so it is safe in both.
   output: "standalone",
+
+  env: {
+    NEXT_PUBLIC_SUPABASE_URL:
+      process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || "",
+    NEXT_PUBLIC_SUPABASE_ANON_KEY:
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
+    NEXT_PUBLIC_TURNSTILE_SITE_KEY:
+      process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || "",
+    NEXT_PUBLIC_CAMPUS_CONTACT_EMAIL:
+      process.env.NEXT_PUBLIC_CAMPUS_CONTACT_EMAIL || "campus@proofit.app",
+  },
 
   async rewrites() {
     return [

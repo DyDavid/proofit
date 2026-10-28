@@ -6,6 +6,8 @@ import * as React from "react";
 import { hasJobPost, isBlockedJobUrl, JobPostPanel, type JobPostValue } from "@/components/analyze/JobPostPanel";
 import { ResumeDropzone } from "@/components/analyze/ResumeDropzone";
 import { TurnstileWidget } from "@/components/auth/TurnstileWidget";
+import { UpgradePrompt } from "@/components/billing/UpgradePrompt";
+import { UsageMeter } from "@/components/billing/UsageMeter";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import Link from "next/link";
@@ -75,6 +77,7 @@ export function AnalyzeForm() {
   const [jobError, setJobError] = React.useState<string | null>(null);
   const [formError, setFormError] = React.useState<string | null>(null);
   const [guestLimitHit, setGuestLimitHit] = React.useState(false);
+  const [quotaError, setQuotaError] = React.useState<string | null>(null);
   const [isGuest, setIsGuest] = React.useState(true);
   const [turnstileToken, setTurnstileToken] = React.useState<string | null>(null);
   const [turnstileReset, setTurnstileReset] = React.useState(0);
@@ -115,6 +118,7 @@ export function AnalyzeForm() {
     setJobError(null);
     setFormError(null);
     setGuestLimitHit(false);
+    setQuotaError(null);
     try {
       let resumeId: string;
       if (file) {
@@ -148,7 +152,13 @@ export function AnalyzeForm() {
       }
       const code = err instanceof ApiError ? err.code : undefined;
       const message = isLocalizedCode(code) ? te(code) : tc("error.generic");
-      if (code === "GUEST_LIMIT_REACHED") {
+      if (code === "quota_exceeded") {
+        setQuotaError(
+          err instanceof ApiError && err.message
+            ? err.message
+            : "You have used all credits in your current plan. Upgrade on Pricing to continue.",
+        );
+      } else if (code === "GUEST_LIMIT_REACHED") {
         setGuestLimitHit(true);
         setFormError(
           "You've used your 1 free guest analysis for today. Sign in to save your results and run more analyses.",
@@ -175,6 +185,13 @@ export function AnalyzeForm() {
 
   return (
     <form onSubmit={handleSubmit} className="grid gap-8">
+      {!isGuest ? <UsageMeter /> : null}
+      {quotaError ? (
+        <UpgradePrompt
+          message={quotaError}
+          onDismiss={() => setQuotaError(null)}
+        />
+      ) : null}
       <div className="grid gap-8 md:grid-cols-2">
         <Card padding="lg">
           <h2 className="mb-1 font-serif text-xl text-ink">{t("resume.label")}</h2>

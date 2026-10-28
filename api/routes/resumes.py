@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, File, UploadFile
 from api.auth import CurrentUser, get_optional_user
 from api.config import settings
 from api.errors import ApiError
+from api.quota import check_saved_resumes_quota
 from api.store import store
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,9 @@ async def upload_resume(
             code="RESUME_TOO_LARGE",
             message=f"Upload exceeds {settings.max_upload_bytes} bytes.",
         )
+
+    if user is not None:
+        check_saved_resumes_quota(user.id, store.count_user_resumes(user.id))
 
     from engine.normalize.parser import parse_resume_bytes
 

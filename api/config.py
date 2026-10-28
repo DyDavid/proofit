@@ -31,6 +31,29 @@ class Settings(BaseSettings):
     enforce_auth_on_rewrites: bool = True
     turnstile_secret_key: str | None = None
 
+    billing_provider: Literal["stripe_sandbox", "mock"] = "mock"
+    stripe_secret_key: str | None = None
+    stripe_webhook_secret: str | None = None
+    site_url: str = "http://localhost:3000"
+    enforce_quotas: bool = True
+
+
+def validate_billing_config(cfg: Settings | None = None) -> None:
+    """Refuse to start if a non-test Stripe key is configured."""
+    active = cfg or settings
+    key = (active.stripe_secret_key or "").strip()
+    if active.billing_provider == "stripe_sandbox":
+        if not key or not (key.startswith("sk_test_") or key.startswith("rk_test_")):
+            raise RuntimeError(
+                "Refusing to start: BILLING_PROVIDER=stripe_sandbox requires a Stripe "
+                "test secret key starting with 'sk_test_' or 'rk_test_'."
+            )
+    elif key and not (key.startswith("sk_test_") or key.startswith("rk_test_")):
+        raise RuntimeError(
+            "Refusing to start: STRIPE_SECRET_KEY must be a sandbox test key "
+            "starting with 'sk_test_' or 'rk_test_'."
+        )
+
 
 settings = Settings()
-
+validate_billing_config(settings)

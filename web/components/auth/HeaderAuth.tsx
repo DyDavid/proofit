@@ -3,18 +3,37 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { fetchSubscription } from "@/lib/billing/api";
 import { createClient } from "@/lib/supabase/client";
 
 export interface HeaderAuthProps {
   planLabel?: string;
 }
 
-export function HeaderAuth({ planLabel = "Free" }: HeaderAuthProps) {
+export function HeaderAuth({ planLabel }: HeaderAuthProps) {
   const router = useRouter();
   const [email, setEmail] = React.useState<string | null>(null);
+  const [dynamicPlanLabel, setDynamicPlanLabel] = React.useState<string>(
+    planLabel ?? "Free",
+  );
   const [ready, setReady] = React.useState(false);
   const [menuOpen, setMenuOpen] = React.useState(false);
   const menuRef = React.useRef<HTMLDivElement | null>(null);
+
+  const refreshPlanBadge = React.useCallback(async () => {
+    const sub = await fetchSubscription();
+    if (!sub) {
+      setDynamicPlanLabel(planLabel ?? "Free");
+      return;
+    }
+    if (sub.plan_id === "pass") {
+      setDynamicPlanLabel("Pass");
+    } else if (sub.plan_id === "campus") {
+      setDynamicPlanLabel("Campus");
+    } else {
+      setDynamicPlanLabel("Free");
+    }
+  }, [planLabel]);
 
   React.useEffect(() => {
     const supabase = createClient();
@@ -24,21 +43,37 @@ export function HeaderAuth({ planLabel = "Free" }: HeaderAuthProps) {
     }
 
     supabase.auth.getUser().then(({ data }) => {
-      setEmail(data.user?.email ?? null);
+      const userEmail = data.user?.email ?? null;
+      setEmail(userEmail);
       setReady(true);
+      if (userEmail) {
+        void refreshPlanBadge();
+      }
     });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      setEmail(session?.user?.email ?? null);
+      const userEmail = session?.user?.email ?? null;
+      setEmail(userEmail);
       setReady(true);
+      if (userEmail) {
+        void refreshPlanBadge();
+      } else {
+        setDynamicPlanLabel("Free");
+      }
     });
+
+    const onSubUpdated = () => {
+      void refreshPlanBadge();
+    };
+    window.addEventListener("proofit:subscription-updated", onSubUpdated);
 
     return () => {
       subscription.unsubscribe();
+      window.removeEventListener("proofit:subscription-updated", onSubUpdated);
     };
-  }, []);
+  }, [refreshPlanBadge]);
 
   React.useEffect(() => {
     if (!menuOpen) return;
@@ -70,6 +105,7 @@ export function HeaderAuth({ planLabel = "Free" }: HeaderAuthProps) {
       // Ignore network error if browser signOut already succeeded
     }
     setEmail(null);
+    setDynamicPlanLabel("Free");
     router.push("/");
     router.refresh();
   }
@@ -99,8 +135,11 @@ export function HeaderAuth({ planLabel = "Free" }: HeaderAuthProps) {
         className="inline-flex min-h-9 items-center gap-2 rounded-pill border border-rule bg-surface-raised px-3.5 py-1.5 text-sm text-ink transition-colors hover:border-ink"
       >
         <span className="max-w-[160px] truncate font-medium">{email}</span>
-        <span className="rounded-pill bg-accent-tint px-2 py-0.5 font-mono text-[11px] font-semibold uppercase tracking-wider text-accent">
-          {planLabel}
+        <span
+          data-testid="header-plan-badge"
+          className="rounded-pill bg-accent-tint px-2 py-0.5 font-mono text-[11px] font-semibold uppercase tracking-wider text-accent"
+        >
+          {dynamicPlanLabel}
         </span>
       </button>
 
@@ -115,7 +154,15 @@ export function HeaderAuth({ planLabel = "Free" }: HeaderAuthProps) {
             onClick={() => setMenuOpen(false)}
             className="block rounded-md px-3 py-2 text-sm text-ink transition-colors hover:bg-paper-2"
           >
-            Account
+            Account &amp; Usage
+          </Link>
+          <Link
+            href="/pricing"
+            role="menuitem"
+            onClick={() => setMenuOpen(false)}
+            className="block rounded-md px-3 py-2 text-sm text-ink transition-colors hover:bg-paper-2"
+          >
+            Pricing
           </Link>
           <button
             type="button"
@@ -130,4 +177,3 @@ export function HeaderAuth({ planLabel = "Free" }: HeaderAuthProps) {
     </div>
   );
 }
-
