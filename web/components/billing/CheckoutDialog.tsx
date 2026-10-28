@@ -211,17 +211,13 @@ export function CheckoutDialog({
         aria-labelledby="checkout-dialog-title"
         className="w-full max-w-md rounded-2xl border border-rule bg-surface-raised p-6 shadow-xl"
       >
-        {/* Demo mode safety banner */}
+        {/* Payment method info banner */}
         <div className="mb-4 rounded-lg border border-accent/30 bg-accent-tint/60 px-3.5 py-2.5 text-xs font-medium text-ink">
           <p className="font-semibold text-accent">
-            Demo mode: no real money is charged
+            Bakong KHQR · ABA Mobile ($5.00 USD)
           </p>
           <p className="mt-0.5 text-ink-2">
-            Use test card{" "}
-            <span className="font-mono font-semibold text-ink">
-              4242 4242 4242 4242
-            </span>
-            , any future date, any CVC.
+            Scan with ABA Mobile or any Bakong-supported banking app in Cambodia.
           </p>
         </div>
 
@@ -291,7 +287,7 @@ export function CheckoutDialog({
                 id="checkout-dialog-title"
                 className="font-serif text-xl font-bold text-ink"
               >
-                Complete demo payment
+                Scan ABA KHQR to pay
               </h2>
               <span className="rounded-md bg-paper-2 px-2.5 py-1 font-mono text-xs font-medium text-ink-2">
                 Expires in {countdown}
@@ -305,16 +301,20 @@ export function CheckoutDialog({
               for 30-day Job Hunt Pass.
             </p>
 
-            {/* QR placeholder box where KHQR / payment QR can plug in later */}
-            <div className="mt-4 flex flex-col items-center justify-center rounded-xl border border-dashed border-rule-2 bg-paper/70 px-4 py-8 text-center">
-              <div className="flex h-28 w-28 items-center justify-center rounded-lg border border-rule bg-surface-raised font-mono text-xs text-ink-3">
-                Payment QR
-                <br />
-                Placeholder
-              </div>
-              <p className="mt-3 text-xs text-ink-3">
-                Offline mock provider active. Click below to simulate a
-                completed payment.
+            {/* Official ABA Bakong KHQR Card */}
+            <div className="mt-4 flex flex-col items-center justify-center rounded-xl border border-rule bg-paper/70 p-4 text-center">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/aba-khqr.jpg"
+                alt="ABA KHQR — DY DAVID (5 USD)"
+                className="h-auto w-56 rounded-xl border border-rule shadow-sm"
+              />
+              <p className="mt-3 font-mono text-xs font-semibold text-ink">
+                USD account: 012 929 221 · DY DAVID
+              </p>
+              <p className="mt-1 text-xs text-ink-3">
+                Scan with ABA Mobile or any Bakong KHQR banking app, then click
+                below to confirm and activate your pass.
               </p>
             </div>
 
@@ -334,7 +334,7 @@ export function CheckoutDialog({
                 data-testid="checkout-simulate-btn"
                 className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-surface-raised hover:bg-accent-2 disabled:opacity-50"
               >
-                {inFlight ? "Confirming…" : "Simulate payment"}
+                {inFlight ? "Confirming…" : "I've completed payment"}
               </button>
             </div>
           </div>
