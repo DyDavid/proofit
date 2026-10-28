@@ -48,18 +48,28 @@ export function UsageMeter() {
   const rewriteLimit = sub.usage.rewrite.limit;
   const isPass = sub.plan_id === "pass" || sub.plan_id === "campus";
 
+  const analysisPct =
+    analysisLimit !== null
+      ? Math.min(100, Math.round((analysisUsed / Math.max(1, analysisLimit)) * 100))
+      : 0;
+
+  const rewritePct =
+    rewriteLimit !== null
+      ? Math.min(100, Math.round((rewriteUsed / Math.max(1, rewriteLimit)) * 100))
+      : 0;
+
   return (
     <div
       data-testid="usage-meter"
-      className="rounded-2xl border border-rule bg-surface-raised p-5"
+      className="rounded-2xl border border-rule bg-surface-raised p-6 shadow-xs"
     >
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5">
+      <div className="flex flex-col gap-3 border-b border-rule pb-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center gap-2.5">
           <span
-            className={`rounded-md px-2.5 py-1 text-xs font-semibold ${
+            className={`inline-flex items-center rounded-pill px-3 py-1 font-mono text-xs font-semibold uppercase tracking-wider ${
               isPass
                 ? "bg-accent-tint text-accent"
-                : "bg-paper-2 text-ink-2"
+                : "bg-paper-2 text-ink"
             }`}
           >
             {sub.plan_id === "pass"
@@ -68,69 +78,78 @@ export function UsageMeter() {
                 ? "Campus"
                 : "Free Plan"}
           </span>
-          <span className="text-xs text-ink-3">
+          <span className="text-xs font-medium text-ink-3">
             {formatEndDate(sub.active_until)}
           </span>
         </div>
 
         <Link
           href="/pricing"
-          className="text-xs font-semibold text-accent hover:underline"
+          className="inline-flex items-center text-xs font-semibold text-accent transition-colors hover:text-accent-2 hover:underline"
         >
           {isPass ? "Extend pass ↗" : "Upgrade to Job Hunt Pass ↗"}
         </Link>
       </div>
 
-      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <div className="rounded-xl border border-rule bg-paper/60 p-3.5">
+      <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {/* Analyses Usage Card */}
+        <div className="rounded-xl border border-rule bg-paper/60 p-4">
           <div className="flex items-baseline justify-between text-sm">
-            <span className="text-ink-2">Analyses</span>
-            <span className="font-mono font-semibold text-ink">
+            <span className="font-medium text-ink-2">Analyses</span>
+            <span className="font-mono text-sm font-bold text-ink">
               {analysisLimit !== null
-                ? `${analysisUsed} of ${analysisLimit} analyses used`
-                : `${analysisUsed} used (Unlimited)`}
+                ? `${analysisUsed} / ${analysisLimit} used`
+                : `${analysisUsed} used`}
             </span>
           </div>
-          {analysisLimit !== null && (
-            <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-track">
-              <div
-                className="h-full rounded-full bg-accent transition-all"
-                style={{
-                  width: `${Math.min(
-                    100,
-                    Math.round((analysisUsed / Math.max(1, analysisLimit)) * 100),
-                  )}%`,
-                }}
-              />
+
+          {analysisLimit !== null ? (
+            <div className="mt-3">
+              <div className="h-2 w-full overflow-hidden rounded-full bg-track">
+                <div
+                  className="h-full rounded-full bg-accent transition-all duration-300"
+                  style={{ width: `${analysisPct}%` }}
+                />
+              </div>
+              <div className="mt-1.5 flex justify-between text-[11px] font-mono text-ink-3">
+                <span>{analysisPct}% utilized</span>
+                <span>{Math.max(0, analysisLimit - analysisUsed)} remaining</span>
+              </div>
             </div>
+          ) : (
+            <p className="mt-2 font-mono text-xs text-accent">Unlimited quota</p>
           )}
         </div>
 
-        <div className="rounded-xl border border-rule bg-paper/60 p-3.5">
+        {/* AI Rewrites Usage Card */}
+        <div className="rounded-xl border border-rule bg-paper/60 p-4">
           <div className="flex items-baseline justify-between text-sm">
-            <span className="text-ink-2">AI rewrites</span>
-            <span className="font-mono font-semibold text-ink">
+            <span className="font-medium text-ink-2">AI bullet rewrites</span>
+            <span className="font-mono text-sm font-bold text-ink">
               {rewriteLimit !== null
-                ? `${rewriteUsed} of ${rewriteLimit} rewrites used`
-                : `${rewriteUsed} used (Unlimited)`}
+                ? `${rewriteUsed} / ${rewriteLimit} used`
+                : `${rewriteUsed} used`}
             </span>
           </div>
-          {rewriteLimit !== null && (
-            <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-track">
-              <div
-                className="h-full rounded-full bg-accent transition-all"
-                style={{
-                  width: `${Math.min(
-                    100,
-                    Math.round((rewriteUsed / Math.max(1, rewriteLimit)) * 100),
-                  )}%`,
-                }}
-              />
+
+          {rewriteLimit !== null ? (
+            <div className="mt-3">
+              <div className="h-2 w-full overflow-hidden rounded-full bg-track">
+                <div
+                  className="h-full rounded-full bg-accent transition-all duration-300"
+                  style={{ width: `${rewritePct}%` }}
+                />
+              </div>
+              <div className="mt-1.5 flex justify-between text-[11px] font-mono text-ink-3">
+                <span>{rewritePct}% utilized</span>
+                <span>{Math.max(0, rewriteLimit - rewriteUsed)} remaining</span>
+              </div>
             </div>
+          ) : (
+            <p className="mt-2 font-mono text-xs text-accent">Unlimited quota</p>
           )}
         </div>
       </div>
     </div>
   );
 }
-

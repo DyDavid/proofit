@@ -59,8 +59,13 @@ export function AnalysisHistory({
     if (!showEmpty) return null;
     return (
       <Card padding="lg" className={className ?? "mt-8"}>
-        <h2 className="mb-2 font-serif text-xl text-ink">{t("title")}</h2>
-        <p className="text-sm text-ink-3">
+        <div className="flex items-center justify-between gap-2 border-b border-rule pb-4">
+          <h2 className="font-serif text-xl font-bold text-ink">{t("title")}</h2>
+          <span className="rounded-pill bg-paper-2 px-2.5 py-0.5 font-mono text-xs text-ink-3">
+            0 total
+          </span>
+        </div>
+        <p className="mt-4 text-sm text-ink-3">
           No analyses saved yet. Head to the{" "}
           <Link href="/analyze" className="font-medium text-accent underline">
             Analyzer
@@ -73,25 +78,45 @@ export function AnalysisHistory({
 
   return (
     <Card padding="lg" className={className ?? "mt-8"}>
-      <h2 className="mb-4 font-serif text-xl text-ink">{t("title")}</h2>
+      <div className="mb-4 flex items-center justify-between gap-3 border-b border-rule pb-4">
+        <h2 className="font-serif text-xl font-bold text-ink">{t("title")}</h2>
+        <span className="rounded-pill bg-paper-2 px-2.5 py-0.5 font-mono text-xs font-semibold text-ink-2">
+          {rows.length} {rows.length === 1 ? "analysis" : "analyses"}
+        </span>
+      </div>
+
       <ul className="grid gap-3">
         {rows.map((row) => (
           <li key={row.analysis_id}>
             <Link
               href={`/results?id=${row.analysis_id}`}
-              className="flex flex-wrap items-center justify-between gap-3 rounded-control border border-rule bg-paper p-3.5 transition-colors hover:bg-paper-2"
+              className="flex flex-col gap-3 rounded-xl border border-rule bg-paper/60 p-4 transition-all hover:border-ink/30 hover:bg-paper hover:shadow-xs sm:flex-row sm:items-center sm:justify-between"
             >
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <p className="truncate font-medium text-ink">
                   {row.job_title}
-                  {row.company ? ` · ${row.company}` : ""}
+                  {row.company ? (
+                    <span className="text-ink-2"> · {row.company}</span>
+                  ) : (
+                    ""
+                  )}
                 </p>
-                <p className="font-mono text-xs text-ink-3">
-                  {new Date(row.created_at).toLocaleDateString()}
+                <p className="mt-0.5 font-mono text-xs text-ink-3">
+                  {new Date(row.created_at).toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
+                  })}
                 </p>
               </div>
-              <div className="flex shrink-0 items-center gap-3">
-                <span className="font-mono text-sm text-ink-2">{Math.round(row.coverage)}%</span>
+
+              <div className="flex shrink-0 items-center justify-between gap-4 sm:justify-end">
+                <div className="text-right">
+                  <span className="font-mono text-sm font-semibold text-ink">
+                    {Math.round(row.coverage)}%
+                  </span>
+                  <span className="ml-1 text-xs text-ink-3">match</span>
+                </div>
                 <Stamp tone={REALISM_TONE[row.realism_verdict] ?? "partial"}>
                   {tr(`realism.${row.realism_verdict}`)}
                 </Stamp>
