@@ -145,7 +145,7 @@ def test_get_status_cancelled_returns_expired():
         "status": {"code": "00", "message": "Cancelled"},
         "data": {
             "payment_status": "CANCELLED",
-            "payment_status_code": 2,
+            "payment_status_code": 7,
         },
     }
 

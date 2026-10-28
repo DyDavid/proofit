@@ -26,3 +26,4 @@ alter table public.checkout_sessions
   add column if not exists qr_string text,
   add column if not exists qr_image text,
   add column if not exists deeplink text;
+

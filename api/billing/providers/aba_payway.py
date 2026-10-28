@@ -41,9 +41,22 @@ class AbaPayWayProvider:
         api_key: str | None = None,
         base_url: str | None = None,
     ) -> None:
-        self.merchant_id = merchant_id or settings.aba_payway_merchant_id or ""
-        self.api_key = api_key or settings.aba_payway_api_key or ""
-        self.base_url = (base_url or settings.aba_payway_base_url or "https://checkout-sandbox.payway.com.kh").rstrip("/")
+        self.merchant_id = (
+            settings.aba_payway_merchant_id or ""
+            if merchant_id is None
+            else merchant_id
+        )
+        self.api_key = (
+            settings.aba_payway_api_key or ""
+            if api_key is None
+            else api_key
+        )
+        resolved_url = (
+            settings.aba_payway_base_url or "https://checkout-sandbox.payway.com.kh"
+            if base_url is None
+            else base_url
+        )
+        self.base_url = resolved_url.rstrip("/")
 
     def create_session(
         self,
@@ -200,9 +213,11 @@ class AbaPayWayProvider:
 
                     if payment_status == "APPROVED" or payment_code == 0:
                         return "paid"
+                    if payment_status == "PENDING" or payment_code == 2:
+                        return "pending"
                     if (
-                        payment_status in ("REFUNDED", "CANCELLED", "FAILED", "EXPIRED")
-                        or payment_code in (2, 3, 4)
+                        payment_status in ("REFUNDED", "CANCELLED", "DECLINED", "FAILED", "EXPIRED")
+                        or payment_code in (3, 4, 7)
                     ):
                         return "expired"
                     return "pending"
@@ -210,3 +225,4 @@ class AbaPayWayProvider:
             logger.warning("ABA PayWay check-transaction-2 error: %s", e)
 
         return "pending"
+
