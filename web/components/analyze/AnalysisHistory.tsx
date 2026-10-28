@@ -11,16 +11,18 @@ import { getAnalysisHistory, type AnalysisSummary } from "@/lib/api";
 import { loadRememberedResume } from "@/lib/localResume";
 import { createClient } from "@/lib/supabase/client";
 
+export interface AnalysisHistoryProps {
+  className?: string;
+  showEmpty?: boolean;
+}
+
 /**
- * Past analyses for the resume remembered in this browser (PERSON_B_PLAN_v2.md
- * §5 Phase 3 task 2). There are no accounts, so "the current user" is exactly
- * the resume_id `localResume.ts` already remembers per browser (Phase 2) —
- * reusing that identity rather than adding a second anonymous-id mechanism
- * for the same purpose. Renders nothing when there is no remembered resume or
- * no history yet, rather than an empty-state card — the Analyze form is
- * already the first thing on this page.
+ * Past analyses for the signed-in user or the resume remembered in this browser.
  */
-export function AnalysisHistory() {
+export function AnalysisHistory({
+  className,
+  showEmpty = false,
+}: AnalysisHistoryProps) {
   const t = useTranslations("analyze.history");
   const tr = useTranslations("results");
   const [rows, setRows] = React.useState<AnalysisSummary[] | null>(null);
@@ -45,16 +47,32 @@ export function AnalysisHistory() {
         if (active) setRows([]);
       }
     }
-    load();
+    void load();
     return () => {
       active = false;
     };
   }, []);
 
-  if (!rows || rows.length === 0) return null;
+  if (rows === null) return null;
+
+  if (rows.length === 0) {
+    if (!showEmpty) return null;
+    return (
+      <Card padding="lg" className={className ?? "mt-8"}>
+        <h2 className="mb-2 font-serif text-xl text-ink">{t("title")}</h2>
+        <p className="text-sm text-ink-3">
+          No analyses saved yet. Head to the{" "}
+          <Link href="/analyze" className="font-medium text-accent underline">
+            Analyzer
+          </Link>{" "}
+          to run your first match.
+        </p>
+      </Card>
+    );
+  }
 
   return (
-    <Card padding="lg" className="mt-8">
+    <Card padding="lg" className={className ?? "mt-8"}>
       <h2 className="mb-4 font-serif text-xl text-ink">{t("title")}</h2>
       <ul className="grid gap-3">
         {rows.map((row) => (

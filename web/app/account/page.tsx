@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { AnalysisHistory } from "@/components/analyze/AnalysisHistory";
 import { UsageMeter } from "@/components/billing/UsageMeter";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -59,6 +60,8 @@ export default async function AccountPage() {
             </form>
           </div>
         </Card>
+
+        <AnalysisHistory showEmpty className="mt-0" />
       </div>
     </div>
   );
