@@ -7,7 +7,8 @@ import {
   type SubscriptionSummary,
 } from "@/lib/billing/api";
 
-function formatEndDate(iso: string | null): string {
+function formatEndDate(iso: string | null, planId?: string): string {
+  if (planId === "campus") return "Unlimited lifetime access";
   if (!iso) return "Rolling 30-day window";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "Rolling 30-day window";
@@ -75,11 +76,11 @@ export function UsageMeter() {
             {sub.plan_id === "pass"
               ? "Job Hunt Pass"
               : sub.plan_id === "campus"
-                ? "Campus"
+                ? "Campus (Unlimited)"
                 : "Free Plan"}
           </span>
           <span className="text-xs font-medium text-ink-3">
-            {formatEndDate(sub.active_until)}
+            {formatEndDate(sub.active_until, sub.plan_id)}
           </span>
         </div>
 

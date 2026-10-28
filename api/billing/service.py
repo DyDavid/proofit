@@ -234,6 +234,23 @@ def record_usage_event(
 def get_subscription_summary(user_id: str) -> SubscriptionOut:
     """Return the user's active plan, expiry, and usage in the current window."""
     now = datetime.now(UTC)
+
+    from api.auth import get_user_email
+    from api.config import is_admin_email
+
+    user_email = get_user_email(user_id)
+    if is_admin_email(user_email):
+        analysis_used = _count_usage(user_id, "analysis", now - timedelta(days=365))
+        rewrite_used = _count_usage(user_id, "rewrite", now - timedelta(days=365))
+        return SubscriptionOut(
+            plan_id="campus",
+            active_until=None,
+            usage=UsageSummary(
+                analysis=UsageBucket(used=analysis_used, limit=None),
+                rewrite=UsageBucket(used=rewrite_used, limit=None),
+            ),
+        )
+
     active_sub = _get_active_subscription_for_user(user_id)
 
     if active_sub is not None:

@@ -36,6 +36,15 @@ class Settings(BaseSettings):
     stripe_webhook_secret: str | None = None
     site_url: str = "http://localhost:3000"
     enforce_quotas: bool = True
+    admin_emails: str = "dydavid168@gmail.com"
+
+
+def is_admin_email(email: str | None) -> bool:
+    """Check if the email has unlimited superuser privileges."""
+    if not email:
+        return False
+    admins = [e.strip().lower() for e in settings.admin_emails.split(",") if e.strip()]
+    return email.strip().lower() in admins
 
 
 def validate_billing_config(cfg: Settings | None = None) -> None:

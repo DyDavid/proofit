@@ -322,3 +322,55 @@ def test_free_user_quota_blocks_fourth_analysis_and_second_resume(
     assert detail["kind"] == "analysis"
     assert detail["limit"] == 3
     assert detail["upgrade_url"] == "/pricing"
+
+
+def test_admin_user_has_unlimited_access(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "supabase_jwt_secret", TEST_JWT_SECRET)
+    monkeypatch.setattr(settings, "enforce_quotas", True)
+    client = TestClient(app)
+    admin_id = "user-super-admin"
+    admin_headers = {"Authorization": f"Bearer {_make_token(admin_id, email='dydavid168@gmail.com')}"}
+
+    # Admin's subscription returns campus / unlimited
+    sub_res = client.get("/api/billing/subscription", headers=admin_headers)
+    assert sub_res.status_code == 200
+    sub_data = sub_res.json()
+    assert sub_data["plan_id"] == "campus"
+    assert sub_data["usage"]["analysis"]["limit"] is None
+    assert sub_data["usage"]["rewrite"]["limit"] is None
+
+    # Admin can upload multiple resumes without hitting saved_resumes limit
+    r1 = client.post(
+        "/api/resumes",
+        files={"file": ("adm_resume1.pdf", b"%PDF-1.4 sample", "application/pdf")},
+        headers=admin_headers,
+    )
+    assert r1.status_code == 200
+    r2 = client.post(
+        "/api/resumes",
+        files={"file": ("adm_resume2.pdf", b"%PDF-1.4 sample 2", "application/pdf")},
+        headers=admin_headers,
+    )
+    assert r2.status_code == 200
+
+    job_res = client.post(
+        "/api/jobs",
+        json={
+            "text": (
+                "Junior Software Engineer required with TypeScript and Python. "
+                "Responsibilities include building frontend apps and writing tests."
+            )
+        },
+        headers=admin_headers,
+    )
+    job_id = job_res.json()["job_id"]
+
+    # Admin can run 5+ analyses without 402 quota error
+    for _ in range(5):
+        a_res = client.post(
+            "/api/analyses",
+            json={"resume_id": r1.json()["resume_id"], "job_id": job_id, "country": "cambodia"},
+            headers=admin_headers,
+        )
+        assert a_res.status_code == 202
+

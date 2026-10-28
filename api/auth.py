@@ -17,16 +17,31 @@ from fastapi import Header, Request
 from jwt import PyJWKClient
 from pydantic import BaseModel
 
-from api.config import settings
+from api.config import is_admin_email, settings
 from api.db import get_supabase_client
 from api.errors import ApiError
 
 logger = logging.getLogger(__name__)
 
+_known_user_emails: dict[str, str] = {}
+
+
+def register_user_email(user_id: str, email: str | None) -> None:
+    if email:
+        _known_user_emails[user_id] = email.strip().lower()
+
+
+def get_user_email(user_id: str) -> str | None:
+    return _known_user_emails.get(user_id)
+
 
 class CurrentUser(BaseModel):
     id: str
     email: str | None = None
+
+    @property
+    def is_admin(self) -> bool:
+        return is_admin_email(self.email)
 
 
 @lru_cache(maxsize=4)
@@ -85,7 +100,9 @@ async def verify_bearer_token(token: str) -> CurrentUser:
             sub = payload.get("sub")
             if not sub:
                 raise ValueError("Token missing sub claim")
-            return CurrentUser(id=str(sub), email=payload.get("email"))
+            user = CurrentUser(id=str(sub), email=payload.get("email"))
+            register_user_email(user.id, user.email)
+            return user
         except Exception as err:
             raise ApiError(
                 status_code=401,
@@ -100,7 +117,9 @@ async def verify_bearer_token(token: str) -> CurrentUser:
             sub = payload.get("sub")
             if not sub:
                 raise ValueError("Token missing sub claim")
-            return CurrentUser(id=str(sub), email=payload.get("email"))
+            user = CurrentUser(id=str(sub), email=payload.get("email"))
+            register_user_email(user.id, user.email)
+            return user
         except Exception as err:
             raise ApiError(
                 status_code=401,
@@ -113,9 +132,11 @@ async def verify_bearer_token(token: str) -> CurrentUser:
     if client is not None:
         try:
             res = await anyio.to_thread.run_sync(client.auth.get_user, token)
-            user = getattr(res, "user", None)
-            if user and getattr(user, "id", None):
-                return CurrentUser(id=str(user.id), email=getattr(user, "email", None))
+            user_data = getattr(res, "user", None)
+            if user_data and getattr(user_data, "id", None):
+                user = CurrentUser(id=str(user_data.id), email=getattr(user_data, "email", None))
+                register_user_email(user.id, user.email)
+                return user
         except Exception as err:
             logger.debug("Supabase auth.get_user failed: %s", err)
 
