@@ -41,16 +41,19 @@ class CheckoutCreateIn(BaseModel):
 
 class CheckoutCreatedOut(BaseModel):
     session_id: str
-    provider: Literal["stripe_sandbox", "mock"]
+    provider: Literal["stripe_sandbox", "mock", "aba_payway"]
     amount_cents: int
     currency: str
     expires_at: datetime
     checkout_url: str | None = None
+    qr_string: str | None = None
+    qr_image: str | None = None
+    deeplink: str | None = None
 
 
 class CheckoutStatusOut(BaseModel):
     session_id: str
-    provider: Literal["stripe_sandbox", "mock"]
+    provider: Literal["stripe_sandbox", "mock", "aba_payway"]
     provider_ref: str | None = None
     plan_id: str
     amount_cents: int
@@ -59,6 +62,9 @@ class CheckoutStatusOut(BaseModel):
     expires_at: datetime
     paid_at: datetime | None = None
     active_until: datetime | None = None
+    qr_string: str | None = None
+    qr_image: str | None = None
+    deeplink: str | None = None
 
 
 @dataclass
@@ -69,9 +75,12 @@ class CheckoutSessionRecord:
     amount_cents: int
     currency: str
     status: Literal["pending", "paid", "expired", "canceled"]
-    provider: Literal["stripe_sandbox", "mock"]
+    provider: Literal["stripe_sandbox", "mock", "aba_payway"]
     provider_ref: str | None = None
     checkout_url: str | None = None
+    qr_string: str | None = None
+    qr_image: str | None = None
+    deeplink: str | None = None
     expires_at: datetime = field(
         default_factory=lambda: datetime.now(UTC) + timedelta(minutes=30)
     )
@@ -116,6 +125,9 @@ def reset_billing_memory() -> None:
 def get_active_provider() -> BillingProvider:
     if settings.billing_provider == "stripe_sandbox":
         return StripeSandboxProvider()
+    if settings.billing_provider == "aba_payway":
+        from api.billing.providers.aba_payway import AbaPayWayProvider
+        return AbaPayWayProvider()
     return MockProvider()
 
 
@@ -357,6 +369,9 @@ def _row_to_checkout_session(row: dict) -> CheckoutSessionRecord:
         provider=row["provider"],
         provider_ref=row.get("provider_ref"),
         checkout_url=row.get("checkout_url"),
+        qr_string=row.get("qr_string"),
+        qr_image=row.get("qr_image"),
+        deeplink=row.get("deeplink"),
         expires_at=datetime.fromisoformat(row["expires_at"]),
         paid_at=datetime.fromisoformat(row["paid_at"]) if row.get("paid_at") else None,
         created_at=datetime.fromisoformat(row["created_at"]),
@@ -481,7 +496,10 @@ def create_checkout(
         status="pending",
         provider=provider.name,
         provider_ref=created["provider_ref"],
-        checkout_url=created["checkout_url"],
+        checkout_url=created.get("checkout_url"),
+        qr_string=created.get("qr_string"),
+        qr_image=created.get("qr_image"),
+        deeplink=created.get("deeplink"),
         expires_at=created["expires_at"],
     )
     _save_checkout_session(rec)
@@ -493,6 +511,9 @@ def create_checkout(
         currency=rec.currency,
         expires_at=rec.expires_at,
         checkout_url=rec.checkout_url,
+        qr_string=rec.qr_string,
+        qr_image=rec.qr_image,
+        deeplink=rec.deeplink,
     )
 
 
@@ -503,6 +524,23 @@ def _refresh_and_serialize_session(rec: CheckoutSessionRecord) -> CheckoutStatus
             try:
                 provider = StripeSandboxProvider()
                 remote_status = provider.get_status(rec.provider_ref)
+                if remote_status == "paid":
+                    rec.status = "paid"
+                    rec.paid_at = rec.paid_at or now
+                    _save_checkout_session(rec)
+                    grant_plan(rec)
+                elif remote_status == "expired":
+                    rec.status = "expired"
+                    _save_checkout_session(rec)
+            except Exception:
+                pass
+
+        if rec.provider == "aba_payway" and rec.provider_ref:
+            try:
+                from api.billing.providers.aba_payway import AbaPayWayProvider
+
+                aba_provider = AbaPayWayProvider()
+                remote_status = aba_provider.get_status(rec.provider_ref)
                 if remote_status == "paid":
                     rec.status = "paid"
                     rec.paid_at = rec.paid_at or now
@@ -530,6 +568,9 @@ def _refresh_and_serialize_session(rec: CheckoutSessionRecord) -> CheckoutStatus
         expires_at=rec.expires_at,
         paid_at=rec.paid_at,
         active_until=active_sub.current_period_end if active_sub else None,
+        qr_string=rec.qr_string,
+        qr_image=rec.qr_image,
+        deeplink=rec.deeplink,
     )
 
 
@@ -554,8 +595,8 @@ def get_checkout_status_by_ref(provider_ref: str, user_id: str) -> CheckoutStatu
 
 
 def simulate_mock_payment(session_id: str, user_id: str) -> CheckoutStatusOut:
-    """Mark a mock checkout session paid and grant the pass (mock provider only)."""
-    if settings.billing_provider != "mock":
+    """Mark a mock or sandbox ABA checkout session paid and grant the pass."""
+    if settings.billing_provider not in ("mock", "aba_payway"):
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": "Mock simulation is disabled."},

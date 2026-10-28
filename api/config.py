@@ -31,9 +31,12 @@ class Settings(BaseSettings):
     enforce_auth_on_rewrites: bool = True
     turnstile_secret_key: str | None = None
 
-    billing_provider: Literal["stripe_sandbox", "mock"] = "mock"
+    billing_provider: Literal["stripe_sandbox", "mock", "aba_payway"] = "mock"
     stripe_secret_key: str | None = None
     stripe_webhook_secret: str | None = None
+    aba_payway_merchant_id: str | None = None
+    aba_payway_api_key: str | None = None
+    aba_payway_base_url: str = "https://checkout-sandbox.payway.com.kh"
     site_url: str = "http://localhost:3000"
     enforce_quotas: bool = True
     admin_emails: str = "dydavid168@gmail.com"

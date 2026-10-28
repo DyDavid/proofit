@@ -305,16 +305,23 @@ export function CheckoutDialog({
             <div className="mt-4 flex flex-col items-center justify-center rounded-xl border border-rule bg-paper/70 p-4 text-center">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src="/aba-khqr.jpg"
+                src={session.qr_image || "/aba-khqr.jpg"}
                 alt="ABA KHQR — DY DAVID (5 USD)"
-                className="h-auto w-56 rounded-xl border border-rule shadow-sm"
+                className="h-auto w-56 rounded-xl border border-rule shadow-sm bg-white p-1.5"
               />
+              {session.deeplink && (
+                <a
+                  href={session.deeplink}
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-[#004B87] px-4 py-2 text-xs font-semibold text-white shadow-sm hover:opacity-90 transition-opacity"
+                >
+                  <span>Open in ABA Mobile ↗</span>
+                </a>
+              )}
               <p className="mt-3 font-mono text-xs font-semibold text-ink">
                 USD account: 012 929 221 · DY DAVID
               </p>
               <p className="mt-1 text-xs text-ink-3">
-                Scan with ABA Mobile or any Bakong KHQR banking app, then click
-                below to confirm and activate your pass.
+                Scan with ABA Mobile or any Bakong KHQR banking app. Status updates automatically when paid.
               </p>
             </div>
 

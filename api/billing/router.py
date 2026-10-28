@@ -74,7 +74,7 @@ def post_simulate_checkout(
     session_id: str,
     user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> CheckoutStatusOut:
-    """Simulate payment completion (only available when BILLING_PROVIDER=mock)."""
+    """Simulate payment completion (available when BILLING_PROVIDER is mock or aba_payway in test mode)."""
     return simulate_mock_payment(session_id=session_id, user_id=user.id)
 
 

@@ -12,7 +12,7 @@ create table if not exists public.checkout_sessions (
   currency text not null default 'USD' check (currency in ('USD', 'KHR')),
   status text not null default 'pending'
     check (status in ('pending', 'paid', 'expired', 'canceled')),
-  provider text not null check (provider in ('stripe_sandbox', 'mock')),
+  provider text not null check (provider in ('stripe_sandbox', 'mock', 'aba_payway')),
   provider_ref text unique,            -- Stripe Checkout Session ID (cs_test_...) or mock ref
   checkout_url text,                   -- Stripe hosted Checkout URL, null for mock
   expires_at timestamptz not null default (now() + interval '30 minutes'),
@@ -26,7 +26,7 @@ create table if not exists public.subscriptions (
   plan_id text not null check (plan_id in ('pass', 'campus')),
   current_period_start timestamptz not null default now(),
   current_period_end timestamptz not null,
-  provider text not null check (provider in ('stripe_sandbox', 'mock', 'manual')),
+  provider text not null check (provider in ('stripe_sandbox', 'mock', 'aba_payway', 'manual')),
   checkout_session_id uuid unique references public.checkout_sessions(id),
   created_at timestamptz not null default now()
 );

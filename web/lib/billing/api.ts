@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/client";
 
 export type PlanId = "free" | "pass" | "campus";
-export type BillingProviderName = "stripe_sandbox" | "mock";
+export type BillingProviderName = "stripe_sandbox" | "mock" | "aba_payway";
 export type CheckoutSessionStatus = "pending" | "paid" | "expired" | "canceled";
 
 export interface PlanLimits {
@@ -49,6 +49,9 @@ export interface CheckoutCreatedResponse {
   currency: string;
   expires_at: string;
   checkout_url: string | null;
+  qr_string?: string | null;
+  qr_image?: string | null;
+  deeplink?: string | null;
 }
 
 export interface CheckoutStatusResponse {
@@ -62,6 +65,9 @@ export interface CheckoutStatusResponse {
   expires_at: string;
   paid_at: string | null;
   active_until: string | null;
+  qr_string?: string | null;
+  qr_image?: string | null;
+  deeplink?: string | null;
 }
 
 export const DEFAULT_PLANS: PlanDefinition[] = [

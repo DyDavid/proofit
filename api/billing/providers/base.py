@@ -8,14 +8,17 @@ from typing import Literal, Protocol, TypedDict
 CheckoutStatus = Literal["pending", "paid", "expired"]
 
 
-class CreatedProviderSession(TypedDict):
+class CreatedProviderSession(TypedDict, total=False):
     provider_ref: str
     checkout_url: str | None
     expires_at: datetime
+    qr_string: str | None
+    qr_image: str | None
+    deeplink: str | None
 
 
 class BillingProvider(Protocol):
-    name: Literal["stripe_sandbox", "mock"]
+    name: Literal["stripe_sandbox", "mock", "aba_payway"]
 
     def create_session(
         self,
