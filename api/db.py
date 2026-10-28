@@ -131,7 +131,15 @@ def db_get_resume(resume_id: str) -> dict[str, Any] | None:
         return None
 
 
-def db_upsert_resume(resume_id: str, filename: str, content_type: str, size_bytes: int, raw_text: str | None = None, normalized: dict[str, Any] | None = None) -> bool:
+def db_upsert_resume(
+    resume_id: str,
+    filename: str,
+    content_type: str,
+    size_bytes: int,
+    raw_text: str | None = None,
+    normalized: dict[str, Any] | None = None,
+    user_id: str | None = None,
+) -> bool:
     client = get_supabase_client()
     if not client:
         return False
@@ -146,6 +154,8 @@ def db_upsert_resume(resume_id: str, filename: str, content_type: str, size_byte
             row["raw_text"] = raw_text
         if normalized is not None:
             row["normalized"] = normalized
+        if user_id is not None:
+            row["user_id"] = user_id
 
         client.table("resumes").upsert(row).execute()
         return True
@@ -158,18 +168,27 @@ def db_upsert_resume(resume_id: str, filename: str, content_type: str, size_byte
 # Analysis Persistence
 # ============================================================================
 
-def db_create_analysis(analysis_id: str, resume_id: str, job_id: str, country: str, status: str = "queued") -> bool:
+def db_create_analysis(
+    analysis_id: str,
+    resume_id: str,
+    job_id: str,
+    country: str,
+    status: str = "queued",
+    user_id: str | None = None,
+) -> bool:
     client = get_supabase_client()
     if not client:
         return False
     try:
-        row = {
+        row: dict[str, Any] = {
             "id": analysis_id,
             "resume_id": resume_id,
             "job_id": job_id,
             "country": country,
             "status": status,
         }
+        if user_id is not None:
+            row["user_id"] = user_id
         client.table("analyses").upsert(row).execute()
         return True
     except Exception as err:
@@ -212,7 +231,12 @@ def db_get_analysis(analysis_id: str) -> dict[str, Any] | None:
         return None
 
 
-def db_list_analyses(resume_id: str | None = None, limit: int = 50, ids: list[str] | None = None) -> list[dict[str, Any]]:
+def db_list_analyses(
+    resume_id: str | None = None,
+    limit: int = 50,
+    ids: list[str] | None = None,
+    user_id: str | None = None,
+) -> list[dict[str, Any]]:
     client = get_supabase_client()
     if not client:
         return []
@@ -220,6 +244,8 @@ def db_list_analyses(resume_id: str | None = None, limit: int = 50, ids: list[st
         query = client.table("analyses").select("*").order("created_at", desc=True).limit(limit)
         if resume_id:
             query = query.eq("resume_id", resume_id)
+        if user_id:
+            query = query.eq("user_id", user_id)
         if ids is not None:
             if not ids:
                 return []
@@ -229,6 +255,35 @@ def db_list_analyses(resume_id: str | None = None, limit: int = 50, ids: list[st
     except Exception as err:
         logger.error("Error listing analyses: %s", err)
         return []
+
+
+def db_get_guest_ip_last_used(ip_hash: str) -> str | None:
+    client = get_supabase_client()
+    if not client:
+        return None
+    try:
+        res = client.table("guest_ip_usage").select("last_analysis_at").eq("ip_hash", ip_hash).maybe_single().execute()
+        if res and res.data:
+            return res.data.get("last_analysis_at")
+        return None
+    except Exception as err:
+        logger.debug("Error checking guest_ip_usage for %s: %s", ip_hash[:8], err)
+        return None
+
+
+def db_record_guest_ip_usage(ip_hash: str, timestamp_iso: str) -> bool:
+    client = get_supabase_client()
+    if not client:
+        return False
+    try:
+        client.table("guest_ip_usage").upsert({
+            "ip_hash": ip_hash,
+            "last_analysis_at": timestamp_iso,
+        }).execute()
+        return True
+    except Exception as err:
+        logger.debug("Error recording guest_ip_usage for %s: %s", ip_hash[:8], err)
+        return False
 
 
 # ============================================================================

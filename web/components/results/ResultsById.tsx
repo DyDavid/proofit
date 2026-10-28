@@ -5,8 +5,10 @@ import * as React from "react";
 
 import { Button } from "@/components/ui/Button";
 import { ResultsView } from "@/components/results/ResultsView";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ApiError, getAnalysis } from "@/lib/api";
+import { createClient } from "@/lib/supabase/client";
 import type { BaselineMatch, Match } from "@/lib/types";
 
 export interface ResultsByIdProps {
@@ -40,6 +42,7 @@ export function ResultsById({ id }: ResultsByIdProps) {
   const router = useRouter();
   const [match, setMatch] = React.useState<Match | null>(null);
   const [baseline, setBaseline] = React.useState<BaselineMatch | null>(null);
+  const [isGuestResult, setIsGuestResult] = React.useState(false);
   const [notFound, setNotFound] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -48,11 +51,16 @@ export function ResultsById({ id }: ResultsByIdProps) {
 
     async function load() {
       try {
+        const supabase = createClient();
+        const userRes = supabase ? await supabase.auth.getUser() : null;
+        const isLoggedOut = !userRes?.data?.user;
+
         const res = await getAnalysis(id);
         if (cancelled) return;
         if (res.status === "done" && res.match) {
           setMatch(res.match);
           setBaseline(res.baseline);
+          setIsGuestResult(Boolean(res.is_guest || isLoggedOut));
         } else if (res.status === "failed") {
           const code = res.error?.code;
           if (!code) {
@@ -104,5 +112,24 @@ export function ResultsById({ id }: ResultsByIdProps) {
     );
   }
 
-  return <ResultsView match={match} baseline={baseline} analysisId={id} />;
+  return (
+    <div>
+      {isGuestResult ? (
+        <div className="mx-auto mt-6 max-w-6xl px-4 sm:px-8">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-control border border-accent/30 bg-accent-tint px-4 py-3 text-sm text-ink">
+            <p className="font-medium">
+              Sign in to save this result and get more analyses.
+            </p>
+            <Link
+              href={`/login?next=${encodeURIComponent(`/results?id=${id}`)}`}
+              className="inline-flex items-center rounded-pill bg-accent px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-surface-raised transition-colors hover:bg-accent-2"
+            >
+              Sign in
+            </Link>
+          </div>
+        </div>
+      ) : null}
+      <ResultsView match={match} baseline={baseline} analysisId={id} />
+    </div>
+  );
 }

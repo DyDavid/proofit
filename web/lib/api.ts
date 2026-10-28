@@ -1,4 +1,23 @@
+import { createClient } from "@/lib/supabase/client";
 import type { BaselineMatch, HiddenStrength, Match } from "@/lib/types";
+
+async function authHeaders(extra?: Record<string, string>): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { ...(extra ?? {}) };
+  try {
+    const supabase = createClient();
+    if (supabase) {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        headers.Authorization = `Bearer ${session.access_token}`;
+      }
+    }
+  } catch {
+    // Ignore client auth error and proceed as guest
+  }
+  return headers;
+}
 
 /**
  * Thin client for the FastAPI mock/live service (PERSON_B_PLAN_v2.md §5
@@ -54,7 +73,8 @@ async function toApiError(res: Response): Promise<ApiError> {
 export async function uploadResume(file: File): Promise<{ resume_id: string }> {
   const form = new FormData();
   form.append("file", file);
-  const res = await fetch("/api/resumes", { method: "POST", body: form });
+  const headers = await authHeaders();
+  const res = await fetch("/api/resumes", { method: "POST", headers, body: form });
   if (!res.ok) throw await toApiError(res);
   return res.json();
 }
@@ -64,9 +84,10 @@ export type JobInput = { text: string } | { url: string };
 export async function submitJob(
   input: JobInput,
 ): Promise<{ job_id: string; cached: boolean }> {
+  const headers = await authHeaders({ "Content-Type": "application/json" });
   const res = await fetch("/api/jobs", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(input),
   });
   if (!res.ok) throw await toApiError(res);
@@ -76,9 +97,10 @@ export async function submitJob(
 export async function fetchJobFromUrl(
   url: string,
 ): Promise<{ text: string; url: string; word_count: number }> {
+  const headers = await authHeaders({ "Content-Type": "application/json" });
   const res = await fetch("/api/jobs/fetch-url", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({ url }),
   });
   if (!res.ok) throw await toApiError(res);
@@ -89,14 +111,16 @@ export interface CreateAnalysisInput {
   resume_id: string;
   job_id: string;
   country: string;
+  turnstile_token?: string;
 }
 
 export async function createAnalysis(
   input: CreateAnalysisInput,
-): Promise<{ analysis_id: string; status: string }> {
+): Promise<{ analysis_id: string; status: string; is_guest?: boolean }> {
+  const headers = await authHeaders({ "Content-Type": "application/json" });
   const res = await fetch("/api/analyses", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(input),
   });
   if (!res.ok) throw await toApiError(res);
@@ -106,7 +130,8 @@ export async function createAnalysis(
 export async function retryAnalysis(
   id: string,
 ): Promise<{ analysis_id: string; status: string }> {
-  const res = await fetch(`/api/analyses/${id}/retry`, { method: "POST" });
+  const headers = await authHeaders();
+  const res = await fetch(`/api/analyses/${id}/retry`, { method: "POST", headers });
   if (!res.ok) throw await toApiError(res);
   return res.json();
 }
@@ -124,7 +149,8 @@ export interface CreateRewritesResponse {
  * path is the whole request, same shape as `retryAnalysis` above.
  */
 export async function createRewrites(id: string): Promise<CreateRewritesResponse> {
-  const res = await fetch(`/api/analyses/${id}/rewrites`, { method: "POST" });
+  const headers = await authHeaders();
+  const res = await fetch(`/api/analyses/${id}/rewrites`, { method: "POST", headers });
   if (!res.ok) throw await toApiError(res);
   return res.json();
 }
@@ -135,10 +161,12 @@ export interface AnalysisStatusResponse {
   match: Match | null;
   baseline: BaselineMatch | null;
   error: { code: string; message: string; error_id: string } | null;
+  is_guest?: boolean;
 }
 
 export async function getAnalysis(id: string): Promise<AnalysisStatusResponse> {
-  const res = await fetch(`/api/analyses/${id}`);
+  const headers = await authHeaders();
+  const res = await fetch(`/api/analyses/${id}`, { headers });
   if (!res.ok) throw await toApiError(res);
   return res.json();
 }
@@ -152,8 +180,10 @@ export interface AnalysisSummary {
   created_at: string;
 }
 
-export async function getAnalysisHistory(resumeId: string): Promise<AnalysisSummary[]> {
-  const res = await fetch(`/api/analyses?resume_id=${encodeURIComponent(resumeId)}`);
+export async function getAnalysisHistory(resumeId?: string): Promise<AnalysisSummary[]> {
+  const headers = await authHeaders();
+  const query = resumeId ? `?resume_id=${encodeURIComponent(resumeId)}` : "";
+  const res = await fetch(`/api/analyses${query}`, { headers });
   if (!res.ok) throw await toApiError(res);
   return res.json();
 }

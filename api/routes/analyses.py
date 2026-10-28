@@ -13,9 +13,10 @@ import asyncio
 import logging
 import time
 
-from fastapi import APIRouter, BackgroundTasks, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 from pydantic import BaseModel, ValidationError
 
+from api.auth import CurrentUser, get_client_ip, get_optional_user, hash_guest_ip
 from api.config import settings
 from api.db import (
     db_save_jd_requirements,
@@ -24,6 +25,7 @@ from api.db import (
 )
 from api.errors import ApiError, new_error_id
 from api.store import STAGE_ORDER, store
+from api.turnstile import verify_turnstile_token
 from engine.country.rules import rules_for
 from engine.normalize.schema import HiddenStrength, Match
 from engine.rewrite.detect import detect_hidden_strengths
@@ -42,6 +44,7 @@ class AnalysisIn(BaseModel):
     resume_id: str
     job_id: str
     country: str
+    turnstile_token: str | None = None
 
 
 class AnalysisSummary(BaseModel):
@@ -212,13 +215,42 @@ async def _run_live_analysis(analysis_id: str) -> None:
 
 
 
+def _assert_analysis_access(record, user: CurrentUser | None) -> None:
+    """Enforce row-level ownership: a user cannot read or mutate another user's rows."""
+    if record.user_id is not None:
+        if user is None:
+            raise ApiError(
+                status_code=401,
+                code="UNAUTHORIZED",
+                message="Sign in to view this analysis.",
+            )
+        if user.id != record.user_id:
+            raise ApiError(
+                status_code=403,
+                code="FORBIDDEN",
+                message="You do not have permission to access this analysis.",
+            )
+
+
 @router.post("/analyses", status_code=202)
-async def create_analysis(payload: AnalysisIn, background_tasks: BackgroundTasks) -> dict:
-    if not store.get_resume(payload.resume_id):
+async def create_analysis(
+    payload: AnalysisIn,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    user: CurrentUser | None = Depends(get_optional_user),  # noqa: B008
+) -> dict:
+    res_rec = store.get_resume(payload.resume_id)
+    if not res_rec:
         raise ApiError(
             status_code=404,
             code="RESUME_NOT_FOUND",
             message="Unknown resume_id.",
+        )
+    if res_rec.user_id is not None and (user is None or user.id != res_rec.user_id):
+        raise ApiError(
+            status_code=403,
+            code="FORBIDDEN",
+            message="You do not have permission to use this resume.",
         )
     if not store.get_job(payload.job_id):
         raise ApiError(
@@ -227,17 +259,40 @@ async def create_analysis(payload: AnalysisIn, background_tasks: BackgroundTasks
             message="Unknown job_id.",
         )
 
-    record = store.create_analysis(payload.resume_id, payload.job_id, payload.country)
+    if user is None:
+        await verify_turnstile_token(payload.turnstile_token, get_client_ip(request))
+
+    is_guest = user is None and settings.enforce_guest_limit
+    if is_guest:
+        ip_hash = hash_guest_ip(request)
+        if not store.check_guest_ip_allowed(ip_hash):
+            raise ApiError(
+                status_code=429,
+                code="GUEST_LIMIT_REACHED",
+                message="You have used your 1 free guest analysis for today. Sign in to save results and get more analyses.",
+            )
+        store.record_guest_ip_usage(ip_hash)
+
+    record = store.create_analysis(
+        payload.resume_id,
+        payload.job_id,
+        payload.country,
+        user_id=user.id if user else None,
+        is_guest=is_guest,
+    )
     if settings.engine_mode == "live":
         background_tasks.add_task(_run_live_analysis, record.id)
     else:
         background_tasks.add_task(_run_mock_analysis, record.id)
 
-    return {"analysis_id": record.id, "status": record.status}
+    return {"analysis_id": record.id, "status": record.status, "is_guest": record.is_guest}
 
 
 @router.get("/analyses/{analysis_id}")
-async def get_analysis(analysis_id: str) -> dict:
+async def get_analysis(
+    analysis_id: str,
+    user: CurrentUser | None = Depends(get_optional_user),  # noqa: B008
+) -> dict:
     record = store.get_analysis(analysis_id)
     if record is None:
         raise ApiError(
@@ -245,6 +300,7 @@ async def get_analysis(analysis_id: str) -> dict:
             code="ANALYSIS_NOT_FOUND",
             message="Unknown analysis_id.",
         )
+    _assert_analysis_access(record, user)
 
     return {
         "status": record.status,
@@ -253,13 +309,26 @@ async def get_analysis(analysis_id: str) -> dict:
         "baseline": record.baseline.model_dump(mode="json") if record.baseline else None,
         "error": record.error,
         "error_message": record.error_message,
+        "is_guest": record.is_guest or record.user_id is None,
     }
 
 
 @router.get("/analyses")
-async def list_analyses(resume_id: str = Query(..., min_length=1)) -> list[AnalysisSummary]:
+async def list_analyses(
+    resume_id: str | None = Query(default=None),
+    user: CurrentUser | None = Depends(get_optional_user),  # noqa: B008
+) -> list[AnalysisSummary]:
+    if user is None and (resume_id is None or not resume_id.strip()):
+        raise ApiError(
+            status_code=401,
+            code="UNAUTHORIZED",
+            message="Authentication or resume_id required.",
+        )
     summaries: list[AnalysisSummary] = []
-    for record in store.analyses_for_resume(resume_id):
+    for record in store.analyses_for_resume(
+        resume_id=resume_id.strip() if resume_id else None,
+        user_id=user.id if user else None,
+    ):
         assert record.match is not None  # guaranteed by analyses_for_resume's own filter
         job = record.match.job
         summaries.append(
@@ -276,10 +345,18 @@ async def list_analyses(resume_id: str = Query(..., min_length=1)) -> list[Analy
 
 
 @router.post("/analyses/{analysis_id}/retry", status_code=202)
-async def retry_analysis(analysis_id: str, background_tasks: BackgroundTasks) -> dict:
-    record = store.create_retry(analysis_id)
-    if record is None:
+async def retry_analysis(
+    analysis_id: str,
+    background_tasks: BackgroundTasks,
+    user: CurrentUser | None = Depends(get_optional_user),  # noqa: B008
+) -> dict:
+    original = store.get_analysis(analysis_id)
+    if original is None:
         raise ApiError(status_code=404, code="ANALYSIS_NOT_FOUND", message="Unknown analysis_id.")
+    _assert_analysis_access(original, user)
+
+    record = store.create_retry(analysis_id)
+    assert record is not None
 
     if settings.engine_mode == "live":
         background_tasks.add_task(_run_live_analysis, record.id)
@@ -304,7 +381,10 @@ def _append_hidden_strength(match: Match, hidden_strength: HiddenStrength) -> Ma
 
 
 @router.post("/analyses/{analysis_id}/rewrites")
-def create_rewrites(analysis_id: str) -> dict:
+def create_rewrites(
+    analysis_id: str,
+    user: CurrentUser | None = Depends(get_optional_user),  # noqa: B008
+) -> dict:
     """Runs the F5 pipeline for one completed analysis (PERSON_B_PLAN_v2.md §5
     Phase 3 task 6): detect candidates, generate a rewrite for each, validate
     it, retry generation+validation once on failure, log every failure, and
@@ -319,9 +399,17 @@ def create_rewrites(analysis_id: str) -> dict:
     the `GET /api/analyses/{id}` poll the Progress screen depends on. FastAPI
     runs a plain `def` route in a threadpool instead, so the LLM I/O blocks
     only that worker thread."""
+    if settings.enforce_auth_on_rewrites and user is None:
+        raise ApiError(
+            status_code=401,
+            code="UNAUTHORIZED",
+            message="Sign in to generate AI rewrites.",
+        )
+
     record = store.get_analysis(analysis_id)
     if record is None:
         raise ApiError(status_code=404, code="ANALYSIS_NOT_FOUND", message="Unknown analysis_id.")
+    _assert_analysis_access(record, user)
     if record.status != "done" or record.match is None:
         raise ApiError(
             status_code=409,

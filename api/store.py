@@ -12,16 +12,19 @@ import json
 import logging
 import secrets
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
 from api.db import (
     db_create_analysis,
     db_get_analysis,
+    db_get_guest_ip_last_used,
     db_get_job,
     db_get_job_by_hash,
     db_get_resume,
+    db_list_analyses,
+    db_record_guest_ip_usage,
     db_update_analysis_stage,
     db_upsert_job,
     db_upsert_resume,
@@ -90,6 +93,7 @@ class ResumeRecord:
     data: bytes | None = None
     raw_text: str | None = None
     normalized: Resume | None = None
+    user_id: str | None = None
 
 
 @dataclass
@@ -113,6 +117,8 @@ class AnalysisRecord:
     baseline: BaselineMatch | None = None
     error: dict | None = None
     error_message: str | None = None
+    user_id: str | None = None
+    is_guest: bool = False
     created_at: datetime = field(default_factory=utcnow)
 
 
@@ -141,6 +147,7 @@ class Store:
     jobs_by_hash: dict[str, str] = field(default_factory=dict)
     analyses: dict[str, AnalysisRecord] = field(default_factory=dict)
     rewrite_rejections: list[RewriteRejection] = field(default_factory=list)
+    guest_ip_usage: dict[str, datetime] = field(default_factory=dict)
     _rotation_index: int = 0
     #: Caches the fixture name `pick_fixture_name` picked for a given job_id.
     #: Without this, calling `pick_fixture_name` twice for the same job_id on
@@ -158,6 +165,7 @@ class Store:
         data: bytes | None = None,
         raw_text: str | None = None,
         normalized: Resume | None = None,
+        user_id: str | None = None,
     ) -> ResumeRecord:
         record = ResumeRecord(
             id=_new_id("res"),
@@ -167,11 +175,12 @@ class Store:
             data=data,
             raw_text=raw_text,
             normalized=normalized,
+            user_id=user_id,
         )
         self.resumes[record.id] = record
 
-        # Persist to Supabase if available
-        if get_supabase_client():
+        # Persist to Supabase if available (only for authenticated users; guest resumes stay in memory)
+        if get_supabase_client() and user_id is not None:
             norm_json = normalized.model_dump(mode="json") if normalized else None
             db_upsert_resume(
                 resume_id=record.id,
@@ -180,6 +189,7 @@ class Store:
                 size_bytes=size,
                 raw_text=raw_text,
                 normalized=norm_json,
+                user_id=user_id,
             )
 
         return record
@@ -199,6 +209,7 @@ class Store:
                     size=row.get("size_bytes", 0),
                     raw_text=row.get("raw_text"),
                     normalized=norm_obj,
+                    user_id=row.get("user_id"),
                 )
                 self.resumes[rec.id] = rec
                 return rec
@@ -287,7 +298,7 @@ class Store:
         rec = self.resumes.get(resume_id)
         if rec is not None:
             rec.normalized = normalized
-        if get_supabase_client() and rec is not None:
+        if get_supabase_client() and rec is not None and rec.user_id is not None:
             db_upsert_resume(
                 resume_id=rec.id,
                 filename=rec.filename,
@@ -295,6 +306,7 @@ class Store:
                 size_bytes=rec.size,
                 raw_text=rec.raw_text,
                 normalized=normalized.model_dump(mode="json"),
+                user_id=rec.user_id,
             )
         return rec
 
@@ -315,23 +327,63 @@ class Store:
             )
         return rec
 
-    def create_analysis(self, resume_id: str, job_id: str, country: str) -> AnalysisRecord:
+    def check_guest_ip_allowed(self, ip_hash: str) -> bool:
+        """Returns True if this salted IP hash has not run a guest analysis in the past 24h."""
+        now = utcnow()
+        cutoff = now - timedelta(hours=24)
+
+        last_mem = self.guest_ip_usage.get(ip_hash)
+        if last_mem is not None and last_mem > cutoff:
+            return False
+
+        if get_supabase_client():
+            last_db_str = db_get_guest_ip_last_used(ip_hash)
+            if last_db_str:
+                try:
+                    last_db = datetime.fromisoformat(last_db_str.replace("Z", "+00:00"))
+                    if last_db > cutoff:
+                        self.guest_ip_usage[ip_hash] = last_db
+                        return False
+                except ValueError:
+                    pass
+
+        return True
+
+    def record_guest_ip_usage(self, ip_hash: str) -> None:
+        now = utcnow()
+        self.guest_ip_usage[ip_hash] = now
+        if get_supabase_client():
+            db_record_guest_ip_usage(ip_hash, now.isoformat())
+
+    def create_analysis(
+        self,
+        resume_id: str,
+        job_id: str,
+        country: str,
+        user_id: str | None = None,
+        is_guest: bool = False,
+    ) -> AnalysisRecord:
         record = AnalysisRecord(
             id=_new_id("an"),
             resume_id=resume_id,
             job_id=job_id,
             country=country,
             status="queued",
+            user_id=user_id,
+            is_guest=is_guest,
         )
         self.analyses[record.id] = record
 
-        if get_supabase_client():
+        # Phase 1.5: Guest results are returned in memory for the single session,
+        # never saved to Supabase.
+        if get_supabase_client() and not is_guest:
             db_create_analysis(
                 analysis_id=record.id,
                 resume_id=resume_id,
                 job_id=job_id,
                 country=country,
                 status="queued",
+                user_id=user_id,
             )
 
         return record
@@ -340,18 +392,57 @@ class Store:
         original = self.get_analysis(original_id)
         if original is None:
             return None
-        return self.create_analysis(original.resume_id, original.job_id, original.country)
+        return self.create_analysis(
+            original.resume_id,
+            original.job_id,
+            original.country,
+            user_id=original.user_id,
+            is_guest=original.is_guest,
+        )
 
-    def analyses_for_resume(self, resume_id: str) -> list[AnalysisRecord]:
-        """Completed analyses for one resume, newest first — the History list
-        (PERSON_B_PLAN_v2.md §5 Phase 3 task 2). Only `status == "done"`
-        records carry a `match`, which is where job title/company/coverage/
-        realism come from in mock mode — there is no separate normalized-job
-        store to join against."""
-        done = [
-            a for a in self.analyses.values()
-            if a.resume_id == resume_id and a.status == "done" and a.match is not None
-        ]
+    def analyses_for_resume(
+        self,
+        resume_id: str | None = None,
+        user_id: str | None = None,
+    ) -> list[AnalysisRecord]:
+        """Completed analyses for a user and/or resume, newest first.
+
+        - When `user_id` is provided: includes all completed non-guest analyses
+          owned by `user_id` (hydrating from Supabase if needed), plus any
+          unowned (`user_id is None`, `not is_guest`) analyses matching `resume_id`.
+        - When `user_id` is None: includes only unowned (`user_id is None`,
+          `not is_guest`) analyses matching `resume_id`. Never leaks another
+          user's rows.
+        """
+        if get_supabase_client() and user_id is not None:
+            for row in db_list_analyses(user_id=user_id):
+                aid = row.get("id")
+                if aid and aid not in self.analyses:
+                    match_obj = Match.model_validate(row["match"]) if row.get("match") else None
+                    self.analyses[aid] = AnalysisRecord(
+                        id=aid,
+                        resume_id=row.get("resume_id") or "",
+                        job_id=row.get("job_id") or "",
+                        country=row.get("country", "KH"),
+                        status=row.get("status", "done"),
+                        stage=row.get("stage"),
+                        match=match_obj,
+                        error_message=row.get("error_message"),
+                        user_id=row.get("user_id"),
+                        is_guest=False,
+                    )
+
+        done: list[AnalysisRecord] = []
+        for a in self.analyses.values():
+            if a.status != "done" or a.match is None or a.is_guest:
+                continue
+            if user_id is not None:
+                if a.user_id == user_id or (resume_id and a.resume_id == resume_id and a.user_id is None):
+                    done.append(a)
+            else:
+                if resume_id and a.resume_id == resume_id and a.user_id is None:
+                    done.append(a)
+
         return sorted(done, key=lambda a: a.created_at, reverse=True)
 
     def update_analysis(
@@ -380,7 +471,7 @@ class Store:
             if error_message is not None:
                 record.error_message = error_message
 
-        if get_supabase_client():
+        if get_supabase_client() and (record is None or not record.is_guest):
             match_json = match.model_dump(mode="json") if match else None
             db_update_analysis_stage(
                 analysis_id=analysis_id,
@@ -418,6 +509,8 @@ class Store:
                     match=match_obj,
                     baseline=baseline_obj,
                     error_message=row.get("error_message"),
+                    user_id=row.get("user_id"),
+                    is_guest=False,
                 )
                 self.analyses[rec.id] = rec
                 return rec

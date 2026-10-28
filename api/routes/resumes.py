@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, Depends, File, UploadFile
 
+from api.auth import CurrentUser, get_optional_user
 from api.config import settings
 from api.errors import ApiError
 from api.store import store
@@ -26,7 +27,10 @@ ACCEPTED_CONTENT_TYPES = {
 
 
 @router.post("/resumes")
-async def upload_resume(file: UploadFile = File(...)) -> dict:  # noqa: B008 (FastAPI DI convention)
+async def upload_resume(
+    file: UploadFile = File(...),  # noqa: B008 (FastAPI DI convention)
+    user: CurrentUser | None = Depends(get_optional_user),  # noqa: B008
+) -> dict:
     if file.content_type not in ACCEPTED_CONTENT_TYPES:
         raise ApiError(
             status_code=415,
@@ -56,6 +60,7 @@ async def upload_resume(file: UploadFile = File(...)) -> dict:  # noqa: B008 (Fa
         size=len(body),
         data=body,
         raw_text=raw_text,
+        user_id=user.id if user else None,
     )
     return {"resume_id": record.id}
 

@@ -17,14 +17,17 @@ env_file = find_dotenv(usecwd=True) or Path(__file__).resolve().parent.parent / 
 load_dotenv(env_file, override=True)
 
 
+from api.billing.router import router as billing_router
 from api.config import settings
 from api.errors import install_error_handlers
-from api.routes import analyses, countries, health, jobs, resumes
+from api.routes import analyses, auth, countries, health, jobs, resumes
 
 app = FastAPI(title="Proofit API", version=settings.app_version)
 install_error_handlers(app)
 
 app.include_router(health.router, prefix="/api")
+app.include_router(auth.router, prefix="/api")
+app.include_router(billing_router, prefix="/api")
 app.include_router(resumes.router, prefix="/api")
 app.include_router(jobs.router, prefix="/api")
 app.include_router(analyses.router, prefix="/api")

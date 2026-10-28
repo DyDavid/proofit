@@ -1,10 +1,12 @@
 import { useTranslations } from "@/lib/copy";
+import { HeaderAuth } from "@/components/auth/HeaderAuth";
 import { Button } from "@/components/ui/Button";
 import Link from "next/link";
 
 const NAV_ITEMS = [
   { href: "/", key: "nav.home" },
   { href: "/analyze", key: "nav.analyze" },
+  { href: "/pricing", key: "nav.pricing" },
   { href: "/about", key: "nav.about" },
 ] as const;
 
@@ -37,7 +39,8 @@ export default function Header() {
           ))}
         </nav>
 
-        <div className="ml-auto flex shrink-0 items-center gap-4">
+        <div className="ml-auto flex shrink-0 items-center gap-3">
+          <HeaderAuth />
           <Button
             as="a"
             href="/analyze"

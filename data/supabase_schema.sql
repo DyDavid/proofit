@@ -11,6 +11,7 @@ CREATE EXTENSION IF NOT EXISTS "vector";
 -- 2. Resumes Table
 CREATE TABLE IF NOT EXISTS resumes (
     id TEXT PRIMARY KEY,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
     filename TEXT NOT NULL,
     content_type TEXT NOT NULL DEFAULT 'application/pdf',
     size_bytes INTEGER NOT NULL DEFAULT 0,
@@ -35,6 +36,7 @@ CREATE TABLE IF NOT EXISTS jobs (
 -- 4. Analyses Table
 CREATE TABLE IF NOT EXISTS analyses (
     id TEXT PRIMARY KEY,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
     resume_id TEXT REFERENCES resumes(id) ON DELETE SET NULL,
     job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL,
     country TEXT NOT NULL DEFAULT 'KH',
@@ -112,5 +114,6 @@ CREATE POLICY "Service Role full access on analyses" ON analyses FOR ALL TO serv
 CREATE POLICY "Service Role full access on jd_requirements" ON jd_requirements FOR ALL TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "Service Role full access on resume_evidence" ON resume_evidence FOR ALL TO service_role USING (true) WITH CHECK (true);
 
--- (Optional) Allow public read access on analyses for shareable results
-CREATE POLICY "Allow anon read analyses" ON analyses FOR SELECT TO anon USING (true);
+-- Authenticate-only select own policies (see data/migrations/001_phase1_auth.sql)
+CREATE POLICY "resumes_select_own" ON resumes FOR SELECT TO authenticated USING (auth.uid() = user_id);
+CREATE POLICY "analyses_select_own" ON analyses FOR SELECT TO authenticated USING (auth.uid() = user_id);

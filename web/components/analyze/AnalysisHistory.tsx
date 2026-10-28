@@ -9,6 +9,7 @@ import { Stamp } from "@/components/ui/Stamp";
 import Link from "next/link";
 import { getAnalysisHistory, type AnalysisSummary } from "@/lib/api";
 import { loadRememberedResume } from "@/lib/localResume";
+import { createClient } from "@/lib/supabase/client";
 
 /**
  * Past analyses for the resume remembered in this browser (PERSON_B_PLAN_v2.md
@@ -25,14 +26,29 @@ export function AnalysisHistory() {
   const [rows, setRows] = React.useState<AnalysisSummary[] | null>(null);
 
   React.useEffect(() => {
-    const remembered = loadRememberedResume();
-    if (!remembered) {
-      setRows([]);
-      return;
+    let active = true;
+    async function load() {
+      const remembered = loadRememberedResume();
+      const supabase = createClient();
+      const userRes = supabase ? await supabase.auth.getUser() : null;
+      const isSignedIn = Boolean(userRes?.data?.user);
+
+      if (!remembered && !isSignedIn) {
+        if (active) setRows([]);
+        return;
+      }
+
+      try {
+        const data = await getAnalysisHistory(remembered?.id);
+        if (active) setRows(data);
+      } catch {
+        if (active) setRows([]);
+      }
     }
-    getAnalysisHistory(remembered.id)
-      .then(setRows)
-      .catch(() => setRows([]));
+    load();
+    return () => {
+      active = false;
+    };
   }, []);
 
   if (!rows || rows.length === 0) return null;

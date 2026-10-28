@@ -5,10 +5,13 @@ import * as React from "react";
 
 import { hasJobPost, isBlockedJobUrl, JobPostPanel, type JobPostValue } from "@/components/analyze/JobPostPanel";
 import { ResumeDropzone } from "@/components/analyze/ResumeDropzone";
+import { TurnstileWidget } from "@/components/auth/TurnstileWidget";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ApiError, createAnalysis, submitJob, uploadResume } from "@/lib/api";
+import { createClient } from "@/lib/supabase/client";
 import {
   clearRememberedResume,
   loadRememberedResume,
@@ -71,12 +74,22 @@ export function AnalyzeForm() {
   const [resumeError, setResumeError] = React.useState<string | null>(null);
   const [jobError, setJobError] = React.useState<string | null>(null);
   const [formError, setFormError] = React.useState<string | null>(null);
+  const [guestLimitHit, setGuestLimitHit] = React.useState(false);
+  const [isGuest, setIsGuest] = React.useState(true);
+  const [turnstileToken, setTurnstileToken] = React.useState<string | null>(null);
+  const [turnstileReset, setTurnstileReset] = React.useState(0);
   const [rememberedResume, setRememberedResume] = React.useState<RememberedResume | null>(
     null,
   );
 
   React.useEffect(() => {
     setRememberedResume(loadRememberedResume());
+    const supabase = createClient();
+    if (supabase) {
+      supabase.auth.getUser().then(({ data }) => {
+        setIsGuest(!data.user);
+      });
+    }
   }, []);
 
   const canSubmit = Boolean(file || rememberedResume) && hasJobPost(jobPost);
@@ -101,6 +114,7 @@ export function AnalyzeForm() {
     setResumeError(null);
     setJobError(null);
     setFormError(null);
+    setGuestLimitHit(false);
     try {
       let resumeId: string;
       if (file) {
@@ -116,9 +130,16 @@ export function AnalyzeForm() {
       const { job_id, cached } = await submitJob(
         jobPost.mode === "text" ? { text: jobPost.text } : { url: jobPost.url },
       );
-      const { analysis_id } = await createAnalysis({ resume_id: resumeId, job_id, country });
+      const { analysis_id } = await createAnalysis({
+        resume_id: resumeId,
+        job_id,
+        country,
+        turnstile_token: turnstileToken ?? undefined,
+      });
+      setTurnstileReset((n) => n + 1);
       router.push(`/progress?id=${analysis_id}${cached ? "&cached=1" : ""}`);
     } catch (err) {
+      setTurnstileReset((n) => n + 1);
       if (err instanceof ApiError && err.code === "RESUME_NOT_FOUND") {
         // The remembered id came from a server session that no longer
         // exists (e.g. the backend restarted) — drop it and ask again.
@@ -127,7 +148,16 @@ export function AnalyzeForm() {
       }
       const code = err instanceof ApiError ? err.code : undefined;
       const message = isLocalizedCode(code) ? te(code) : tc("error.generic");
-      if (code === "RESUME_BAD_TYPE" || code === "RESUME_TOO_LARGE") {
+      if (code === "GUEST_LIMIT_REACHED") {
+        setGuestLimitHit(true);
+        setFormError(
+          "You've used your 1 free guest analysis for today. Sign in to save your results and run more analyses.",
+        );
+      } else if (code === "CAPTCHA_FAILED") {
+        setFormError(
+          "Security verification failed. Please complete the security check and try again.",
+        );
+      } else if (code === "RESUME_BAD_TYPE" || code === "RESUME_TOO_LARGE") {
         setResumeError(message);
       } else if (code === "JOB_URL_BLOCKED" || code === "JOB_FETCH_FAILED") {
         setJobPost((v) => ({ ...v, mode: "text" }));
@@ -220,13 +250,27 @@ export function AnalyzeForm() {
           {t("submit")}
         </Button>
       </div>
+      {isGuest ? (
+        <TurnstileWidget
+          onVerify={setTurnstileToken}
+          resetSignal={turnstileReset}
+        />
+      ) : null}
       {!canSubmit && !submitting ? (
         <p className="-mt-4 font-mono text-sm text-ink-3">{t("submitHint")}</p>
       ) : null}
       {formError ? (
-        <p role="alert" className="-mt-4 text-sm text-danger">
-          {formError}
-        </p>
+        <div role="alert" className="-mt-4 flex flex-wrap items-center gap-3 text-sm text-danger">
+          <span>{formError}</span>
+          {guestLimitHit ? (
+            <Link
+              href="/login?next=/analyze"
+              className="inline-flex items-center rounded-pill bg-accent px-3.5 py-1 text-xs font-semibold uppercase tracking-wider text-surface-raised hover:bg-accent-2"
+            >
+              Sign in
+            </Link>
+          ) : null}
+        </div>
       ) : null}
     </form>
   );

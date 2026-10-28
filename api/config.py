@@ -22,7 +22,14 @@ class Settings(BaseSettings):
 
     supabase_url: str | None = None
     supabase_service_key: str | None = None
+    supabase_service_role_key: str | None = None
     supabase_key: str | None = None
+    supabase_jwt_secret: str | None = None
+
+    guest_ip_salt: str = "proofit-default-guest-salt"
+    enforce_guest_limit: bool = True
+    enforce_auth_on_rewrites: bool = True
+    turnstile_secret_key: str | None = None
 
 
 settings = Settings()
