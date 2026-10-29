@@ -73,6 +73,15 @@ function LoginFormInner() {
   );
   const [info, setInfo] = React.useState<string | null>(null);
 
+  const emailInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  function switchMode(nextMode: "signin" | "signup") {
+    if (mode === nextMode) return;
+    setMode(nextMode);
+    setError(null);
+    setInfo(null);
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -186,33 +195,46 @@ function LoginFormInner() {
     }
   }
 
+  const passwordValid = password.length >= 6;
+
   return (
-    <div className="mx-auto w-full max-w-md px-4 py-16 sm:py-24">
-      <Card padding="lg">
+    <div className="mx-auto w-full max-w-md px-4 py-12 sm:py-20">
+      <Card padding="lg" className="transition-all duration-200">
         <div className="mb-6">
           <p className="font-mono text-xs uppercase tracking-widest text-ink-3">
             Account access
           </p>
-          <h1 className="mt-1.5 font-serif text-3xl font-bold text-ink">
+          <h1 className="mt-1.5 font-serif text-2xl font-bold text-ink sm:text-3xl">
             {mode === "signin" ? "Sign in to Proofit" : "Create your account"}
           </h1>
-          <p className="mt-2 text-sm text-ink-2">
-            Save your resume analyses, track your application history, and unlock AI bullet rewrites.
+          <p className="mt-2 text-sm leading-relaxed text-ink-2">
+            {mode === "signin"
+              ? "Welcome back. Enter your email and password to access your saved analyses and rewrites."
+              : "Save your resume analyses, track your application history, and unlock AI bullet rewrites."}
           </p>
         </div>
 
-        {/* Mode Switcher Tabs */}
-        <div className="mb-6 grid grid-cols-2 rounded-control border border-rule bg-paper-2 p-1">
+        {/* Segmented Pill Mode Switcher */}
+        <div
+          role="tablist"
+          aria-label="Authentication mode"
+          className="relative mb-6 grid grid-cols-2 rounded-pill border border-rule bg-paper-2 p-1 select-none"
+        >
+          {/* Sliding active pill indicator */}
+          <span
+            aria-hidden="true"
+            className={`pointer-events-none absolute inset-y-1 left-1 w-[calc(50%-0.25rem)] rounded-pill border border-rule/70 bg-surface-raised shadow-xs transition-transform duration-200 ease-out ${
+              mode === "signup" ? "translate-x-full" : "translate-x-0"
+            }`}
+          />
           <button
             type="button"
-            onClick={() => {
-              setMode("signin");
-              setError(null);
-              setInfo(null);
-            }}
-            className={`rounded-[6px] py-2 text-sm font-medium transition-all ${
+            role="tab"
+            aria-selected={mode === "signin"}
+            onClick={() => switchMode("signin")}
+            className={`relative z-10 cursor-pointer rounded-pill py-2 text-sm font-medium transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
               mode === "signin"
-                ? "bg-surface-raised text-ink shadow-xs"
+                ? "text-ink font-semibold"
                 : "text-ink-3 hover:text-ink"
             }`}
           >
@@ -220,14 +242,12 @@ function LoginFormInner() {
           </button>
           <button
             type="button"
-            onClick={() => {
-              setMode("signup");
-              setError(null);
-              setInfo(null);
-            }}
-            className={`rounded-[6px] py-2 text-sm font-medium transition-all ${
+            role="tab"
+            aria-selected={mode === "signup"}
+            onClick={() => switchMode("signup")}
+            className={`relative z-10 cursor-pointer rounded-pill py-2 text-sm font-medium transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
               mode === "signup"
-                ? "bg-surface-raised text-ink shadow-xs"
+                ? "text-ink font-semibold"
                 : "text-ink-3 hover:text-ink"
             }`}
           >
@@ -238,14 +258,14 @@ function LoginFormInner() {
         {error ? (
           <div
             role="alert"
-            className="mb-5 rounded-control border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-danger"
+            className="mb-5 rounded-2xl border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-danger"
           >
             {error}
           </div>
         ) : null}
 
         {info && !error ? (
-          <div className="mb-5 rounded-control border border-rule bg-surface-raised px-4 py-3 text-sm text-ink-2">
+          <div className="mb-5 rounded-2xl border border-rule bg-surface-raised px-4 py-3 text-sm text-ink-2">
             {info}
           </div>
         ) : null}
@@ -257,6 +277,7 @@ function LoginFormInner() {
                 Email address
               </label>
               <input
+                ref={emailInputRef}
                 id="login-email"
                 type="email"
                 autoComplete="email"
@@ -267,14 +288,25 @@ function LoginFormInner() {
                   setError(null);
                 }}
                 placeholder="you@example.com"
-                className="min-h-11 w-full rounded-control border border-rule bg-paper px-3.5 text-[15px] text-ink placeholder:text-ink-3"
+                className="min-h-11 w-full rounded-control border border-rule bg-paper px-4 text-[15px] text-ink transition-all duration-150 placeholder:text-ink-3 hover:border-rule-2 focus:border-accent focus:bg-surface-raised focus:ring-3 focus:ring-accent/15 focus:outline-none"
               />
             </div>
 
             <div className="grid gap-1.5">
-              <label htmlFor="login-password" className="text-sm font-medium text-ink">
-                Password
-              </label>
+              <div className="flex items-center justify-between">
+                <label htmlFor="login-password" className="text-sm font-medium text-ink">
+                  Password
+                </label>
+                {mode === "signup" && password.length > 0 ? (
+                  <span
+                    className={`font-mono text-[11px] transition-colors ${
+                      passwordValid ? "text-accent font-medium" : "text-ink-3"
+                    }`}
+                  >
+                    {passwordValid ? "✓ 6+ characters" : `${password.length}/6 characters`}
+                  </span>
+                ) : null}
+              </div>
               <div className="relative flex items-center">
                 <input
                   id="login-password"
@@ -288,12 +320,13 @@ function LoginFormInner() {
                     setError(null);
                   }}
                   placeholder={mode === "signin" ? "Enter your password" : "At least 6 characters"}
-                  className="min-h-11 w-full rounded-control border border-rule bg-paper pl-3.5 pr-16 text-[15px] text-ink placeholder:text-ink-3"
+                  className="min-h-11 w-full rounded-control border border-rule bg-paper pl-4 pr-20 text-[15px] text-ink transition-all duration-150 placeholder:text-ink-3 hover:border-rule-2 focus:border-accent focus:bg-surface-raised focus:ring-3 focus:ring-accent/15 focus:outline-none"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword((prev) => !prev)}
-                  className="absolute right-3 font-mono text-xs font-medium text-ink-3 hover:text-ink"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  className="absolute right-2 cursor-pointer rounded-pill px-2.5 py-1 font-mono text-[11px] font-semibold tracking-wider text-ink-2 transition-all hover:bg-paper-2 hover:text-ink active:scale-95"
                 >
                   {showPassword ? "HIDE" : "SHOW"}
                 </button>
@@ -305,12 +338,44 @@ function LoginFormInner() {
               resetSignal={captchaReset}
             />
 
-            <Button type="submit" size="md" icon="arrow" loading={loading} className="w-full">
+            <Button
+              type="submit"
+              size="md"
+              icon="arrow"
+              loading={loading}
+              className="mt-1 w-full cursor-pointer"
+            >
               {mode === "signin" ? "Sign in" : "Create account"}
             </Button>
           </form>
 
-          <div className="relative flex items-center py-1">
+          <p className="text-center text-xs text-ink-2">
+            {mode === "signin" ? (
+              <>
+                New to Proofit?{" "}
+                <button
+                  type="button"
+                  onClick={() => switchMode("signup")}
+                  className="cursor-pointer font-semibold text-accent underline underline-offset-4 transition-colors hover:text-accent-2"
+                >
+                  Create an account
+                </button>
+              </>
+            ) : (
+              <>
+                Already have an account?{" "}
+                <button
+                  type="button"
+                  onClick={() => switchMode("signin")}
+                  className="cursor-pointer font-semibold text-accent underline underline-offset-4 transition-colors hover:text-accent-2"
+                >
+                  Sign in instead
+                </button>
+              </>
+            )}
+          </p>
+
+          <div className="relative flex items-center py-0.5">
             <div className="grow border-t border-rule" />
             <span className="mx-3 shrink font-mono text-xs uppercase text-ink-3">or</span>
             <div className="grow border-t border-rule" />
@@ -322,7 +387,7 @@ function LoginFormInner() {
             size="md"
             loading={googleLoading}
             onClick={handleGoogleLogin}
-            className="w-full"
+            className="w-full cursor-pointer"
           >
             Continue with Google
           </Button>
@@ -330,7 +395,7 @@ function LoginFormInner() {
 
         <p className="mt-6 border-t border-rule pt-4 text-center text-xs text-ink-3">
           Just trying it out?{" "}
-          <Link href="/analyze" className="font-medium text-ink underline underline-offset-4">
+          <Link href="/analyze" className="font-medium text-ink underline underline-offset-4 hover:text-accent">
             Run 1 free guest analysis
           </Link>
         </p>
