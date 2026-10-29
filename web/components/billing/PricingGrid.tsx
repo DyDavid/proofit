@@ -10,11 +10,12 @@ import {
   type PlanDefinition,
   type SubscriptionSummary,
 } from "@/lib/billing/api";
+import { CampusContactDialog } from "@/components/billing/CampusContactDialog";
 import { CheckoutDialog } from "@/components/billing/CheckoutDialog";
 import { PricingCard } from "@/components/billing/PricingCard";
 
 const CAMPUS_CONTACT_EMAIL =
-  process.env.NEXT_PUBLIC_CAMPUS_CONTACT_EMAIL || "campus@proofit.app";
+  process.env.NEXT_PUBLIC_CAMPUS_CONTACT_EMAIL || "dydavid168@gmail.com";
 
 function formatActiveUntil(isoDate: string | null | undefined): string | null {
   if (!isoDate) return null;
@@ -41,6 +42,7 @@ export function PricingGrid({ onStartCheckout }: PricingGridProps) {
     null,
   );
   const [checkoutPlan, setCheckoutPlan] = useState<PlanDefinition | null>(null);
+  const [campusModalOpen, setCampusModalOpen] = useState<boolean>(false);
   const [autoTriggered, setAutoTriggered] = useState<boolean>(false);
 
   const reloadSubscription = useCallback(async () => {
@@ -147,9 +149,7 @@ export function PricingGrid({ onStartCheckout }: PricingGridProps) {
         showArrow: true,
         activeUntilText: null,
         onAction: () => {
-          window.location.href = `mailto:${CAMPUS_CONTACT_EMAIL}?subject=${encodeURIComponent(
-            "Proofit Campus Inquiry",
-          )}`;
+          setCampusModalOpen(true);
         },
       };
     }
@@ -252,6 +252,12 @@ export function PricingGrid({ onStartCheckout }: PricingGridProps) {
           }}
         />
       )}
+
+      <CampusContactDialog
+        open={campusModalOpen}
+        onClose={() => setCampusModalOpen(false)}
+        email={CAMPUS_CONTACT_EMAIL}
+      />
     </div>
   );
 }
