@@ -16,21 +16,11 @@ export async function GET(request: Request) {
   const code = searchParams.get("code");
   const token_hash = searchParams.get("token_hash");
   const type = searchParams.get("type") as EmailOtpType | null;
+  const provider = searchParams.get("provider");
+  const isGoogleOAuth = provider === "google";
   const nextPath = sanitizeNextPath(searchParams.get("next"));
 
-  // 1. Check for explicit error from provider/Supabase
-  const incomingError = searchParams.get("error");
-  if (incomingError) {
-    const errorCode = searchParams.get("error_code");
-    const isOAuth = incomingError.toLowerCase().includes("oauth") || !type;
-    return NextResponse.redirect(
-      `${origin}/login?error=${isOAuth ? "oauth_failed" : "verification_failed"}&next=${encodeURIComponent(
-        nextPath,
-      )}${errorCode ? `&reason=${encodeURIComponent(errorCode)}` : ""}`,
-    );
-  }
-
-  // 2. PKCE code exchange (Google OAuth or PKCE email links)
+  // 1. PKCE code exchange (Google OAuth or PKCE email links)
   if (code) {
     const supabase = await createClient();
     if (supabase) {
@@ -41,7 +31,7 @@ export async function GET(request: Request) {
     }
   }
 
-  // 3. Token hash verification (Supabase email confirmation / recovery)
+  // 2. Token hash verification (Supabase email confirmation / recovery)
   if (token_hash && type) {
     const supabase = await createClient();
     if (supabase) {
@@ -52,14 +42,17 @@ export async function GET(request: Request) {
     }
   }
 
-  // 4. If this was an email confirmation, redirect with confirmed notice rather than failing
-  if (type === "signup" || type === "email" || token_hash) {
+  // 3. Only show Google OAuth error if this callback was explicitly initiated by Google OAuth
+  if (isGoogleOAuth) {
     return NextResponse.redirect(
-      `${origin}/login?confirmed=true&next=${encodeURIComponent(nextPath)}`,
+      `${origin}/login?error=oauth_failed&next=${encodeURIComponent(nextPath)}`,
     );
   }
 
+  // 4. For all email confirmation callbacks where session cookie wasn't auto-exchanged
+  // (e.g. opened in a different browser/tab or PKCE verifier missing after email verification),
+  // redirect to login with the green confirmed banner so the user can sign in with their password.
   return NextResponse.redirect(
-    `${origin}/login?error=oauth_failed&next=${encodeURIComponent(nextPath)}`,
+    `${origin}/login?confirmed=true&next=${encodeURIComponent(nextPath)}`,
   );
 }

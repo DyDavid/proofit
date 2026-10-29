@@ -92,6 +92,22 @@ function LoginFormInner() {
 
   const emailInputRef = React.useRef<HTMLInputElement | null>(null);
 
+  // If Supabase redirected here with a hash session (#access_token=...) from an email confirmation,
+  // complete the session automatically and redirect to nextPath.
+  React.useEffect(() => {
+    const supabase = createClient();
+    if (!supabase) return;
+    if (typeof window !== "undefined" && window.location.hash.includes("access_token=")) {
+      setError(null);
+      supabase.auth.getSession().then(({ data }) => {
+        if (data.session) {
+          router.push(nextPath);
+          router.refresh();
+        }
+      });
+    }
+  }, [nextPath, router]);
+
   function switchMode(nextMode: "signin" | "signup") {
     if (mode === nextMode) return;
     setMode(nextMode);
@@ -197,7 +213,7 @@ function LoginFormInner() {
 
     setGoogleLoading(true);
     try {
-      const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextPath)}`;
+      const redirectTo = `${window.location.origin}/auth/callback?provider=google&next=${encodeURIComponent(nextPath)}`;
       const { error: oError } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: { redirectTo },
