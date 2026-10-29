@@ -124,6 +124,7 @@ export async function createAnalysis(
     body: JSON.stringify(input),
   });
   if (!res.ok) throw await toApiError(res);
+  invalidateAnalysisHistoryCache();
   return res.json();
 }
 
@@ -180,12 +181,49 @@ export interface AnalysisSummary {
   created_at: string;
 }
 
-export async function getAnalysisHistory(resumeId?: string): Promise<AnalysisSummary[]> {
-  const headers = await authHeaders();
-  const query = resumeId ? `?resume_id=${encodeURIComponent(resumeId)}` : "";
-  const res = await fetch(`/api/analyses${query}`, { headers });
-  if (!res.ok) throw await toApiError(res);
-  return res.json();
+let _cachedHistory: { key: string; expiresAt: number; data: AnalysisSummary[] } | null = null;
+let _inFlightHistoryPromise: Promise<AnalysisSummary[]> | null = null;
+let _inFlightHistoryKey = "";
+
+export function invalidateAnalysisHistoryCache(): void {
+  _cachedHistory = null;
+  _inFlightHistoryPromise = null;
+  _inFlightHistoryKey = "";
+}
+
+export async function getAnalysisHistory(
+  resumeId?: string,
+  force = false,
+): Promise<AnalysisSummary[]> {
+  const cacheKey = resumeId ? `resume:${resumeId}` : "all";
+  const now = Date.now();
+  if (!force && _cachedHistory && _cachedHistory.key === cacheKey && now < _cachedHistory.expiresAt) {
+    return _cachedHistory.data;
+  }
+  if (!force && _inFlightHistoryPromise && _inFlightHistoryKey === cacheKey) {
+    return _inFlightHistoryPromise;
+  }
+
+  _inFlightHistoryKey = cacheKey;
+  _inFlightHistoryPromise = (async () => {
+    try {
+      const headers = await authHeaders();
+      const query = resumeId ? `?resume_id=${encodeURIComponent(resumeId)}` : "";
+      const res = await fetch(`/api/analyses${query}`, { headers });
+      if (!res.ok) throw await toApiError(res);
+      const data = (await res.json()) as AnalysisSummary[];
+      _cachedHistory = {
+        key: cacheKey,
+        expiresAt: Date.now() + 5000,
+        data,
+      };
+      return data;
+    } finally {
+      _inFlightHistoryPromise = null;
+    }
+  })();
+
+  return _inFlightHistoryPromise;
 }
 
 /**

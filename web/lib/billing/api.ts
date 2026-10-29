@@ -201,19 +201,42 @@ export async function fetchPlans(): Promise<PlanDefinition[]> {
   }
 }
 
-export async function fetchSubscription(): Promise<SubscriptionSummary | null> {
-  try {
-    const headers = await getBearerHeaders();
-    if (!headers.Authorization) return null;
-    const res = await fetch("/api/billing/subscription", {
-      headers,
-      cache: "no-store",
-    });
-    if (!res.ok) return null;
-    return (await res.json()) as SubscriptionSummary;
-  } catch {
-    return null;
+let _cachedSubscription: SubscriptionSummary | null = null;
+let _cachedSubExpiresAt = 0;
+let _inFlightSubPromise: Promise<SubscriptionSummary | null> | null = null;
+
+export async function fetchSubscription(
+  force = false,
+): Promise<SubscriptionSummary | null> {
+  const now = Date.now();
+  if (!force && _cachedSubscription && now < _cachedSubExpiresAt) {
+    return _cachedSubscription;
   }
+  if (!force && _inFlightSubPromise) {
+    return _inFlightSubPromise;
+  }
+
+  _inFlightSubPromise = (async () => {
+    try {
+      const headers = await getBearerHeaders();
+      if (!headers.Authorization) return null;
+      const res = await fetch("/api/billing/subscription", {
+        headers,
+        cache: "no-store",
+      });
+      if (!res.ok) return null;
+      const data = (await res.json()) as SubscriptionSummary;
+      _cachedSubscription = data;
+      _cachedSubExpiresAt = Date.now() + 4000; // 4s TTL to eliminate duplicate calls on same page
+      return data;
+    } catch {
+      return null;
+    } finally {
+      _inFlightSubPromise = null;
+    }
+  })();
+
+  return _inFlightSubPromise;
 }
 
 export async function createCheckoutSession(
