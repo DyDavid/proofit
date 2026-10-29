@@ -1,8 +1,7 @@
 import { createClient } from "@/lib/supabase/client";
 
 export type PlanId = "free" | "pass" | "campus";
-export type BillingProviderName = "stripe_sandbox" | "mock" | "aba_payway";
-export type CheckoutSessionStatus = "pending" | "paid" | "expired" | "canceled";
+export type CheckoutSessionStatus = "unpaid" | "paid" | "expired";
 
 export interface PlanLimits {
   analyses: number | null;
@@ -44,30 +43,35 @@ export interface SubscriptionSummary {
 
 export interface CheckoutCreatedResponse {
   session_id: string;
-  provider: BillingProviderName;
+  bill_number: string;
+  amount_minor: number;
   amount_cents: number;
-  currency: string;
+  currency: "USD" | "KHR";
+  recipient_name: string;
+  recipient_bakong_id: string;
+  qr_payload: string;
+  qr_md5: string;
+  status: CheckoutSessionStatus;
   expires_at: string;
-  checkout_url: string | null;
-  qr_string?: string | null;
-  qr_image?: string | null;
-  deeplink?: string | null;
 }
 
 export interface CheckoutStatusResponse {
   session_id: string;
-  provider: BillingProviderName;
-  provider_ref: string | null;
   plan_id: string;
+  bill_number: string;
+  amount_minor: number;
   amount_cents: number;
-  currency: string;
+  currency: "USD" | "KHR";
+  recipient_name: string;
+  qr_payload: string;
+  qr_md5: string;
   status: CheckoutSessionStatus;
   expires_at: string;
   paid_at: string | null;
   active_until: string | null;
-  qr_string?: string | null;
-  qr_image?: string | null;
-  deeplink?: string | null;
+  nbc_transaction_hash?: string | null;
+  verification_error?: string | null;
+  verification_message?: string | null;
 }
 
 export const DEFAULT_PLANS: PlanDefinition[] = [
@@ -240,27 +244,12 @@ export async function getCheckoutSession(
   return (await res.json()) as CheckoutStatusResponse;
 }
 
-export async function getCheckoutSessionByRef(
-  providerRef: string,
-): Promise<CheckoutStatusResponse> {
-  const headers = await getBearerHeaders();
-  const res = await fetch(
-    `/api/billing/checkout/by-ref/${encodeURIComponent(providerRef)}`,
-    {
-      headers,
-      cache: "no-store",
-    },
-  );
-  if (!res.ok) throw await readBillingError(res);
-  return (await res.json()) as CheckoutStatusResponse;
-}
-
-export async function simulateCheckoutPayment(
+export async function recheckCheckoutSession(
   sessionId: string,
 ): Promise<CheckoutStatusResponse> {
   const headers = await getBearerHeaders();
   const res = await fetch(
-    `/api/billing/checkout/${encodeURIComponent(sessionId)}/simulate`,
+    `/api/billing/checkout/${encodeURIComponent(sessionId)}/recheck`,
     {
       method: "POST",
       headers,

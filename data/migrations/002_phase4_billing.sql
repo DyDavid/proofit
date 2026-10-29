@@ -1,32 +1,35 @@
 -- ============================================================================
--- PHASE 4 MIGRATION: Checkout Sessions, Subscriptions, Usage Events & Stripe
+-- PHASE 4 MIGRATION: Direct Individual Bakong KHQR, Subscriptions & Usage Events
 -- ============================================================================
 -- Run this migration in the Supabase SQL Editor after Phase 1 migration.
+-- Do not apply without explicit user/teammate approval.
 -- ============================================================================
 
 create table if not exists public.checkout_sessions (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
-  plan_id text not null check (plan_id in ('pass')),
-  amount_cents integer not null check (amount_cents >= 0),
-  currency text not null default 'USD' check (currency in ('USD', 'KHR')),
-  status text not null default 'pending'
-    check (status in ('pending', 'paid', 'expired', 'canceled')),
-  provider text not null check (provider in ('stripe_sandbox', 'mock', 'aba_payway')),
-  provider_ref text unique,            -- Stripe Checkout Session ID (cs_test_...) or mock ref
-  checkout_url text,                   -- Stripe hosted Checkout URL, null for mock
-  expires_at timestamptz not null default (now() + interval '30 minutes'),
+  plan_id text not null check (plan_id = 'pass'),
+  bill_number text not null unique,
+  amount_minor bigint not null check (amount_minor > 0),
+  currency text not null check (currency in ('USD', 'KHR')),
+  recipient_bakong_id text not null,
+  qr_payload text not null,
+  qr_md5 char(32) not null unique,
+  status text not null default 'unpaid'
+    check (status in ('unpaid', 'paid', 'expired')),
+  nbc_transaction_hash text unique,
+  expires_at timestamptz not null,
   paid_at timestamptz,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  check (expires_at > created_at)
 );
 
 create table if not exists public.subscriptions (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
   plan_id text not null check (plan_id in ('pass', 'campus')),
-  current_period_start timestamptz not null default now(),
+  current_period_start timestamptz not null,
   current_period_end timestamptz not null,
-  provider text not null check (provider in ('stripe_sandbox', 'mock', 'aba_payway', 'manual')),
   checkout_session_id uuid unique references public.checkout_sessions(id),
   created_at timestamptz not null default now()
 );
@@ -38,13 +41,6 @@ create table if not exists public.usage_events (
   created_at timestamptz not null default now()
 );
 
--- Stripe webhook events already processed (Stripe can deliver the same event more than once)
-create table if not exists public.stripe_events (
-  id text primary key,                 -- Stripe event ID (evt_...)
-  type text not null,
-  received_at timestamptz not null default now()
-);
-
 create index if not exists usage_events_user_kind_time
   on public.usage_events (user_id, kind, created_at desc);
 create index if not exists subscriptions_user_end
@@ -53,7 +49,6 @@ create index if not exists subscriptions_user_end
 alter table public.checkout_sessions enable row level security;
 alter table public.subscriptions enable row level security;
 alter table public.usage_events enable row level security;
-alter table public.stripe_events enable row level security;   -- no policies: server only
 
 drop policy if exists "checkout_select_own" on public.checkout_sessions;
 create policy "checkout_select_own" on public.checkout_sessions
@@ -67,7 +62,5 @@ drop policy if exists "usage_select_own" on public.usage_events;
 create policy "usage_select_own" on public.usage_events
   for select using (auth.uid() = user_id);
 
--- No insert/update/delete policies on purpose.
--- Only FastAPI (service role, bypasses RLS) can write these tables.
--- Users must never be able to grant themselves a plan.
-
+-- No insert/update/delete policies for browser clients.
+-- Only FastAPI (service role, bypasses RLS) may create orders or grant plans.
