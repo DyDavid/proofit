@@ -57,7 +57,26 @@ function LoginFormInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const nextPath = sanitizeNextPath(searchParams.get("next"));
-  const oauthError = searchParams.get("error");
+  const urlError = searchParams.get("error");
+  const isConfirmed = searchParams.get("confirmed") === "true";
+
+  const initialError = React.useMemo(() => {
+    if (!urlError) return null;
+    if (urlError === "oauth_failed") {
+      return "Google sign-in could not be completed. Please try again or sign in with email.";
+    }
+    if (urlError === "verification_failed") {
+      return "The confirmation link was invalid or has already been used. Please sign in below.";
+    }
+    return "Sign-in could not be completed. Please try again.";
+  }, [urlError]);
+
+  const initialInfo = React.useMemo(() => {
+    if (isConfirmed) {
+      return "Email confirmed successfully! Please sign in with your password.";
+    }
+    return null;
+  }, [isConfirmed]);
 
   const [mode, setMode] = React.useState<"signin" | "signup">("signin");
   const [email, setEmail] = React.useState("");
@@ -68,10 +87,8 @@ function LoginFormInner() {
   const [captchaToken, setCaptchaToken] = React.useState<string | null>(null);
   const [captchaReset, setCaptchaReset] = React.useState(0);
   const turnstileEnabled = isTurnstileConfigured();
-  const [error, setError] = React.useState<string | null>(
-    oauthError ? "Google sign-in could not be completed. Please try again." : null,
-  );
-  const [info, setInfo] = React.useState<string | null>(null);
+  const [error, setError] = React.useState<string | null>(initialError);
+  const [info, setInfo] = React.useState<string | null>(initialInfo);
 
   const emailInputRef = React.useRef<HTMLInputElement | null>(null);
 
@@ -264,7 +281,19 @@ function LoginFormInner() {
           </div>
         ) : null}
 
-        {info && !error ? (
+        {isConfirmed && !error ? (
+          <div
+            role="status"
+            className="mb-5 flex items-center gap-2.5 rounded-2xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm font-medium text-emerald-800"
+          >
+            <svg className="h-4 w-4 shrink-0 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+            </svg>
+            <span>Email confirmed successfully! Please sign in with your password below.</span>
+          </div>
+        ) : null}
+
+        {info && !error && !isConfirmed ? (
           <div className="mb-5 rounded-2xl border border-rule bg-surface-raised px-4 py-3 text-sm text-ink-2">
             {info}
           </div>
