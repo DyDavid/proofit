@@ -1,10 +1,10 @@
-"""Billing API endpoints for Direct Individual Bakong KHQR."""
+"""Billing API endpoints."""
 
 from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from api.auth import CurrentUser, get_current_user
 from api.billing.plans import PlanDefinition, list_plans
@@ -15,9 +15,11 @@ from api.billing.service import (
     SubscriptionOut,
     create_checkout,
     get_checkout_status,
+    get_checkout_status_by_ref,
     get_subscription_summary,
-    recheck_checkout_status,
+    simulate_mock_payment,
 )
+from api.billing.webhooks import process_stripe_webhook
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
@@ -41,7 +43,7 @@ def post_checkout(
     body: CheckoutCreateIn,
     user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> CheckoutCreatedOut:
-    """Create a new Direct Individual Bakong KHQR order for the 30-day Job Hunt Pass."""
+    """Create a pending checkout session through the active provider."""
     return create_checkout(
         user_id=user.id,
         user_email=user.email or "",
@@ -49,19 +51,34 @@ def post_checkout(
     )
 
 
+@router.get("/checkout/by-ref/{provider_ref}", response_model=CheckoutStatusOut)
+def get_checkout_by_ref(
+    provider_ref: str,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> CheckoutStatusOut:
+    """Look up checkout session status by provider reference (e.g. cs_test_...)."""
+    return get_checkout_status_by_ref(provider_ref=provider_ref, user_id=user.id)
+
+
 @router.get("/checkout/{session_id}", response_model=CheckoutStatusOut)
 def get_checkout(
     session_id: str,
     user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> CheckoutStatusOut:
-    """Return checkout status for the order owner, verifying via official NBC API if due."""
+    """Return checkout session status with late-webhook fallback for Stripe."""
     return get_checkout_status(session_id=session_id, user_id=user.id)
 
 
-@router.post("/checkout/{session_id}/recheck", response_model=CheckoutStatusOut)
-def post_recheck_checkout(
+@router.post("/checkout/{session_id}/simulate", response_model=CheckoutStatusOut)
+def post_simulate_checkout(
     session_id: str,
     user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> CheckoutStatusOut:
-    """Rate-limited explicit server verification / reconciliation request."""
-    return recheck_checkout_status(session_id=session_id, user_id=user.id)
+    """Simulate payment completion (only available when BILLING_PROVIDER=mock)."""
+    return simulate_mock_payment(session_id=session_id, user_id=user.id)
+
+
+@router.post("/webhooks/stripe")
+async def stripe_webhook(request: Request) -> dict[str, str]:
+    """Stripe webhook receiver (verified via Stripe-Signature header, no user JWT)."""
+    return await process_stripe_webhook(request)

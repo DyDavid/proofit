@@ -9,13 +9,6 @@ from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-TRUSTED_BAKONG_API_HOSTS = frozenset(
-    {
-        "https://sit-api-bakong.nbc.gov.kh",
-        "https://api-bakong.nbc.gov.kh",
-    }
-)
-
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -38,17 +31,9 @@ class Settings(BaseSettings):
     enforce_auth_on_rewrites: bool = True
     turnstile_secret_key: str | None = None
 
-    # Phase 4: Direct Individual Bakong KHQR (NBC Open API)
-    bakong_token: str | None = None
-    bakong_account_id: str = "abaakhppxxx@abaa"
-    bakong_account_information: str | None = "012929221"
-    bakong_acquiring_bank: str | None = "ABA Bank"
-    bakong_merchant_name: str = "DY DAVID"
-    bakong_merchant_city: str = "Phnom Penh"
-    bakong_api_base_url: str = "https://sit-api-bakong.nbc.gov.kh"
-    bakong_live_enabled: bool = False
-    khqr_expiry_seconds: int = 300
-
+    billing_provider: Literal["stripe_sandbox", "mock"] = "mock"
+    stripe_secret_key: str | None = None
+    stripe_webhook_secret: str | None = None
     site_url: str = "http://localhost:3000"
     enforce_quotas: bool = True
     admin_emails: str = "dydavid168@gmail.com"
@@ -63,40 +48,20 @@ def is_admin_email(email: str | None) -> bool:
 
 
 def validate_billing_config(cfg: Settings | None = None) -> None:
-    """Validate Direct Bakong KHQR configuration and reject untrusted hosts or relay tokens."""
+    """Refuse to start if a non-test Stripe key is configured."""
     active = cfg or settings
-    base_url = (active.bakong_api_base_url or "").strip().rstrip("/")
-    if base_url not in TRUSTED_BAKONG_API_HOSTS:
-        raise RuntimeError(
-            "Refusing to start: BAKONG_API_BASE_URL must be one of the official NBC "
-            f"hosts {sorted(TRUSTED_BAKONG_API_HOSTS)}, got {base_url!r}."
-        )
-
-    if active.khqr_expiry_seconds <= 0 or active.khqr_expiry_seconds > 600:
-        raise RuntimeError(
-            "Refusing to start: KHQR_EXPIRY_SECONDS must be between 1 and 600 seconds "
-            f"(10 minutes maximum), got {active.khqr_expiry_seconds}."
-        )
-
-    token = (active.bakong_token or "").strip()
-    if token.lower().startswith("rbk"):
-        raise RuntimeError(
-            "Refusing to start: third-party KHQR relay tokens ('rbk...') are prohibited. "
-            "Use an official NBC Bakong developer token."
-        )
-
-    if active.bakong_live_enabled:
-        acct = (active.bakong_account_id or "").strip()
-        if not acct or "@" not in acct:
+    key = (active.stripe_secret_key or "").strip()
+    if active.billing_provider == "stripe_sandbox":
+        if not key or not (key.startswith("sk_test_") or key.startswith("rk_test_")):
             raise RuntimeError(
-                "Refusing to start: BAKONG_LIVE_ENABLED=true requires a valid "
-                "BAKONG_ACCOUNT_ID (e.g. 'name@aba')."
+                "Refusing to start: BILLING_PROVIDER=stripe_sandbox requires a Stripe "
+                "test secret key starting with 'sk_test_' or 'rk_test_'."
             )
-        if not token:
-            raise RuntimeError(
-                "Refusing to start: BAKONG_LIVE_ENABLED=true requires an official "
-                "BAKONG_TOKEN."
-            )
+    elif key and not (key.startswith("sk_test_") or key.startswith("rk_test_")):
+        raise RuntimeError(
+            "Refusing to start: STRIPE_SECRET_KEY must be a sandbox test key "
+            "starting with 'sk_test_' or 'rk_test_'."
+        )
 
 
 settings = Settings()

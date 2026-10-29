@@ -4,11 +4,11 @@ import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
-  getCheckoutSession,
+  getCheckoutSessionByRef,
   notifySubscriptionUpdated,
 } from "@/lib/billing/api";
 
-type PollState = "polling" | "paid" | "still_pending" | "missing_session";
+type PollState = "polling" | "paid" | "still_pending" | "missing_cs";
 
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return "30 days from today";
@@ -23,16 +23,13 @@ function formatDate(iso: string | null | undefined): string {
 
 function BillingSuccessContent() {
   const searchParams = useSearchParams();
-  const sessionId =
-    searchParams.get("session_id") || searchParams.get("id");
-  const [state, setState] = useState<PollState>(
-    sessionId ? "polling" : "missing_session",
-  );
+  const cs = searchParams.get("cs");
+  const [state, setState] = useState<PollState>(cs ? "polling" : "missing_cs");
   const [activeUntil, setActiveUntil] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!sessionId) {
-      setState("missing_session");
+    if (!cs) {
+      setState("missing_cs");
       return;
     }
 
@@ -41,16 +38,12 @@ function BillingSuccessContent() {
 
     async function checkOnce(): Promise<boolean> {
       try {
-        const res = await getCheckoutSession(sessionId!);
+        const res = await getCheckoutSessionByRef(cs!);
         if (cancelled) return true;
         if (res.status === "paid") {
           setActiveUntil(res.active_until);
           setState("paid");
           notifySubscriptionUpdated();
-          return true;
-        }
-        if (res.status === "expired") {
-          setState("still_pending");
           return true;
         }
       } catch {
@@ -69,13 +62,13 @@ function BillingSuccessContent() {
       if (done) {
         window.clearInterval(timer);
       }
-    }, 3500);
+    }, 2000);
 
     return () => {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [sessionId]);
+  }, [cs]);
 
   return (
     <div className="mx-auto w-full max-w-lg px-4 py-16 sm:px-8">
@@ -84,11 +77,11 @@ function BillingSuccessContent() {
           <div>
             <div className="mx-auto h-10 w-10 animate-spin rounded-full border-2 border-rule border-t-accent" />
             <h1 className="mt-5 font-serif text-2xl font-bold text-ink">
-              Verifying Bakong KHQR payment...
+              Confirming your payment...
             </h1>
             <p className="mt-2 text-sm text-ink-2">
-              Please wait while our server verifies your transaction with the
-              official NBC Bakong API.
+              Please wait a moment while we verify your Job Hunt Pass with our
+              payment provider.
             </p>
           </div>
         )}
@@ -125,11 +118,11 @@ function BillingSuccessContent() {
         {state === "still_pending" && (
           <div>
             <h1 className="font-serif text-2xl font-bold text-ink">
-              Payment not yet confirmed
+              Payment received, still confirming. Refresh in a minute.
             </h1>
             <p className="mt-2 text-sm text-ink-2">
-              Check your bank transaction history before paying again, or
-              refresh in a moment to recheck status.
+              Your payment is being finalized. Refresh this page in a minute or
+              check your dashboard shortly.
             </p>
             <div className="mt-6 flex flex-wrap justify-center gap-3">
               <button
@@ -137,7 +130,7 @@ function BillingSuccessContent() {
                 onClick={() => window.location.reload()}
                 className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-surface-raised hover:bg-accent-2"
               >
-                Refresh status
+                Refresh now
               </button>
               <Link
                 href="/dashboard"
@@ -149,7 +142,7 @@ function BillingSuccessContent() {
           </div>
         )}
 
-        {state === "missing_session" && (
+        {state === "missing_cs" && (
           <div>
             <h1 className="font-serif text-2xl font-bold text-ink">
               No checkout session found
@@ -177,7 +170,7 @@ export default function BillingSuccessPage() {
     <Suspense
       fallback={
         <div className="mx-auto w-full max-w-lg px-4 py-16 text-center text-sm text-ink-3">
-          Verifying Bakong KHQR payment...
+          Confirming your payment...
         </div>
       }
     >
@@ -185,3 +178,4 @@ export default function BillingSuccessPage() {
     </Suspense>
   );
 }
+
