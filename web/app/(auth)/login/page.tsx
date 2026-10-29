@@ -29,18 +29,26 @@ function mapAuthError(err: unknown): string {
       : undefined;
 
   if (status === 429 || msg.includes("rate limit") || msg.includes("too many") || msg.includes("security purposes")) {
-    return "Too many attempts, wait a minute before trying again.";
+    return "Too many attempts. Please wait a minute before trying again.";
   }
-  if (msg.includes("expired")) {
-    return "That verification code has expired. Click Resend code to get a new 6-digit code.";
+  if (msg.includes("invalid login credentials") || msg.includes("invalid credentials")) {
+    return "Invalid email or password. Please check your credentials or create an account.";
   }
-  if (msg.includes("invalid") || msg.includes("token")) {
-    return "Invalid verification code. Please check the 6-digit code and try again.";
+  if (msg.includes("email not confirmed")) {
+    return "Email not confirmed yet. Check your inbox or disable 'Confirm email' in your Supabase Auth settings.";
+  }
+  if (msg.includes("already registered") || msg.includes("already exists")) {
+    return "An account with this email already exists. Please sign in instead.";
+  }
+  if (msg.includes("password should be") || msg.includes("least 6 characters")) {
+    return "Password must be at least 6 characters.";
   }
   if (msg.includes("fetch") || msg.includes("network")) {
     return "Network error. Please check your internet connection and try again.";
   }
-  return "Could not complete sign-in. Please try again.";
+  return err && typeof err === "object" && "message" in err && typeof err.message === "string"
+    ? err.message
+    : "Could not complete authentication. Please try again.";
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -51,12 +59,12 @@ function LoginFormInner() {
   const nextPath = sanitizeNextPath(searchParams.get("next"));
   const oauthError = searchParams.get("error");
 
-  const [step, setStep] = React.useState<"email" | "code">("email");
+  const [mode, setMode] = React.useState<"signin" | "signup">("signin");
   const [email, setEmail] = React.useState("");
-  const [code, setCode] = React.useState("");
+  const [password, setPassword] = React.useState("");
+  const [showPassword, setShowPassword] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [googleLoading, setGoogleLoading] = React.useState(false);
-  const [cooldown, setCooldown] = React.useState(0);
   const [captchaToken, setCaptchaToken] = React.useState<string | null>(null);
   const [captchaReset, setCaptchaReset] = React.useState(0);
   const turnstileEnabled = isTurnstileConfigured();
@@ -65,23 +73,7 @@ function LoginFormInner() {
   );
   const [info, setInfo] = React.useState<string | null>(null);
 
-  const codeInputRef = React.useRef<HTMLInputElement | null>(null);
-
-  React.useEffect(() => {
-    if (step === "code") {
-      requestAnimationFrame(() => codeInputRef.current?.focus());
-    }
-  }, [step]);
-
-  React.useEffect(() => {
-    if (cooldown <= 0) return;
-    const timer = window.setInterval(() => {
-      setCooldown((prev) => (prev <= 1 ? 0 : prev - 1));
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [cooldown]);
-
-  async function handleSendCode(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setInfo(null);
@@ -89,6 +81,11 @@ function LoginFormInner() {
     const trimmedEmail = email.trim();
     if (!EMAIL_RE.test(trimmedEmail)) {
       setError("Please enter a valid email address.");
+      return;
+    }
+
+    if (password.length < 6) {
+      setError("Password must be at least 6 characters.");
       return;
     }
 
@@ -107,93 +104,54 @@ function LoginFormInner() {
 
     setLoading(true);
     try {
-      const { error: otpError } = await supabase.auth.signInWithOtp({
-        email: trimmedEmail,
-        options: {
-          shouldCreateUser: true,
-          captchaToken: captchaToken ?? undefined,
-        },
-      });
-      setCaptchaReset((n) => n + 1);
-      if (otpError) {
-        setError(mapAuthError(otpError));
-        return;
+      if (mode === "signin") {
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email: trimmedEmail,
+          password,
+          options: {
+            captchaToken: captchaToken ?? undefined,
+          },
+        });
+        setCaptchaReset((n) => n + 1);
+        if (signInError) {
+          setError(mapAuthError(signInError));
+          return;
+        }
+        router.push(nextPath);
+        router.refresh();
+      } else {
+        const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextPath)}`;
+        const { data, error: signUpError } = await supabase.auth.signUp({
+          email: trimmedEmail,
+          password,
+          options: {
+            emailRedirectTo: redirectTo,
+            captchaToken: captchaToken ?? undefined,
+          },
+        });
+        setCaptchaReset((n) => n + 1);
+        if (signUpError) {
+          setError(mapAuthError(signUpError));
+          return;
+        }
+
+        if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+          setMode("signin");
+          setError("An account with this email already exists. Please sign in with your password.");
+          return;
+        }
+
+        if (data.session) {
+          router.push(nextPath);
+          router.refresh();
+          return;
+        }
+
+        setMode("signin");
+        setInfo(
+          "Account created! If email confirmation is enabled on your Supabase project, check your inbox or disable 'Confirm email' in Supabase Auth settings to sign in immediately.",
+        );
       }
-      setEmail(trimmedEmail);
-      setCode("");
-      setStep("code");
-      setCooldown(60);
-      setInfo(`We sent a 6-digit verification code to ${trimmedEmail}.`);
-    } catch (err) {
-      setError(mapAuthError(err));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleVerifyCode(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-
-    const cleanCode = code.replace(/\D/g, "");
-    if (cleanCode.length !== 6) {
-      setError("Please enter the 6-digit verification code from your email.");
-      return;
-    }
-
-    const supabase = createClient();
-    if (!supabase) {
-      setError("Supabase Auth is not configured yet.");
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const { error: verifyError } = await supabase.auth.verifyOtp({
-        email,
-        token: cleanCode,
-        type: "email",
-      });
-      if (verifyError) {
-        setError(mapAuthError(verifyError));
-        return;
-      }
-      router.push(nextPath);
-      router.refresh();
-    } catch (err) {
-      setError(mapAuthError(err));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleResendCode() {
-    if (cooldown > 0 || loading) return;
-    setError(null);
-    setInfo(null);
-
-    const supabase = createClient();
-    if (!supabase) {
-      setError("Supabase Auth is not configured yet.");
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const { error: otpError } = await supabase.auth.signInWithOtp({
-        email,
-        options: {
-          shouldCreateUser: true,
-          captchaToken: captchaToken ?? undefined,
-        },
-      });
-      setCaptchaReset((n) => n + 1);
-      if (otpError) {
-        setError(mapAuthError(otpError));
-        return;
-      }
-      setCooldown(60);
-      setInfo(`Sent a new 6-digit code to ${email}.`);
     } catch (err) {
       setError(mapAuthError(err));
     } finally {
@@ -236,13 +194,45 @@ function LoginFormInner() {
             Account access
           </p>
           <h1 className="mt-1.5 font-serif text-3xl font-bold text-ink">
-            {step === "email" ? "Sign in to Proofit" : "Enter your 6-digit code"}
+            {mode === "signin" ? "Sign in to Proofit" : "Create your account"}
           </h1>
           <p className="mt-2 text-sm text-ink-2">
-            {step === "email"
-              ? "Save your resume analyses, track your application history, and unlock AI bullet rewrites."
-              : `Enter the 6-digit code sent to ${email}. It expires in 10 minutes.`}
+            Save your resume analyses, track your application history, and unlock AI bullet rewrites.
           </p>
+        </div>
+
+        {/* Mode Switcher Tabs */}
+        <div className="mb-6 grid grid-cols-2 rounded-control border border-rule bg-paper-2 p-1">
+          <button
+            type="button"
+            onClick={() => {
+              setMode("signin");
+              setError(null);
+              setInfo(null);
+            }}
+            className={`rounded-[6px] py-2 text-sm font-medium transition-all ${
+              mode === "signin"
+                ? "bg-surface-raised text-ink shadow-xs"
+                : "text-ink-3 hover:text-ink"
+            }`}
+          >
+            Sign in
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMode("signup");
+              setError(null);
+              setInfo(null);
+            }}
+            className={`rounded-[6px] py-2 text-sm font-medium transition-all ${
+              mode === "signup"
+                ? "bg-surface-raised text-ink shadow-xs"
+                : "text-ink-3 hover:text-ink"
+            }`}
+          >
+            Create account
+          </button>
         </div>
 
         {error ? (
@@ -260,124 +250,83 @@ function LoginFormInner() {
           </div>
         ) : null}
 
-        {step === "email" ? (
-          <div className="grid gap-5">
-            <form onSubmit={handleSendCode} className="grid gap-4" noValidate>
-              <div className="grid gap-1.5">
-                <label htmlFor="login-email" className="text-sm font-medium text-ink">
-                  Email address
-                </label>
-                <input
-                  id="login-email"
-                  type="email"
-                  autoComplete="email"
-                  required
-                  value={email}
-                  onChange={(e) => {
-                    setEmail(e.target.value);
-                    setError(null);
-                  }}
-                  placeholder="you@example.com"
-                  className="min-h-11 w-full rounded-control border border-rule bg-paper px-3.5 text-[15px] text-ink placeholder:text-ink-3"
-                />
-              </div>
-
-              <TurnstileWidget
-                onVerify={setCaptchaToken}
-                resetSignal={captchaReset}
-              />
-
-              <Button type="submit" size="md" icon="arrow" loading={loading} className="w-full">
-                Send code
-              </Button>
-            </form>
-
-            <div className="relative flex items-center py-1">
-              <div className="grow border-t border-rule" />
-              <span className="mx-3 shrink font-mono text-xs uppercase text-ink-3">or</span>
-              <div className="grow border-t border-rule" />
-            </div>
-
-            <Button
-              type="button"
-              variant="secondary"
-              size="md"
-              loading={googleLoading}
-              onClick={handleGoogleLogin}
-              className="w-full"
-            >
-              Continue with Google
-            </Button>
-          </div>
-        ) : (
-          <form onSubmit={handleVerifyCode} className="grid gap-4" noValidate>
+        <div className="grid gap-5">
+          <form onSubmit={handleSubmit} className="grid gap-4" noValidate>
             <div className="grid gap-1.5">
-              <label htmlFor="login-otp" className="text-sm font-medium text-ink">
-                6-digit verification code
+              <label htmlFor="login-email" className="text-sm font-medium text-ink">
+                Email address
               </label>
               <input
-                ref={codeInputRef}
-                id="login-otp"
-                type="text"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                autoComplete="one-time-code"
-                maxLength={6}
-                value={code}
+                id="login-email"
+                type="email"
+                autoComplete="email"
+                required
+                value={email}
                 onChange={(e) => {
-                  const digitsOnly = e.target.value.replace(/\D/g, "").slice(0, 6);
-                  setCode(digitsOnly);
+                  setEmail(e.target.value);
                   setError(null);
                 }}
-                onPaste={(e) => {
-                  const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
-                  if (pasted) {
-                    e.preventDefault();
-                    setCode(pasted);
-                    setError(null);
-                  }
-                }}
-                placeholder="123456"
-                className="min-h-12 w-full rounded-control border border-rule bg-paper px-4 text-center font-mono text-2xl tracking-[0.35em] text-ink placeholder:text-ink-3"
+                placeholder="you@example.com"
+                className="min-h-11 w-full rounded-control border border-rule bg-paper px-3.5 text-[15px] text-ink placeholder:text-ink-3"
               />
             </div>
 
-            <Button
-              type="submit"
-              size="md"
-              icon="arrow"
-              loading={loading}
-              disabled={code.length !== 6}
-              className="w-full"
-            >
-              Verify
-            </Button>
-
-            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-sm">
-              <button
-                type="button"
-                onClick={handleResendCode}
-                disabled={cooldown > 0 || loading}
-                className="font-medium text-accent disabled:cursor-not-allowed disabled:text-ink-3"
-              >
-                {cooldown > 0 ? `Resend code (${cooldown}s)` : "Resend code"}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setStep("email");
-                  setCode("");
-                  setError(null);
-                  setInfo(null);
-                }}
-                className="text-ink-2 underline underline-offset-4 hover:text-ink"
-              >
-                Change email
-              </button>
+            <div className="grid gap-1.5">
+              <label htmlFor="login-password" className="text-sm font-medium text-ink">
+                Password
+              </label>
+              <div className="relative flex items-center">
+                <input
+                  id="login-password"
+                  type={showPassword ? "text" : "password"}
+                  autoComplete={mode === "signin" ? "current-password" : "new-password"}
+                  required
+                  minLength={6}
+                  value={password}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setError(null);
+                  }}
+                  placeholder={mode === "signin" ? "Enter your password" : "At least 6 characters"}
+                  className="min-h-11 w-full rounded-control border border-rule bg-paper pl-3.5 pr-16 text-[15px] text-ink placeholder:text-ink-3"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  className="absolute right-3 font-mono text-xs font-medium text-ink-3 hover:text-ink"
+                >
+                  {showPassword ? "HIDE" : "SHOW"}
+                </button>
+              </div>
             </div>
+
+            <TurnstileWidget
+              onVerify={setCaptchaToken}
+              resetSignal={captchaReset}
+            />
+
+            <Button type="submit" size="md" icon="arrow" loading={loading} className="w-full">
+              {mode === "signin" ? "Sign in" : "Create account"}
+            </Button>
           </form>
-        )}
+
+          <div className="relative flex items-center py-1">
+            <div className="grow border-t border-rule" />
+            <span className="mx-3 shrink font-mono text-xs uppercase text-ink-3">or</span>
+            <div className="grow border-t border-rule" />
+          </div>
+
+          <Button
+            type="button"
+            variant="secondary"
+            size="md"
+            loading={googleLoading}
+            onClick={handleGoogleLogin}
+            className="w-full"
+          >
+            Continue with Google
+          </Button>
+        </div>
 
         <p className="mt-6 border-t border-rule pt-4 text-center text-xs text-ink-3">
           Just trying it out?{" "}
@@ -401,4 +350,3 @@ export default function LoginPage() {
     </Suspense>
   );
 }
-
