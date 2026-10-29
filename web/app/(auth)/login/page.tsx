@@ -35,7 +35,7 @@ function mapAuthError(err: unknown): string {
     return "Invalid email or password. Please check your credentials or create an account.";
   }
   if (msg.includes("email not confirmed")) {
-    return "Email not confirmed yet. Check your inbox or disable 'Confirm email' in your Supabase Auth settings.";
+    return "Your email is not confirmed yet. Please click the confirmation link sent to your inbox first.";
   }
   if (msg.includes("already registered") || msg.includes("already exists")) {
     return "An account with this email already exists. Please sign in instead.";
@@ -52,6 +52,20 @@ function mapAuthError(err: unknown): string {
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function getInboxProvider(email: string): { name: string; url: string } | null {
+  const domain = email.split("@")[1]?.toLowerCase() ?? "";
+  if (domain === "gmail.com" || domain === "googlemail.com") {
+    return { name: "Gmail", url: "https://mail.google.com/mail/u/0/#inbox" };
+  }
+  if (domain === "outlook.com" || domain === "hotmail.com" || domain === "live.com") {
+    return { name: "Outlook", url: "https://outlook.live.com/mail/0/inbox" };
+  }
+  if (domain === "yahoo.com") {
+    return { name: "Yahoo Mail", url: "https://mail.yahoo.com" };
+  }
+  return null;
+}
 
 function LoginFormInner() {
   const router = useRouter();
@@ -71,24 +85,20 @@ function LoginFormInner() {
     return "Sign-in could not be completed. Please try again.";
   }, [urlError]);
 
-  const initialInfo = React.useMemo(() => {
-    if (isConfirmed) {
-      return "Email confirmed successfully! Please sign in with your password.";
-    }
-    return null;
-  }, [isConfirmed]);
-
   const [mode, setMode] = React.useState<"signin" | "signup">("signin");
+  const [pendingVerification, setPendingVerification] = React.useState(false);
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [showPassword, setShowPassword] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
+  const [resendLoading, setResendLoading] = React.useState(false);
+  const [resendCooldown, setResendCooldown] = React.useState(0);
+  const [resendSuccess, setResendSuccess] = React.useState(false);
   const [googleLoading, setGoogleLoading] = React.useState(false);
   const [captchaToken, setCaptchaToken] = React.useState<string | null>(null);
   const [captchaReset, setCaptchaReset] = React.useState(0);
   const turnstileEnabled = isTurnstileConfigured();
   const [error, setError] = React.useState<string | null>(initialError);
-  const [info, setInfo] = React.useState<string | null>(initialInfo);
 
   const emailInputRef = React.useRef<HTMLInputElement | null>(null);
 
@@ -108,17 +118,27 @@ function LoginFormInner() {
     }
   }, [nextPath, router]);
 
+  // Countdown timer for resending confirmation email
+  React.useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = window.setInterval(() => {
+      setResendCooldown((prev) => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [resendCooldown]);
+
   function switchMode(nextMode: "signin" | "signup") {
-    if (mode === nextMode) return;
+    if (mode === nextMode && !pendingVerification) return;
     setMode(nextMode);
+    setPendingVerification(false);
     setError(null);
-    setInfo(null);
+    setResendSuccess(false);
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    setInfo(null);
+    setResendSuccess(false);
 
     const trimmedEmail = email.trim();
     if (!EMAIL_RE.test(trimmedEmail)) {
@@ -189,15 +209,77 @@ function LoginFormInner() {
           return;
         }
 
-        setMode("signin");
-        setInfo(
-          "Account created! If email confirmation is enabled on your Supabase project, check your inbox or disable 'Confirm email' in Supabase Auth settings to sign in immediately.",
-        );
+        setEmail(trimmedEmail);
+        setPendingVerification(true);
+        setResendCooldown(60);
       }
     } catch (err) {
       setError(mapAuthError(err));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleCheckConfirmedAndSignIn() {
+    setError(null);
+    setResendSuccess(false);
+    const supabase = createClient();
+    if (!supabase) return;
+
+    setLoading(true);
+    try {
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+      if (signInError) {
+        const msg = signInError.message?.toLowerCase() ?? "";
+        if (msg.includes("email not confirmed")) {
+          setError(
+            "We haven't detected the confirmation yet. Please open the email we sent you and click 'Confirm your mail', then press this button again.",
+          );
+        } else {
+          setError(mapAuthError(signInError));
+        }
+        return;
+      }
+      router.push(nextPath);
+      router.refresh();
+    } catch (err) {
+      setError(mapAuthError(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleResendConfirmation() {
+    if (resendCooldown > 0 || resendLoading) return;
+    setError(null);
+    setResendSuccess(false);
+
+    const supabase = createClient();
+    if (!supabase) return;
+
+    setResendLoading(true);
+    try {
+      const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextPath)}`;
+      const { error: resendErr } = await supabase.auth.resend({
+        type: "signup",
+        email: email.trim(),
+        options: {
+          emailRedirectTo: redirectTo,
+        },
+      });
+      if (resendErr) {
+        setError(mapAuthError(resendErr));
+        return;
+      }
+      setResendSuccess(true);
+      setResendCooldown(60);
+    } catch (err) {
+      setError(mapAuthError(err));
+    } finally {
+      setResendLoading(false);
     }
   }
 
@@ -229,6 +311,166 @@ function LoginFormInner() {
   }
 
   const passwordValid = password.length >= 6;
+  const inboxProvider = getInboxProvider(email.trim());
+
+  // Dedicated interactive screen after creating an account when email verification is active
+  if (pendingVerification) {
+    return (
+      <div className="mx-auto w-full max-w-md px-4 py-12 sm:py-20">
+        <Card padding="lg" className="transition-all duration-200">
+          {/* Top badge & animated mail icon */}
+          <div className="flex flex-col items-center text-center">
+            <div className="inline-flex items-center gap-2 rounded-pill border border-accent/20 bg-accent-tint px-3 py-1 font-mono text-xs font-semibold text-accent">
+              <span className="h-2 w-2 rounded-full bg-accent animate-ping" />
+              Action Required · Verify Email
+            </div>
+
+            <div className="mt-5 flex h-16 w-16 items-center justify-center rounded-2xl border border-accent/20 bg-accent-tint text-accent shadow-xs">
+              <svg className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.8}
+                  d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                />
+              </svg>
+            </div>
+
+            <h1 className="mt-4 font-serif text-2xl font-bold text-ink sm:text-3xl">
+              Check your inbox
+            </h1>
+            <p className="mt-2 text-sm leading-relaxed text-ink-2">
+              We sent a confirmation link to:
+            </p>
+            <div className="mt-2 inline-flex max-w-full items-center gap-2 rounded-pill border border-rule bg-paper px-3.5 py-1.5">
+              <span className="truncate font-mono text-xs font-bold text-ink sm:text-sm">
+                {email}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setPendingVerification(false);
+                  setMode("signup");
+                  setError(null);
+                }}
+                className="cursor-pointer font-mono text-[11px] font-semibold text-accent underline underline-offset-2 hover:text-accent-2"
+              >
+                Edit
+              </button>
+            </div>
+          </div>
+
+          {/* Step-by-step interactive checklist */}
+          <div className="mt-6 rounded-2xl border border-rule bg-paper/70 p-4">
+            <p className="font-mono text-[11px] font-semibold uppercase tracking-wider text-ink-3">
+              Next steps to activate your account
+            </p>
+            <ol className="mt-3 space-y-2.5 text-xs text-ink-2 sm:text-sm">
+              <li className="flex items-start gap-2.5">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent text-[11px] font-bold text-white">
+                  1
+                </span>
+                <span>
+                  Open the email from <strong className="font-semibold text-ink">Proofit</strong>{" "}
+                  <span className="text-ink-3">(check Spam if not in Inbox)</span>.
+                </span>
+              </li>
+              <li className="flex items-start gap-2.5">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent text-[11px] font-bold text-white">
+                  2
+                </span>
+                <span>
+                  Click <strong className="font-semibold text-ink">&ldquo;Confirm your mail&rdquo;</strong> inside the email.
+                </span>
+              </li>
+              <li className="flex items-start gap-2.5">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent text-[11px] font-bold text-white">
+                  3
+                </span>
+                <span>
+                  Click <strong className="font-semibold text-ink">&ldquo;I&apos;ve confirmed my email&rdquo;</strong> below to sign right in!
+                </span>
+              </li>
+            </ol>
+          </div>
+
+          {error ? (
+            <div
+              role="alert"
+              className="mt-4 rounded-2xl border border-danger/40 bg-danger/10 px-4 py-3 text-xs leading-relaxed text-danger sm:text-sm"
+            >
+              {error}
+            </div>
+          ) : null}
+
+          {resendSuccess && !error ? (
+            <div
+              role="status"
+              className="mt-4 flex items-center gap-2 rounded-2xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-xs font-medium text-emerald-800 sm:text-sm"
+            >
+              <svg className="h-4 w-4 shrink-0 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+              </svg>
+              <span>A fresh confirmation link has been sent to your inbox!</span>
+            </div>
+          ) : null}
+
+          {/* Action buttons */}
+          <div className="mt-6 grid gap-2.5">
+            {inboxProvider ? (
+              <a
+                href={inboxProvider.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-pill bg-accent px-5 py-2.5 text-sm font-semibold text-white shadow-xs transition-all hover:bg-accent-2 active:scale-[0.99]"
+              >
+                <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M24 5.457v13.909c0 .904-.732 1.636-1.636 1.636h-3.819V11.73L12 16.64l-6.545-4.91v9.272H1.636A1.636 1.636 0 0 1 0 19.366V5.457c0-2.023 2.309-3.178 3.927-1.964L5.455 4.64 12 9.548l6.545-4.91 1.528-1.145C21.69 2.28 24 3.434 24 5.457z" />
+                </svg>
+                <span>Open {inboxProvider.name} Inbox ↗</span>
+              </a>
+            ) : null}
+
+            <Button
+              type="button"
+              variant={inboxProvider ? "secondary" : "primary"}
+              size="md"
+              icon="arrow"
+              loading={loading}
+              onClick={handleCheckConfirmedAndSignIn}
+              className="w-full cursor-pointer"
+            >
+              I&apos;ve confirmed my email — Sign in
+            </Button>
+          </div>
+
+          {/* Resend & Back controls */}
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-rule pt-4 text-xs">
+            <button
+              type="button"
+              onClick={handleResendConfirmation}
+              disabled={resendCooldown > 0 || resendLoading}
+              className="cursor-pointer font-semibold text-accent transition-colors hover:text-accent-2 disabled:cursor-not-allowed disabled:text-ink-3"
+            >
+              {resendLoading
+                ? "Sending…"
+                : resendCooldown > 0
+                  ? `Resend email (${resendCooldown}s)`
+                  : "Resend confirmation email"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => switchMode("signin")}
+              className="cursor-pointer font-medium text-ink-2 underline underline-offset-4 hover:text-ink"
+            >
+              Back to Sign in
+            </button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto w-full max-w-md px-4 py-12 sm:py-20">
@@ -306,12 +548,6 @@ function LoginFormInner() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
             </svg>
             <span>Email confirmed successfully! Please sign in with your password below.</span>
-          </div>
-        ) : null}
-
-        {info && !error && !isConfirmed ? (
-          <div className="mb-5 rounded-2xl border border-rule bg-surface-raised px-4 py-3 text-sm text-ink-2">
-            {info}
           </div>
         ) : null}
 
