@@ -34,7 +34,7 @@ const nextConfig: NextConfig = {
     NEXT_PUBLIC_TURNSTILE_SITE_KEY:
       process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || "",
     NEXT_PUBLIC_CAMPUS_CONTACT_EMAIL:
-      process.env.NEXT_PUBLIC_CAMPUS_CONTACT_EMAIL || "campus@proofit.app",
+      process.env.NEXT_PUBLIC_CAMPUS_CONTACT_EMAIL || "dydavid168@gmail.com",
   },
 
   async rewrites() {
