@@ -53,30 +53,7 @@ export function AnalysisHistory({
     };
   }, []);
 
-  if (rows === null) {
-    return (
-      <Card padding="lg" className={className ?? "mt-8"} aria-hidden="true">
-        <div className="animate-pulse">
-          <div className="mb-4 flex items-center justify-between gap-3 border-b border-rule pb-4">
-            <div className="h-6 w-36 rounded bg-paper-2" />
-            <div className="h-5 w-20 rounded-pill bg-paper-2" />
-          </div>
-          <div className="grid gap-3">
-            <div className="flex flex-col gap-3 rounded-xl border border-rule bg-paper/60 p-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="space-y-2">
-                <div className="h-4 w-52 rounded bg-paper-2" />
-                <div className="h-3 w-28 rounded bg-paper-2" />
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="h-4 w-16 rounded bg-paper-2" />
-                <div className="h-6 w-20 rounded bg-paper-2" />
-              </div>
-            </div>
-          </div>
-        </div>
-      </Card>
-    );
-  }
+  if (rows === null) return null;
 
   if (rows.length === 0) {
     if (!showEmpty) return null;

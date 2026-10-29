@@ -11,7 +11,6 @@ import hashlib
 import json
 import logging
 import secrets
-import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -150,7 +149,6 @@ class Store:
     rewrite_rejections: list[RewriteRejection] = field(default_factory=list)
     guest_ip_usage: dict[str, datetime] = field(default_factory=dict)
     _rotation_index: int = 0
-    _last_analyses_hydrated: dict[str, float] = field(default_factory=dict)
     #: Caches the fixture name `pick_fixture_name` picked for a given job_id.
     #: Without this, calling `pick_fixture_name` twice for the same job_id on
     #: the rotation fallback path (once directly, once via `pick_fixture`'s
@@ -391,8 +389,6 @@ class Store:
             is_guest=is_guest,
         )
         self.analyses[record.id] = record
-        if user_id:
-            self._last_analyses_hydrated.pop(user_id, None)
 
         # Phase 1.5: Guest results are returned in memory for the single session,
         # never saved to Supabase.
@@ -434,27 +430,23 @@ class Store:
           `not is_guest`) analyses matching `resume_id`. Never leaks another
           user's rows.
         """
-        now_mono = time.monotonic()
         if get_supabase_client() and user_id is not None:
-            last_hydrated = self._last_analyses_hydrated.get(user_id, 0.0)
-            if (now_mono - last_hydrated) >= 5.0:
-                self._last_analyses_hydrated[user_id] = now_mono
-                for row in db_list_analyses(user_id=user_id):
-                    aid = row.get("id")
-                    if aid and aid not in self.analyses:
-                        match_obj = Match.model_validate(row["match"]) if row.get("match") else None
-                        self.analyses[aid] = AnalysisRecord(
-                            id=aid,
-                            resume_id=row.get("resume_id") or "",
-                            job_id=row.get("job_id") or "",
-                            country=row.get("country", "KH"),
-                            status=row.get("status", "done"),
-                            stage=row.get("stage"),
-                            match=match_obj,
-                            error_message=row.get("error_message"),
-                            user_id=row.get("user_id"),
-                            is_guest=False,
-                        )
+            for row in db_list_analyses(user_id=user_id):
+                aid = row.get("id")
+                if aid and aid not in self.analyses:
+                    match_obj = Match.model_validate(row["match"]) if row.get("match") else None
+                    self.analyses[aid] = AnalysisRecord(
+                        id=aid,
+                        resume_id=row.get("resume_id") or "",
+                        job_id=row.get("job_id") or "",
+                        country=row.get("country", "KH"),
+                        status=row.get("status", "done"),
+                        stage=row.get("stage"),
+                        match=match_obj,
+                        error_message=row.get("error_message"),
+                        user_id=row.get("user_id"),
+                        is_guest=False,
+                    )
 
         done: list[AnalysisRecord] = []
         for a in self.analyses.values():

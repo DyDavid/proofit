@@ -41,47 +41,7 @@ export function UsageMeter() {
     };
   }, []);
 
-  if (!loaded || !sub) {
-    return (
-      <div
-        data-testid="usage-meter-skeleton"
-        aria-hidden="true"
-        className="animate-pulse rounded-2xl border border-rule bg-surface-raised p-6 shadow-xs"
-      >
-        <div className="flex flex-col gap-3 border-b border-rule pb-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="h-6 w-24 rounded-pill bg-paper-2" />
-            <div className="h-4 w-36 rounded bg-paper-2" />
-          </div>
-          <div className="h-4 w-32 rounded bg-paper-2" />
-        </div>
-        <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div className="rounded-xl border border-rule bg-paper/60 p-4">
-            <div className="flex justify-between">
-              <div className="h-4 w-20 rounded bg-paper-2" />
-              <div className="h-4 w-16 rounded bg-paper-2" />
-            </div>
-            <div className="mt-3 h-2 w-full rounded-full bg-paper-2" />
-            <div className="mt-3 flex justify-between">
-              <div className="h-3 w-16 rounded bg-paper-2" />
-              <div className="h-3 w-16 rounded bg-paper-2" />
-            </div>
-          </div>
-          <div className="rounded-xl border border-rule bg-paper/60 p-4">
-            <div className="flex justify-between">
-              <div className="h-4 w-24 rounded bg-paper-2" />
-              <div className="h-4 w-16 rounded bg-paper-2" />
-            </div>
-            <div className="mt-3 h-2 w-full rounded-full bg-paper-2" />
-            <div className="mt-3 flex justify-between">
-              <div className="h-3 w-16 rounded bg-paper-2" />
-              <div className="h-3 w-16 rounded bg-paper-2" />
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  if (!loaded || !sub) return null;
 
   const analysisUsed = sub.usage.analysis.used;
   const analysisLimit = sub.usage.analysis.limit;

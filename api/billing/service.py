@@ -127,19 +127,8 @@ _checkout_sessions: dict[str, CheckoutSessionRecord] = {}
 _subscriptions: list[SubscriptionRecord] = []
 _usage_events: list[UsageEventRecord] = []
 _last_recheck_monotonic: dict[str, float] = {}
-_subscription_cache: dict[str, tuple[float, SubscriptionOut]] = {}
 
 RECHECK_MIN_INTERVAL_SECONDS = 2.0
-SUBSCRIPTION_CACHE_TTL_SECONDS = 5.0
-
-
-def invalidate_subscription_cache(user_id: str | None = None) -> None:
-    """Invalidate cached subscription summaries for one user or all users."""
-    with _fulfillment_lock:
-        if user_id is None:
-            _subscription_cache.clear()
-        else:
-            _subscription_cache.pop(user_id, None)
 
 
 def reset_billing_memory() -> None:
@@ -149,7 +138,6 @@ def reset_billing_memory() -> None:
         _subscriptions.clear()
         _usage_events.clear()
         _last_recheck_monotonic.clear()
-        _subscription_cache.clear()
 
 
 def set_test_subscription(
@@ -171,7 +159,6 @@ def set_test_subscription(
     )
     with _fulfillment_lock:
         _subscriptions.append(rec)
-        _subscription_cache.pop(user_id, None)
     return rec
 
 
@@ -256,7 +243,6 @@ def record_usage_event(
     now = datetime.now(UTC)
     with _fulfillment_lock:
         _usage_events.append(UsageEventRecord(user_id=user_id, kind=kind, created_at=now))
-        _subscription_cache.pop(user_id, None)
     client = get_supabase_client()
     if client is not None:
         with contextlib.suppress(Exception):
@@ -271,12 +257,6 @@ def record_usage_event(
 
 def get_subscription_summary(user_id: str) -> SubscriptionOut:
     """Return the user's active plan, expiry, and usage in the current window."""
-    now_mono = time.monotonic()
-    with _fulfillment_lock:
-        cached = _subscription_cache.get(user_id)
-        if cached is not None and (now_mono - cached[0]) < SUBSCRIPTION_CACHE_TTL_SECONDS:
-            return cached[1]
-
     now = datetime.now(UTC)
 
     from api.auth import get_user_email
@@ -286,7 +266,7 @@ def get_subscription_summary(user_id: str) -> SubscriptionOut:
     if is_admin_email(user_email):
         analysis_used = _count_usage(user_id, "analysis", now - timedelta(days=365))
         rewrite_used = _count_usage(user_id, "rewrite", now - timedelta(days=365))
-        summary = SubscriptionOut(
+        return SubscriptionOut(
             plan_id="campus",
             active_until=None,
             usage=UsageSummary(
@@ -294,9 +274,6 @@ def get_subscription_summary(user_id: str) -> SubscriptionOut:
                 rewrite=UsageBucket(used=rewrite_used, limit=None),
             ),
         )
-        with _fulfillment_lock:
-            _subscription_cache[user_id] = (time.monotonic(), summary)
-        return summary
 
     active_sub = _get_active_subscription_for_user(user_id)
 
@@ -313,7 +290,7 @@ def get_subscription_summary(user_id: str) -> SubscriptionOut:
     analysis_used = _count_usage(user_id, "analysis", window_start)
     rewrite_used = _count_usage(user_id, "rewrite", window_start)
 
-    summary = SubscriptionOut(
+    return SubscriptionOut(
         plan_id=plan_id,
         active_until=active_until,
         usage=UsageSummary(
@@ -327,9 +304,6 @@ def get_subscription_summary(user_id: str) -> SubscriptionOut:
             ),
         ),
     )
-    with _fulfillment_lock:
-        _subscription_cache[user_id] = (time.monotonic(), summary)
-    return summary
 
 
 def _save_checkout_session(rec: CheckoutSessionRecord) -> None:
@@ -494,7 +468,6 @@ def grant_plan(session: CheckoutSessionRecord) -> SubscriptionRecord:
             created_at=now,
         )
         _subscriptions.append(sub)
-        _subscription_cache.pop(session.user_id, None)
 
         if client is not None:
             with contextlib.suppress(Exception):
