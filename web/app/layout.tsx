@@ -7,10 +7,9 @@ import { getTranslations } from "@/lib/copy";
 import { getSiteUrl } from "@/lib/seo";
 import "./globals.css";
 
-/** Geist is the single UI font. */
+/** Geist is the single UI font (variable font supports 100-900). */
 const geist = Geist({
   subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700"],
   variable: "--font-geist",
   display: "swap",
 });
@@ -20,7 +19,6 @@ const geist = Geist({
  * globals.css for why the token name stays "serif"). */
 const archivo = Archivo({
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800", "900"],
   variable: "--font-archivo",
   display: "swap",
 });
@@ -28,8 +26,7 @@ const archivo = Archivo({
 /** Decorative italic accent face for a single emphasised word per section. */
 const newsreader = Newsreader({
   subsets: ["latin"],
-  weight: ["300", "400", "500"],
-  style: ["italic"],
+  style: "italic",
   variable: "--font-newsreader",
   display: "swap",
 });
@@ -38,7 +35,6 @@ const newsreader = Newsreader({
  * figures. */
 const geistMono = Geist_Mono({
   subsets: ["latin"],
-  weight: ["400", "500"],
   variable: "--font-geist-mono",
   display: "swap",
 });
