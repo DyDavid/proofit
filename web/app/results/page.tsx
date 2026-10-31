@@ -1,7 +1,17 @@
+import type { Metadata } from "next";
 import { ResultsById } from "@/components/results/ResultsById";
 import { ResultsView } from "@/components/results/ResultsView";
 import { sampleBaseline } from "@/lib/fixtures/sample-baseline";
 import { sampleMatch } from "@/lib/fixtures/sample-match";
+
+export const metadata: Metadata = {
+  title: "Match Result",
+  description: "Requirement-by-requirement resume coverage report.",
+  robots: {
+    index: false,
+    follow: false,
+  },
+};
 
 export interface ResultsPageProps {
   searchParams: Promise<{ id?: string }>;

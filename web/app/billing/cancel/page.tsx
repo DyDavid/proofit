@@ -2,8 +2,12 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 export const metadata: Metadata = {
-  title: "Payment Canceled — Proofit",
+  title: "Payment Canceled",
   description: "Your payment was canceled and you were not charged.",
+  robots: {
+    index: false,
+    follow: false,
+  },
 };
 
 export default function BillingCancelPage() {

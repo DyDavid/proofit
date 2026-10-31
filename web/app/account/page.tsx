@@ -1,9 +1,19 @@
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { AnalysisHistory } from "@/components/analyze/AnalysisHistory";
 import { UsageMeter } from "@/components/billing/UsageMeter";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { createClient } from "@/lib/supabase/server";
+
+export const metadata: Metadata = {
+  title: "Your Account",
+  description: "Manage your subscription limits, active pass duration, and saved match reports.",
+  robots: {
+    index: false,
+    follow: false,
+  },
+};
 
 export default async function AccountPage() {
   const supabase = await createClient();

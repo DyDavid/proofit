@@ -35,6 +35,8 @@ const nextConfig: NextConfig = {
       process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || "",
     NEXT_PUBLIC_CAMPUS_CONTACT_EMAIL:
       process.env.NEXT_PUBLIC_CAMPUS_CONTACT_EMAIL || "dydavid168@gmail.com",
+    NEXT_PUBLIC_SITE_URL:
+      process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || "http://localhost:3001",
   },
 
   async rewrites() {

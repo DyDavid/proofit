@@ -1,7 +1,17 @@
+import type { Metadata } from "next";
 import { getTranslations } from "@/lib/copy";
 
 import { AnalysisHistory } from "@/components/analyze/AnalysisHistory";
 import { AnalyzeForm } from "@/components/analyze/AnalyzeForm";
+
+export const metadata: Metadata = {
+  title: "Analyze a Job Post",
+  description: "Upload your resume and paste a job post to check requirement coverage.",
+  robots: {
+    index: false,
+    follow: false,
+  },
+};
 
 export default async function AnalyzePage() {
   const t = await getTranslations("analyze");

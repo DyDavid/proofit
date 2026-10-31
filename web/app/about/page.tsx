@@ -1,4 +1,11 @@
+import type { Metadata } from "next";
 import { getTranslations } from "@/lib/copy";
+
+export const metadata: Metadata = {
+  title: "About",
+  description:
+    "How Proofit evaluates requirement coverage and maps non-work evidence for first-job seekers.",
+};
 
 const SECTIONS = ["method", "limits", "team", "legality"] as const;
 

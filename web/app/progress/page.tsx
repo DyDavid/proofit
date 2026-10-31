@@ -1,9 +1,18 @@
+import type { Metadata } from "next";
 import { getTranslations } from "@/lib/copy";
 
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
 import { ProgressStepper } from "@/components/progress/ProgressStepper";
 import { redirect } from "next/navigation";
+
+export const metadata: Metadata = {
+  title: "Analyzing Resume",
+  robots: {
+    index: false,
+    follow: false,
+  },
+};
 
 export interface ProgressPageProps {
   searchParams: Promise<{ id?: string; cached?: string }>;

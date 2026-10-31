@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import Footer from "@/components/layout/Footer";
 import Header from "@/components/layout/Header";
 import { getTranslations } from "@/lib/copy";
+import { getSiteUrl } from "@/lib/seo";
 import "./globals.css";
 
 /** Geist is the single UI font. */
@@ -47,14 +48,34 @@ export async function generateMetadata(): Promise<Metadata> {
   const tLanding = await getTranslations("landing");
 
   const appName = t("appName");
+  const defaultTitle = `${appName} · ${t("tagline")}`;
+  const description = tLanding("hero.subtitle");
+  const siteUrl = getSiteUrl();
 
   return {
+    metadataBase: new URL(siteUrl),
     title: {
-      default: `${appName} · ${t("tagline")}`,
-      template: `%s · ${appName}`,
+      default: defaultTitle,
+      template: `%s | ${appName}`,
     },
-    description: tLanding("hero.subtitle"),
+    description,
     applicationName: appName,
+    alternates: {
+      canonical: "/",
+    },
+    openGraph: {
+      type: "website",
+      locale: "en_US",
+      url: "/",
+      siteName: appName,
+      title: defaultTitle,
+      description,
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: defaultTitle,
+      description,
+    },
   };
 }
 

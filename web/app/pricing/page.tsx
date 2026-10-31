@@ -3,9 +3,25 @@ import type { Metadata } from "next";
 import { PricingGrid } from "@/components/billing/PricingGrid";
 
 export const metadata: Metadata = {
-  title: "Pricing — Proofit",
+  title: "Pricing",
   description:
     "Simple, transparent pricing for first-job seekers. Start free or unlock a 30-day Job Hunt Pass with no recurring subscription.",
+  alternates: {
+    canonical: "/pricing",
+  },
+  openGraph: {
+    title: "Pricing | Proofit",
+    description:
+      "Simple, transparent pricing for first-job seekers. Start free or unlock a 30-day Job Hunt Pass with no recurring subscription.",
+    url: "/pricing",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Pricing | Proofit",
+    description:
+      "Simple, transparent pricing for first-job seekers. Start free or unlock a 30-day Job Hunt Pass with no recurring subscription.",
+  },
 };
 
 export default function PricingPage() {

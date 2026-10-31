@@ -1,5 +1,7 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { getTranslations } from "@/lib/copy";
+import { getSiteUrl } from "@/lib/seo";
 
 import { Button } from "@/components/ui/Button";
 import { EvidenceScene } from "@/components/landing/EvidenceScene";
@@ -258,6 +260,37 @@ function VerdictDiagram() {
   );
 }
 
+export async function generateMetadata(): Promise<Metadata> {
+  const tCommon = await getTranslations("common");
+  const tLanding = await getTranslations("landing");
+  const appName = tCommon("appName");
+  const title = `${appName} · ${tCommon("tagline")}`;
+  const description = tLanding("hero.subtitle");
+
+  return {
+    title: {
+      absolute: title,
+    },
+    description,
+    alternates: {
+      canonical: "/",
+    },
+    openGraph: {
+      title,
+      description,
+      url: "/",
+      siteName: appName,
+      type: "website",
+      locale: "en_US",
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+    },
+  };
+}
+
 /**
  * Landing — redesigned against the "Spean" design canvas (2026-09-28):
  * rotating-word hero, evidence marquee, a scroll-reveal proof scene, a
@@ -267,9 +300,32 @@ function VerdictDiagram() {
  */
 export default async function LandingPage() {
   const t = await getTranslations("landing");
+  const tCommon = await getTranslations("common");
+  const siteUrl = getSiteUrl();
+
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    name: tCommon("appName"),
+    description: t("hero.subtitle"),
+    applicationCategory: "BusinessApplication",
+    operatingSystem: "Web",
+    url: siteUrl,
+    offers: {
+      "@type": "Offer",
+      price: "0",
+      priceCurrency: "USD",
+      description:
+        "Free tier with requirement-level match reports and non-work evidence mapping",
+    },
+  };
 
   return (
     <div className="overflow-x-clip">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
       {/* ---------------------------------------------------------------- Hero */}
       <section className="relative px-4 pb-8 pt-10 sm:px-8 sm:pt-16 lg:pt-24">
         <div
