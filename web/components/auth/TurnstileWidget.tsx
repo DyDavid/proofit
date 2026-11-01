@@ -65,7 +65,7 @@ export function TurnstileWidget({ onVerify, resetSignal = 0 }: TurnstileWidgetPr
 
       widgetIdRef.current = window.turnstile.render(containerRef.current, {
         sitekey: siteKey,
-        appearance: "interaction-only",
+        appearance: "always",
         theme: "light",
         callback: (token: string) => onVerifyRef.current(token),
         "expired-callback": () => onVerifyRef.current(null),
@@ -129,6 +129,6 @@ export function TurnstileWidget({ onVerify, resetSignal = 0 }: TurnstileWidgetPr
     return null;
   }
 
-  return <div ref={containerRef} className="min-h-1" />;
+  return <div ref={containerRef} className="my-2 flex min-h-[65px] justify-center" />;
 }
 
