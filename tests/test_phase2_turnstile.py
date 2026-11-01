@@ -135,3 +135,26 @@ def test_authenticated_user_bypasses_guest_turnstile_check(
     )
     assert res.status_code == 202
 
+
+
+def test_guest_analysis_rejects_turnstile_action_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "turnstile_secret_key", "1x0000000000000000000000000000000AA")
+
+    async def _fake_post(_self: object, _url: str, data: dict[str, str]) -> _FakeHttpxResponse:
+        return _FakeHttpxResponse({"success": True, "action": "wrong_action"})
+
+    res_id, job_id = _seed_inputs()
+    with patch("httpx.AsyncClient.post", new=_fake_post):
+        res = client.post(
+            "/api/analyses",
+            json={
+                "resume_id": res_id,
+                "job_id": job_id,
+                "country": "cambodia",
+                "turnstile_token": "valid-token-wrong-action",
+            },
+        )
+    assert res.status_code == 400
+    assert res.json()["error"]["code"] == "CAPTCHA_FAILED"

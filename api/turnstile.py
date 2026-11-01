@@ -25,7 +25,11 @@ def get_turnstile_secret() -> str | None:
     return secret.strip()
 
 
-async def verify_turnstile_token(token: str | None, remote_ip: str | None = None) -> None:
+async def verify_turnstile_token(
+    token: str | None,
+    remote_ip: str | None = None,
+    expected_action: str | None = None,
+) -> None:
     """Verify a Cloudflare Turnstile token if `TURNSTILE_SECRET_KEY` is set.
 
     Raises `ApiError(400, "CAPTCHA_FAILED")` when the secret is configured and the
@@ -64,6 +68,14 @@ async def verify_turnstile_token(token: str | None, remote_ip: str | None = None
 
     if not isinstance(body, dict) or body.get("success") is not True:
         logger.info("Turnstile verification rejected: %s", body.get("error-codes") if isinstance(body, dict) else body)
+        raise ApiError(
+            status_code=400,
+            code="CAPTCHA_FAILED",
+            message="Security verification failed. Please refresh and try again.",
+        )
+
+    if expected_action and body.get("action") and body.get("action") != expected_action:
+        logger.info("Turnstile action mismatch: expected %s, got %s", expected_action, body.get("action"))
         raise ApiError(
             status_code=400,
             code="CAPTCHA_FAILED",

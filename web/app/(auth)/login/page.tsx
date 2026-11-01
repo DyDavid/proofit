@@ -504,6 +504,7 @@ function LoginFormInner() {
             <TurnstileWidget
               onVerify={setCaptchaToken}
               resetSignal={captchaReset}
+              action={mode === "signin" ? "login" : "signup"}
             />
 
             <Button

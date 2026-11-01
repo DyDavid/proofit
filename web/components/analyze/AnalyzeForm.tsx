@@ -271,6 +271,7 @@ export function AnalyzeForm() {
         <TurnstileWidget
           onVerify={setTurnstileToken}
           resetSignal={turnstileReset}
+          action="guest_analysis"
         />
       ) : null}
       {!canSubmit && !submitting ? (

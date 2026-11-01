@@ -264,7 +264,7 @@ async def create_analysis(
         )
 
     if user is None:
-        await verify_turnstile_token(payload.turnstile_token, get_client_ip(request))
+        await verify_turnstile_token(payload.turnstile_token, get_client_ip(request), expected_action="guest_analysis")
 
     is_guest = user is None and settings.enforce_guest_limit
     if is_guest:

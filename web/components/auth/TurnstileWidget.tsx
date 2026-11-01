@@ -9,6 +9,7 @@ declare global {
         container: HTMLElement,
         options: {
           sitekey: string;
+          action?: string;
           appearance?: "always" | "execute" | "interaction-only";
           theme?: "light" | "dark" | "auto";
           callback?: (token: string) => void;
@@ -34,13 +35,18 @@ export function isTurnstileConfigured(): boolean {
 export interface TurnstileWidgetProps {
   onVerify: (token: string | null) => void;
   resetSignal?: number;
+  action?: string;
 }
 
 /**
  * Cloudflare Turnstile managed/invisible widget (Phase 2).
  * Renders nothing when `NEXT_PUBLIC_TURNSTILE_SITE_KEY` is not set.
  */
-export function TurnstileWidget({ onVerify, resetSignal = 0 }: TurnstileWidgetProps) {
+export function TurnstileWidget({
+  onVerify,
+  resetSignal = 0,
+  action,
+}: TurnstileWidgetProps) {
   const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY?.trim();
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const widgetIdRef = React.useRef<string | null>(null);
@@ -65,6 +71,7 @@ export function TurnstileWidget({ onVerify, resetSignal = 0 }: TurnstileWidgetPr
 
       widgetIdRef.current = window.turnstile.render(containerRef.current, {
         sitekey: siteKey,
+        action: action,
         appearance: "always",
         theme: "light",
         callback: (token: string) => onVerifyRef.current(token),
@@ -111,7 +118,7 @@ export function TurnstileWidget({ onVerify, resetSignal = 0 }: TurnstileWidgetPr
         widgetIdRef.current = null;
       }
     };
-  }, [siteKey]);
+  }, [siteKey, action]);
 
   React.useEffect(() => {
     if (resetSignal === 0) return;
