@@ -12,6 +12,9 @@ export function getSiteUrl(): string {
     (process.env.VERCEL_PROJECT_PRODUCTION_URL
       ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL.trim()}`
       : "") ||
+    (process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL.trim()}`
+      : "") ||
     DEFAULT_SITE_URL;
 
   try {

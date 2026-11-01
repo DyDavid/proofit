@@ -72,6 +72,9 @@ export async function generateMetadata(): Promise<Metadata> {
       title: defaultTitle,
       description,
     },
+    verification: {
+      google: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION || undefined,
+    },
   };
 }
 
