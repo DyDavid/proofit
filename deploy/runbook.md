@@ -76,7 +76,23 @@ APP_VERSION=0.1.0
 GEMINI_API_KEY=...        # matching, embeddings AND rewrites
 SUPABASE_URL=https://<project-id>.supabase.co
 SUPABASE_KEY=eyJ...
+GUEST_IP_SALT=...         # random secret salt for SHA-256 guest IP hashing
+TRUSTED_PROXIES=          # comma-separated trusted proxy IPs/CIDRs (default empty)
 ```
+
+### Proxy Configuration & Client IP Trust (Phase 4)
+1. **Application Server (`uvicorn`)**:
+   - Uvicorn **must** be started with `--no-proxy-headers` (configured in `api/Dockerfile`, `scripts/dev.ps1`, and `scripts/dev.sh`).
+   - Why: Uvicorn enables `ProxyHeadersMiddleware` by default with `forwarded_allow_ips="127.0.0.1,::1"`, which rewrites `scope["client"]` before FastAPI runs and would bypass application-level proxy validation.
+2. **Application Trust (`TRUSTED_PROXIES`)**:
+   - `api/auth.py:get_client_ip` only inspects `X-Forwarded-For` when the direct TCP connection peer (`request.client.host`) belongs to `TRUSTED_PROXIES`.
+   - When trusted, `X-Forwarded-For` is parsed right-to-left (closest hop to furthest), selecting the first valid IP that is **not** in `TRUSTED_PROXIES`.
+   - If the connection peer is untrusted, or if `X-Forwarded-For` is missing or contains a malformed hop in the trusted chain, `get_client_ip` falls back to the connection peer IP.
+   - Raw client IPs are never stored or logged; guest quotas and rate limits use salted SHA-256 (`hash_guest_ip`).
+3. **Hosting Assumptions & Unverified Deployment Facts**:
+   - **Header Sanitization**: We do **not** assume Render or Vercel strip or sanitize client-supplied `X-Forwarded-For` headers. We assume proxies append the connecting client IP to the right of any existing header values.
+   - **Unverified Render Internal Proxy CIDRs**: Render does not document fixed internal load-balancer IP ranges for free-tier containers. Leaving `TRUSTED_PROXIES` empty treats the immediate peer as the client IP until the operator verifies and configures the exact proxy CIDRs.
+   - **Unverified Vercel Server-Side Rewrite Hop**: Next.js `rewrites()` in `web/next.config.ts` proxy `/api/*` from Vercel to Render server-side. Unless both Render's load balancer and Vercel's dynamic egress IPs are verified and listed in `TRUSTED_PROXIES` (or requests go through a single verified edge proxy with static CIDRs like Cloudflare), the rightmost untrusted hop seen by Render will be the Vercel rewrite egress IP rather than the end browser IP.
 
 ### Vercel Environment (Next.js Frontend)
 ```ini

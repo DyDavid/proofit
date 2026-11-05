@@ -28,7 +28,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 echo "Starting FastAPI (uvicorn) on :8000..."
-(cd "$ROOT_DIR" && "$VENV_UVICORN" api.main:app --reload --port 8000) &
+(cd "$ROOT_DIR" && "$VENV_UVICORN" api.main:app --reload --port 8000 --no-proxy-headers) &
 API_PID=$!
 
 echo "Starting Next.js (next dev) on :3000..."

@@ -15,7 +15,7 @@ Write-Host " Starting Proofit Full-Stack Servers    " -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
 Write-Host "-> Starting FastAPI Backend on http://localhost:8000..." -ForegroundColor Yellow
-$apiProcess = Start-Process -FilePath $VenvPython -ArgumentList "-m", "uvicorn", "api.main:app", "--reload", "--host", "127.0.0.1", "--port", "8000" -WorkingDirectory $RootDir -PassThru
+$apiProcess = Start-Process -FilePath $VenvPython -ArgumentList "-m", "uvicorn", "api.main:app", "--reload", "--host", "127.0.0.1", "--port", "8000", "--no-proxy-headers" -WorkingDirectory $RootDir -PassThru
 
 Write-Host "-> Starting Next.js Frontend on http://localhost:3001..." -ForegroundColor Yellow
 $webProcess = Start-Process -FilePath "npm.cmd" -ArgumentList "run", "dev", "--", "-p", "3001" -WorkingDirectory (Join-Path $RootDir "web") -PassThru

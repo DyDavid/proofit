@@ -7,6 +7,7 @@ and legacy `HS256` (`SUPABASE_JWT_SECRET`), with fallback to `supabase.auth.get_
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import logging
 import os
 from functools import lru_cache
@@ -180,20 +181,108 @@ async def get_optional_user(
     return await verify_bearer_token(token)
 
 
+def _parse_ip(ip_str: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    """Validate and return an IP address object, or None if malformed."""
+    cleaned = ip_str.strip()
+    if not cleaned:
+        return None
+    try:
+        return ipaddress.ip_address(cleaned)
+    except ValueError:
+        return None
+
+
+@lru_cache(maxsize=16)
+def _parse_trusted_proxy_networks(
+    raw_proxies: str,
+) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
+    """Parse a comma-separated string of IPs/CIDRs into network objects."""
+    if not raw_proxies or not raw_proxies.strip():
+        return ()
+    networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
+    for item in raw_proxies.split(","):
+        cleaned = item.strip()
+        if not cleaned:
+            continue
+        try:
+            networks.append(ipaddress.ip_network(cleaned, strict=False))
+        except ValueError:
+            logger.warning("Ignoring invalid trusted_proxies entry in configuration.")
+    return tuple(networks)
+
+
+def _get_trusted_proxy_networks() -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
+    """Return configured trusted proxy networks from settings or environment."""
+    raw = settings.trusted_proxies or os.getenv("TRUSTED_PROXIES", "")
+    return _parse_trusted_proxy_networks(raw)
+
+
+def _is_ip_trusted(
+    ip: ipaddress.IPv4Address | ipaddress.IPv6Address,
+    networks: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...],
+) -> bool:
+    """Return True if `ip` belongs to any configured trusted proxy network."""
+    return any(ip in net for net in networks)
+
+
 def get_client_ip(request: Request) -> str:
-    """Extract client IP behind Render/Railway proxy (`X-Forwarded-For` first entry)."""
-    forwarded_for = request.headers.get("x-forwarded-for")
-    if forwarded_for:
-        first_ip = forwarded_for.split(",")[0].strip()
-        if first_ip:
-            return first_ip
-    if request.client and request.client.host:
-        return request.client.host
-    return "127.0.0.1"
+    """Extract validated client IP, trusting forwarding headers only from trusted proxies.
+
+    Security invariants:
+    - If the connection peer (`request.client.host`) is not in `TRUSTED_PROXIES`,
+      all forwarding headers (`X-Forwarded-For`) are ignored and the peer IP is used.
+    - When the connection peer is a trusted proxy, `X-Forwarded-For` is traversed
+      from right to left (closest hop to furthest). The first valid IP address not in
+      `TRUSTED_PROXIES` is returned as the client IP.
+    - If the header is missing, empty, or contains a malformed IP at any inspected
+      trusted hop, the function falls back to the connection peer IP.
+    """
+    raw_peer = request.client.host if (request.client and request.client.host) else None
+    if not raw_peer:
+        return "127.0.0.1"
+
+    if raw_peer == "testclient":
+        peer_ip: ipaddress.IPv4Address | ipaddress.IPv6Address = ipaddress.ip_address("127.0.0.1")
+    else:
+        parsed_peer = _parse_ip(raw_peer)
+        if parsed_peer is None:
+            return "127.0.0.1"
+        peer_ip = parsed_peer
+
+    trusted_networks = _get_trusted_proxy_networks()
+    if not trusted_networks or not _is_ip_trusted(peer_ip, trusted_networks):
+        return str(peer_ip)
+
+    forwarded_headers = request.headers.getlist("x-forwarded-for") if hasattr(request.headers, "getlist") else []
+    if not forwarded_headers:
+        single = request.headers.get("x-forwarded-for")
+        if single is not None:
+            forwarded_headers = [single]
+
+    combined = ",".join(forwarded_headers)
+    if not combined.strip():
+        return str(peer_ip)
+
+    raw_parts = [part.strip() for part in combined.split(",")]
+    if not raw_parts:
+        return str(peer_ip)
+
+    # Traverse right-to-left (from the hop closest to our server back toward the client).
+    for entry in reversed(raw_parts):
+        entry_ip = _parse_ip(entry)
+        if entry_ip is None:
+            # Malformed hop in the trusted chain -> untrusted forwarding info, use peer.
+            return str(peer_ip)
+        if not _is_ip_trusted(entry_ip, trusted_networks):
+            return str(entry_ip)
+
+    # All hops in X-Forwarded-For are trusted proxies; return the leftmost valid hop.
+    leftmost_ip = _parse_ip(raw_parts[0])
+    return str(leftmost_ip) if leftmost_ip is not None else str(peer_ip)
 
 
 def hash_guest_ip(request: Request) -> str:
-    """Return a salted SHA-256 hash of the client IP (never store raw IPs)."""
+    """Return a salted SHA-256 hash of the client IP (never store or log raw IPs)."""
     ip = get_client_ip(request)
     salt = settings.guest_ip_salt or os.getenv("GUEST_IP_SALT") or "proofit-default-guest-salt"
     return hashlib.sha256(f"{salt}:{ip}".encode()).hexdigest()

@@ -72,6 +72,20 @@ services:
       # talks to this service, and only this service talks to Supabase.
       - key: SUPABASE_SERVICE_KEY
         sync: false
+      - key: GUEST_IP_SALT
+        sync: false
+
+      # ── Proxy Trust (Phase 4) ────────────────────────────────────────────
+      # Comma-separated IPs or CIDRs of trusted reverse proxies.
+      # Default is "" (trust no forwarding headers; use connection peer IP).
+      # Unverified deployment facts:
+      #   • Render does not guarantee static internal proxy CIDRs on free tier,
+      #     nor is it verified that Render strips client-sent X-Forwarded-For.
+      #   • Vercel Next.js rewrites proxy /api/* server-side, adding an extra hop.
+      # Only populate TRUSTED_PROXIES in Render dashboard after verifying the
+      # exact proxy CIDRs in your environment.
+      - key: TRUSTED_PROXIES
+        value: ""
 
       # ── HTTP ─────────────────────────────────────────────────────────────
       # Comma-separated allowed browser origins. Replace the first entry with the

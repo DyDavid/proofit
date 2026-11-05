@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     rate_limit_jobs_per_min: int = 20
     rate_limit_fetch_per_min: int = 10
 
+    # Phase 4 client IP forwarding trust
+    trusted_proxies: str = ""
+
 
 def is_admin_email(email: str | None) -> bool:
     """Check if the email has unlimited superuser privileges."""

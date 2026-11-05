@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from api.auth import _parse_trusted_proxy_networks
 from api.billing.service import reset_billing_memory
 from api.config import settings
 from api.limiter import reset_rate_limits
@@ -32,6 +33,9 @@ def _default_mock_mode(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(settings, "billing_provider", "mock")
     monkeypatch.setattr(settings, "turnstile_secret_key", None)
     monkeypatch.delenv("TURNSTILE_SECRET_KEY", raising=False)
+    monkeypatch.setattr(settings, "trusted_proxies", "")
+    monkeypatch.delenv("TRUSTED_PROXIES", raising=False)
+    _parse_trusted_proxy_networks.cache_clear()
     monkeypatch.setattr(ingest_cache, "CACHE_DIR", tmp_path / ".cache")
     store.guest_ip_usage.clear()
     reset_billing_memory()
