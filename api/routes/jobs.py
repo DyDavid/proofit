@@ -48,7 +48,7 @@ async def fetch_job_url(payload: FetchUrlIn) -> dict:
     # Same two codes docs/errors.md §2 defines for URLs we cannot use. The
     # underlying exception is logged, never returned: scraper errors echo URLs
     # and upstream response details, and this body goes to the browser.
-    if not url.startswith(("http://", "https://")):
+    if not url.lower().startswith(("http://", "https://")):
         raise ApiError(
             status_code=502,
             code="JOB_FETCH_FAILED",
@@ -107,12 +107,30 @@ async def submit_job(payload: JobIn) -> dict:
             )
         record, cached = store.add_job(text, source="text")
     else:
+        from engine.ingest.url_safety import validate_and_resolve_url
+
         if _is_blocked_job_host(url):
             raise ApiError(
                 status_code=422,
                 code="JOB_URL_BLOCKED",
                 message="Host is on the LinkedIn/Facebook blocklist (PROJECT_SPEC.md §9 rule 6).",
             )
+        try:
+            validate_and_resolve_url(url)
+        except ValueError as val_err:
+            logger.warning("Job URL refused (%s): %s", url, val_err)
+            raise ApiError(
+                status_code=422,
+                code="JOB_URL_BLOCKED",
+                message="We can't open that link. Paste the job description text instead.",
+            ) from val_err
+        except Exception as err:
+            logger.warning("Job URL resolution failed (%s): %s", url, err)
+            raise ApiError(
+                status_code=502,
+                code="JOB_FETCH_FAILED",
+                message="We couldn't open that link. Paste the job description text instead.",
+            ) from err
         record, cached = store.add_job(url, source="url")
 
     return {"job_id": record.id, "cached": cached}
