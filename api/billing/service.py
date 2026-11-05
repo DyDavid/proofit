@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import threading
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -98,19 +99,34 @@ class UsageEventRecord:
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
+@dataclass
+class UsageReservationRecord:
+    id: str
+    user_id: str
+    kind: Literal["analysis", "rewrite"]
+    expires_at: datetime = field(
+        default_factory=lambda: datetime.now(UTC) + timedelta(minutes=10)
+    )
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
 # In-memory store for tests and offline fallback
 _checkout_sessions: dict[str, CheckoutSessionRecord] = {}
 _subscriptions: list[SubscriptionRecord] = []
 _usage_events: list[UsageEventRecord] = []
+_usage_reservations: dict[str, UsageReservationRecord] = {}
+_reservations_lock = threading.RLock()
 _stripe_events: set[str] = set()
 
 
 def reset_billing_memory() -> None:
     """Clear in-memory billing state (used by test fixtures)."""
-    _checkout_sessions.clear()
-    _subscriptions.clear()
-    _usage_events.clear()
-    _stripe_events.clear()
+    with _reservations_lock:
+        _checkout_sessions.clear()
+        _subscriptions.clear()
+        _usage_events.clear()
+        _usage_reservations.clear()
+        _stripe_events.clear()
 
 
 def get_active_provider() -> BillingProvider:
@@ -231,6 +247,115 @@ def record_usage_event(
             ).execute()
 
 
+def _clean_expired_reservations() -> None:
+    now = datetime.now(UTC)
+    expired = [rid for rid, r in _usage_reservations.items() if r.expires_at <= now]
+    for rid in expired:
+        _usage_reservations.pop(rid, None)
+
+
+def _count_active_reservations(
+    user_id: str,
+    kind: Literal["analysis", "rewrite"],
+    since: datetime | None = None,
+) -> int:
+    with _reservations_lock:
+        _clean_expired_reservations()
+        now = datetime.now(UTC)
+        count = sum(
+            1
+            for r in _usage_reservations.values()
+            if r.user_id == user_id
+            and r.kind == kind
+            and r.expires_at > now
+            and (since is None or r.created_at >= since)
+        )
+        client = get_supabase_client()
+        if client is not None:
+            try:
+                res = (
+                    client.table("usage_reservations")
+                    .select("id", count="exact")
+                    .eq("user_id", user_id)
+                    .eq("kind", kind)
+                    .eq("status", "active")
+                    .gt("expires_at", now.isoformat())
+                    .execute()
+                )
+                if res.count is not None and int(res.count) > count:
+                    count = int(res.count)
+            except Exception:
+                pass
+        return count
+
+
+def create_usage_reservation(
+    user_id: str,
+    kind: Literal["analysis", "rewrite"],
+    reservation_id: str | None = None,
+) -> str:
+    rid = reservation_id or str(uuid.uuid4())
+    now = datetime.now(UTC)
+    expires = now + timedelta(minutes=10)
+    rec = UsageReservationRecord(
+        id=rid,
+        user_id=user_id,
+        kind=kind,
+        created_at=now,
+        expires_at=expires,
+    )
+    with _reservations_lock:
+        _usage_reservations[rid] = rec
+
+    client = get_supabase_client()
+    if client is not None:
+        with contextlib.suppress(Exception):
+            client.table("usage_reservations").insert(
+                {
+                    "id": rid,
+                    "user_id": user_id,
+                    "kind": kind,
+                    "status": "active",
+                    "created_at": now.isoformat(),
+                    "expires_at": expires.isoformat(),
+                }
+            ).execute()
+    return rid
+
+
+def commit_usage_reservation(
+    reservation_id: str | None,
+    user_id: str | None,
+    kind: Literal["analysis", "rewrite"],
+) -> None:
+    with _reservations_lock:
+        if reservation_id:
+            _usage_reservations.pop(reservation_id, None)
+
+    client = get_supabase_client()
+    if reservation_id and client is not None:
+        with contextlib.suppress(Exception):
+            client.table("usage_reservations").update({"status": "committed"}).eq("id", reservation_id).execute()
+
+    if user_id:
+        record_usage_event(user_id, kind)
+
+
+def release_usage_reservation(
+    reservation_id: str | None,
+    user_id: str | None,
+    kind: Literal["analysis", "rewrite"],
+) -> None:
+    with _reservations_lock:
+        if reservation_id:
+            _usage_reservations.pop(reservation_id, None)
+
+    client = get_supabase_client()
+    if reservation_id and client is not None:
+        with contextlib.suppress(Exception):
+            client.table("usage_reservations").update({"status": "released"}).eq("id", reservation_id).execute()
+
+
 def get_subscription_summary(user_id: str) -> SubscriptionOut:
     """Return the user's active plan, expiry, and usage in the current window."""
     now = datetime.now(UTC)
@@ -263,8 +388,8 @@ def get_subscription_summary(user_id: str) -> SubscriptionOut:
         window_start = now - timedelta(days=30)
 
     plan_def = PLANS[plan_id]
-    analysis_used = _count_usage(user_id, "analysis", window_start)
-    rewrite_used = _count_usage(user_id, "rewrite", window_start)
+    analysis_used = _count_usage(user_id, "analysis", window_start) + _count_active_reservations(user_id, "analysis", window_start)
+    rewrite_used = _count_usage(user_id, "rewrite", window_start) + _count_active_reservations(user_id, "rewrite", window_start)
 
     return SubscriptionOut(
         plan_id=plan_id,

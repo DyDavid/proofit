@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import secrets
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -120,6 +121,9 @@ class AnalysisRecord:
     user_id: str | None = None
     is_guest: bool = False
     created_at: datetime = field(default_factory=utcnow)
+    retried_by: str | None = None
+    reservation_id: str | None = None
+    guest_ip_hash: str | None = None
 
 
 @dataclass
@@ -149,6 +153,7 @@ class Store:
     rewrite_rejections: list[RewriteRejection] = field(default_factory=list)
     guest_ip_usage: dict[str, datetime] = field(default_factory=dict)
     _rotation_index: int = 0
+    _lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
     #: Caches the fixture name `pick_fixture_name` picked for a given job_id.
     #: Without this, calling `pick_fixture_name` twice for the same job_id on
     #: the rotation fallback path (once directly, once via `pick_fixture`'s
@@ -345,31 +350,62 @@ class Store:
 
     def check_guest_ip_allowed(self, ip_hash: str) -> bool:
         """Returns True if this salted IP hash has not run a guest analysis in the past 24h."""
-        now = utcnow()
-        cutoff = now - timedelta(hours=24)
+        with self._lock:
+            now = utcnow()
+            cutoff = now - timedelta(hours=24)
 
-        last_mem = self.guest_ip_usage.get(ip_hash)
-        if last_mem is not None and last_mem > cutoff:
-            return False
+            last_mem = self.guest_ip_usage.get(ip_hash)
+            if last_mem is not None and last_mem > cutoff:
+                return False
 
-        if get_supabase_client():
-            last_db_str = db_get_guest_ip_last_used(ip_hash)
-            if last_db_str:
-                try:
-                    last_db = datetime.fromisoformat(last_db_str.replace("Z", "+00:00"))
-                    if last_db > cutoff:
-                        self.guest_ip_usage[ip_hash] = last_db
-                        return False
-                except ValueError:
-                    pass
+            if get_supabase_client():
+                last_db_str = db_get_guest_ip_last_used(ip_hash)
+                if last_db_str:
+                    try:
+                        last_db = datetime.fromisoformat(last_db_str.replace("Z", "+00:00"))
+                        if last_db > cutoff:
+                            self.guest_ip_usage[ip_hash] = last_db
+                            return False
+                    except ValueError:
+                        pass
 
-        return True
+            return True
 
     def record_guest_ip_usage(self, ip_hash: str) -> None:
-        now = utcnow()
-        self.guest_ip_usage[ip_hash] = now
-        if get_supabase_client():
-            db_record_guest_ip_usage(ip_hash, now.isoformat())
+        with self._lock:
+            now = utcnow()
+            self.guest_ip_usage[ip_hash] = now
+            if get_supabase_client():
+                db_record_guest_ip_usage(ip_hash, now.isoformat())
+
+    def reserve_guest_ip_usage(self, ip_hash: str) -> bool:
+        """Atomically checks if guest IP is allowed and reserves a slot if allowed.
+        Returns True if reservation succeeded, False if limit reached (already used in 24h).
+        """
+        with self._lock:
+            if not self.check_guest_ip_allowed(ip_hash):
+                return False
+            self.record_guest_ip_usage(ip_hash)
+            return True
+
+    def release_guest_ip_usage(self, ip_hash: str, prev_time: datetime | None = None) -> None:
+        """Rollback or release guest IP usage when an analysis fails."""
+        with self._lock:
+            if prev_time is not None:
+                self.guest_ip_usage[ip_hash] = prev_time
+            else:
+                self.guest_ip_usage.pop(ip_hash, None)
+
+            if get_supabase_client():
+                try:
+                    if prev_time is not None:
+                        db_record_guest_ip_usage(ip_hash, prev_time.isoformat())
+                    else:
+                        client = get_supabase_client()
+                        if client:
+                            client.table("guest_ip_usage").delete().eq("ip_hash", ip_hash).execute()
+                except Exception as err:
+                    logger.debug("Error releasing guest_ip_usage for %s: %s", ip_hash[:8], err)
 
     def create_analysis(
         self,
@@ -404,17 +440,56 @@ class Store:
 
         return record
 
-    def create_retry(self, original_id: str) -> AnalysisRecord | None:
-        original = self.get_analysis(original_id)
-        if original is None:
-            return None
-        return self.create_analysis(
-            original.resume_id,
-            original.job_id,
-            original.country,
-            user_id=original.user_id,
-            is_guest=original.is_guest,
-        )
+    def create_retry(
+        self,
+        original_id: str,
+        user_id: str | None = None,
+        is_guest: bool | None = None,
+    ) -> AnalysisRecord | None:
+        from api.errors import ApiError
+
+        with self._lock:
+            original = self.get_analysis(original_id)
+            if original is None:
+                return None
+
+            # 1. State eligibility check
+            if original.status in ("queued", "running"):
+                raise ApiError(
+                    status_code=409,
+                    code="ANALYSIS_IN_PROGRESS",
+                    message="Cannot retry an analysis that is still queued or running.",
+                )
+
+            # 2. Duplicate in-flight retry check
+            if original.retried_by:
+                child = self.get_analysis(original.retried_by)
+                if child and child.status in ("queued", "running"):
+                    raise ApiError(
+                        status_code=409,
+                        code="ANALYSIS_IN_PROGRESS",
+                        message="A retry for this analysis is already in progress.",
+                    )
+
+            target_user_id = user_id if user_id is not None else original.user_id
+            target_is_guest = is_guest if is_guest is not None else original.is_guest
+
+            child_rec = self.create_analysis(
+                original.resume_id,
+                original.job_id,
+                original.country,
+                user_id=target_user_id,
+                is_guest=target_is_guest,
+            )
+            original.retried_by = child_rec.id
+
+            if get_supabase_client() and not original.is_guest:
+                try:
+                    get_supabase_client().table("analyses").update({"retried_by": child_rec.id}).eq("id", original.id).execute()
+                except Exception as db_err:
+                    logger.debug("Could not update retried_by in DB: %s", db_err)
+
+            return child_rec
 
     def analyses_for_resume(
         self,
@@ -527,6 +602,7 @@ class Store:
                     error_message=row.get("error_message"),
                     user_id=row.get("user_id"),
                     is_guest=False,
+                    retried_by=row.get("retried_by"),
                 )
                 self.analyses[rec.id] = rec
                 return rec

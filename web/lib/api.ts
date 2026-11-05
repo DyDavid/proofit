@@ -28,12 +28,14 @@ async function authHeaders(extra?: Record<string, string>): Promise<Record<strin
 export class ApiError extends Error {
   code?: string;
   errorId?: string;
+  status?: number;
 
-  constructor(message: string, code?: string, errorId?: string) {
+  constructor(message: string, code?: string, errorId?: string, status?: number) {
     super(message);
     this.name = "ApiError";
     this.code = code;
     this.errorId = errorId;
+    this.status = status;
   }
 }
 
@@ -67,6 +69,7 @@ async function toApiError(res: Response): Promise<ApiError> {
     error?.message ?? `Request failed (${res.status})`,
     error?.code,
     error?.error_id,
+    res.status,
   );
 }
 
@@ -129,9 +132,17 @@ export async function createAnalysis(
 
 export async function retryAnalysis(
   id: string,
+  options?: { turnstile_token?: string },
 ): Promise<{ analysis_id: string; status: string }> {
-  const headers = await authHeaders();
-  const res = await fetch(`/api/analyses/${id}/retry`, { method: "POST", headers });
+  const headers = await authHeaders({ "Content-Type": "application/json" });
+  const body = options?.turnstile_token
+    ? JSON.stringify({ turnstile_token: options.turnstile_token })
+    : undefined;
+  const res = await fetch(`/api/analyses/${id}/retry`, {
+    method: "POST",
+    headers,
+    body,
+  });
   if (!res.ok) throw await toApiError(res);
   return res.json();
 }

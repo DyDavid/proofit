@@ -9,7 +9,7 @@ from fastapi import Depends, HTTPException
 
 from api.auth import CurrentUser, get_optional_user, get_user_email
 from api.billing.plans import PLANS
-from api.billing.service import get_subscription_summary, record_usage_event
+from api.billing.service import get_subscription_summary
 from api.config import is_admin_email, settings
 
 QuotaKind = Literal["analysis", "rewrite"]
@@ -87,4 +87,69 @@ def check_saved_resumes_quota(user_id: str, existing_count: int) -> None:
 def record_usage(user_id: str | None, kind: QuotaKind) -> None:
     """Record a usage event after a successful analysis or rewrite."""
     if user_id:
-        record_usage_event(user_id, kind)
+        commit_quota(None, user_id, kind)
+
+
+def reserve_quota(
+    user_id: str,
+    kind: QuotaKind,
+    reservation_id: str | None = None,
+) -> str | None:
+    """Verify user quota and atomically reserve a slot under concurrency lock.
+    Returns reservation_id on success, or raises HTTP 402 if quota is exceeded.
+    Admin users bypass quota and return None.
+    """
+    if not settings.enforce_quotas:
+        return None
+
+    if is_admin_email(get_user_email(user_id)):
+        return None
+
+    from api.billing.service import (
+        _reservations_lock,
+        create_usage_reservation,
+        get_subscription_summary,
+    )
+
+    with _reservations_lock:
+        summary = get_subscription_summary(user_id)
+        bucket = summary.usage.analysis if kind == "analysis" else summary.usage.rewrite
+        if bucket.limit is not None and bucket.used >= bucket.limit:
+            label = "analyses" if kind == "analysis" else "AI rewrites"
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "code": "quota_exceeded",
+                    "kind": kind,
+                    "limit": bucket.limit,
+                    "upgrade_url": "/pricing",
+                    "message": (
+                        f"You have reached your limit of {bucket.limit} {label}. "
+                        "Upgrade to the Job Hunt Pass for more."
+                    ),
+                },
+            )
+        return create_usage_reservation(user_id, kind, reservation_id=reservation_id)
+
+
+def commit_quota(
+    reservation_id: str | None,
+    user_id: str | None,
+    kind: QuotaKind,
+) -> None:
+    """Commit an in-flight reservation into a permanent usage event."""
+    from api.billing.service import commit_usage_reservation
+
+    commit_usage_reservation(reservation_id, user_id, kind)
+
+
+def release_quota(
+    reservation_id: str | None,
+    user_id: str | None,
+    kind: QuotaKind,
+) -> None:
+    """Release an in-flight reservation without recording usage (e.g. on analysis failure)."""
+    from api.billing.service import release_usage_reservation
+
+    release_usage_reservation(reservation_id, user_id, kind)
+

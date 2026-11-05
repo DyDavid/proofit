@@ -13,7 +13,7 @@ import asyncio
 import logging
 import time
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, Query, Request
 from pydantic import BaseModel, ValidationError
 
 from api.auth import CurrentUser, get_client_ip, get_optional_user, hash_guest_ip
@@ -24,7 +24,13 @@ from api.db import (
     get_supabase_client,
 )
 from api.errors import ApiError, new_error_id
-from api.quota import record_usage, require_quota
+from api.quota import (
+    commit_quota,
+    record_usage,
+    release_quota,
+    require_quota,
+    reserve_quota,
+)
 from api.store import STAGE_ORDER, store
 from api.turnstile import verify_turnstile_token
 from engine.country.rules import rules_for
@@ -45,6 +51,10 @@ class AnalysisIn(BaseModel):
     resume_id: str
     job_id: str
     country: str
+    turnstile_token: str | None = None
+
+
+class RetryIn(BaseModel):
     turnstile_token: str | None = None
 
 
@@ -83,6 +93,10 @@ async def _run_mock_analysis(analysis_id: str) -> None:
         record.match = None
         record.baseline = None
         record.error = {"code": "ENGINE_FAILED", "message": str(exc), "error_id": error_id}
+        if record.reservation_id or record.user_id:
+            release_quota(record.reservation_id, record.user_id, "analysis")
+        if record.is_guest and record.guest_ip_hash:
+            store.release_guest_ip_usage(record.guest_ip_hash)
         return
 
     total_ms = int((time.monotonic() - started_at) * 1000)
@@ -92,7 +106,7 @@ async def _run_mock_analysis(analysis_id: str) -> None:
             "analysis_slow analysis_id=%s total_ms=%d threshold_ms=60000", analysis_id, total_ms,
         )
     record.status = "done"
-    record_usage(record.user_id, "analysis")
+    commit_quota(record.reservation_id, record.user_id, "analysis")
 
 
 async def _run_live_analysis(analysis_id: str) -> None:
@@ -159,7 +173,7 @@ async def _run_live_analysis(analysis_id: str) -> None:
         match.resume = resume
 
         store.update_analysis(analysis_id, status="done", match=match, baseline=baseline)
-        record_usage(record.user_id, "analysis")
+        commit_quota(record.reservation_id, record.user_id, "analysis")
 
         # Parallel pgvector embeddings persistence in background (non-blocking)
         if get_supabase_client():
@@ -267,23 +281,36 @@ async def create_analysis(
         await verify_turnstile_token(payload.turnstile_token, get_client_ip(request), expected_action="guest_analysis")
 
     is_guest = user is None and settings.enforce_guest_limit
+    ip_hash: str | None = None
+    reservation_id: str | None = None
     if is_guest:
         ip_hash = hash_guest_ip(request)
-        if not store.check_guest_ip_allowed(ip_hash):
+        if not store.reserve_guest_ip_usage(ip_hash):
             raise ApiError(
                 status_code=429,
                 code="GUEST_LIMIT_REACHED",
                 message="You have used your 1 free guest analysis for today. Sign in to save results and get more analyses.",
             )
-        store.record_guest_ip_usage(ip_hash)
+    elif user is not None:
+        reservation_id = reserve_quota(user.id, "analysis")
 
-    record = store.create_analysis(
-        payload.resume_id,
-        payload.job_id,
-        payload.country,
-        user_id=user.id if user else None,
-        is_guest=is_guest,
-    )
+    try:
+        record = store.create_analysis(
+            payload.resume_id,
+            payload.job_id,
+            payload.country,
+            user_id=user.id if user else None,
+            is_guest=is_guest,
+        )
+        record.reservation_id = reservation_id
+        record.guest_ip_hash = ip_hash
+    except Exception:
+        if ip_hash:
+            store.release_guest_ip_usage(ip_hash)
+        if reservation_id and user:
+            release_quota(reservation_id, user.id, "analysis")
+        raise
+
     if settings.engine_mode == "live":
         background_tasks.add_task(_run_live_analysis, record.id)
     else:
@@ -352,6 +379,8 @@ async def list_analyses(
 async def retry_analysis(
     analysis_id: str,
     background_tasks: BackgroundTasks,
+    request: Request,
+    payload: RetryIn | None = Body(default=None),  # noqa: B008
     user: CurrentUser | None = Depends(get_optional_user),  # noqa: B008
 ) -> dict:
     original = store.get_analysis(analysis_id)
@@ -359,8 +388,58 @@ async def retry_analysis(
         raise ApiError(status_code=404, code="ANALYSIS_NOT_FOUND", message="Unknown analysis_id.")
     _assert_analysis_access(original, user)
 
-    record = store.create_retry(analysis_id)
-    assert record is not None
+    # 1. State eligibility check: only "failed" or "done" can be retried
+    if original.status in ("queued", "running"):
+        raise ApiError(
+            status_code=409,
+            code="ANALYSIS_IN_PROGRESS",
+            message="Cannot retry an analysis that is still queued or running.",
+        )
+
+    # 2. Check if a duplicate retry is already in flight
+    if original.retried_by:
+        child = store.get_analysis(original.retried_by)
+        if child and child.status in ("queued", "running"):
+            raise ApiError(
+                status_code=409,
+                code="ANALYSIS_IN_PROGRESS",
+                message="A retry for this analysis is already in progress.",
+            )
+
+    # 3. Quota and guest checks
+    ip_hash: str | None = None
+    reservation_id: str | None = None
+    is_guest = user is None and settings.enforce_guest_limit
+
+    if user is None:
+        token = payload.turnstile_token if payload else None
+        await verify_turnstile_token(token, get_client_ip(request), expected_action="guest_analysis")
+        if settings.enforce_guest_limit:
+            ip_hash = hash_guest_ip(request)
+            if not store.reserve_guest_ip_usage(ip_hash):
+                raise ApiError(
+                    status_code=429,
+                    code="GUEST_LIMIT_REACHED",
+                    message="You have used your 1 free guest analysis for today. Sign in to save results and get more analyses.",
+                )
+    else:
+        reservation_id = reserve_quota(user.id, "analysis")
+
+    try:
+        record = store.create_retry(
+            analysis_id,
+            user_id=user.id if user else None,
+            is_guest=is_guest,
+        )
+        assert record is not None
+        record.reservation_id = reservation_id
+        record.guest_ip_hash = ip_hash
+    except Exception:
+        if ip_hash:
+            store.release_guest_ip_usage(ip_hash)
+        if reservation_id and user:
+            release_quota(reservation_id, user.id, "analysis")
+        raise
 
     if settings.engine_mode == "live":
         background_tasks.add_task(_run_live_analysis, record.id)
