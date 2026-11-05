@@ -95,6 +95,7 @@ class ResumeRecord:
     raw_text: str | None = None
     normalized: Resume | None = None
     user_id: str | None = None
+    created_at: datetime = field(default_factory=utcnow)
 
 
 @dataclass
@@ -104,6 +105,7 @@ class JobRecord:
     source: Literal["text", "url"]
     raw: str
     normalized: Job | None = None
+    created_at: datetime = field(default_factory=utcnow)
 
 
 @dataclass
@@ -161,6 +163,78 @@ class Store:
     #: back two *different* names — silently pairing a match with a baseline
     #: from an unrelated fixture. Caching makes the pick idempotent per job_id.
     _picked_fixture_names: dict[str, str] = field(default_factory=dict)
+    max_guest_ip_entries: int = 5_000
+    max_guest_resumes: int = 100
+    max_guest_analyses: int = 200
+    max_jobs_cache: int = 500
+
+    def _guest_ttl_hours(self) -> float:
+        try:
+            from api.config import settings
+
+            return max(0.01, float(settings.guest_record_ttl_hours))
+        except Exception:
+            return 24.0
+
+    def prune_expired(self, now: datetime | None = None) -> None:
+        """Expire old guest records and enforce capacity caps to prevent unbounded memory growth."""
+        with self._lock:
+            eff_now = now or utcnow()
+            cutoff = eff_now - timedelta(hours=self._guest_ttl_hours())
+
+            # 1. Prune and bound guest_ip_usage
+            expired_ips = [ip for ip, ts in self.guest_ip_usage.items() if ts <= cutoff]
+            for ip in expired_ips:
+                self.guest_ip_usage.pop(ip, None)
+            if len(self.guest_ip_usage) > self.max_guest_ip_entries:
+                sorted_ips = sorted(self.guest_ip_usage.items(), key=lambda item: item[1])
+                excess = len(self.guest_ip_usage) - self.max_guest_ip_entries
+                for ip, _ in sorted_ips[:excess]:
+                    self.guest_ip_usage.pop(ip, None)
+
+            # 2. Prune and bound guest resumes (user_id is None)
+            expired_resumes = [
+                rid
+                for rid, rec in self.resumes.items()
+                if rec.user_id is None and rec.created_at <= cutoff
+            ]
+            for rid in expired_resumes:
+                self.resumes.pop(rid, None)
+
+            guest_resumes = [rec for rec in self.resumes.values() if rec.user_id is None]
+            if len(guest_resumes) > self.max_guest_resumes:
+                guest_resumes.sort(key=lambda r: r.created_at)
+                excess = len(guest_resumes) - self.max_guest_resumes
+                for rec in guest_resumes[:excess]:
+                    self.resumes.pop(rec.id, None)
+
+            # 3. Prune and bound guest analyses (is_guest or user_id is None)
+            expired_analyses = [
+                aid
+                for aid, rec in self.analyses.items()
+                if (rec.is_guest or rec.user_id is None) and rec.created_at <= cutoff
+            ]
+            for aid in expired_analyses:
+                self.analyses.pop(aid, None)
+
+            guest_analyses = [
+                rec for rec in self.analyses.values() if rec.is_guest or rec.user_id is None
+            ]
+            if len(guest_analyses) > self.max_guest_analyses:
+                guest_analyses.sort(key=lambda a: a.created_at)
+                excess = len(guest_analyses) - self.max_guest_analyses
+                for rec in guest_analyses[:excess]:
+                    self.analyses.pop(rec.id, None)
+
+            # 4. Bound in-memory jobs cache
+            if len(self.jobs) > self.max_jobs_cache:
+                all_jobs = sorted(self.jobs.values(), key=lambda j: j.created_at)
+                excess = len(self.jobs) - self.max_jobs_cache
+                for job_rec in all_jobs[:excess]:
+                    self.jobs.pop(job_rec.id, None)
+                    if self.jobs_by_hash.get(job_rec.content_hash) == job_rec.id:
+                        self.jobs_by_hash.pop(job_rec.content_hash, None)
+                    self._picked_fixture_names.pop(job_rec.id, None)
 
     def add_resume(
         self,
@@ -172,17 +246,21 @@ class Store:
         normalized: Resume | None = None,
         user_id: str | None = None,
     ) -> ResumeRecord:
-        record = ResumeRecord(
-            id=_new_id("res"),
-            filename=filename,
-            content_type=content_type,
-            size=size,
-            data=data,
-            raw_text=raw_text,
-            normalized=normalized,
-            user_id=user_id,
-        )
-        self.resumes[record.id] = record
+        with self._lock:
+            self.prune_expired()
+            record = ResumeRecord(
+                id=_new_id("res"),
+                filename=filename,
+                content_type=content_type,
+                size=size,
+                data=data,
+                raw_text=raw_text,
+                normalized=normalized,
+                user_id=user_id,
+            )
+            self.resumes[record.id] = record
+            if user_id is None:
+                self.prune_expired()
 
         # Persist to Supabase if available (only for authenticated users; guest resumes stay in memory)
         if get_supabase_client() and user_id is not None:
@@ -267,15 +345,18 @@ class Store:
                 return rec, True
 
         # 3. Create new Job
-        record = JobRecord(
-            id=_new_id("job"),
-            content_hash=content_hash,
-            source=source,
-            raw=raw,
-            normalized=normalized,
-        )
-        self.jobs[record.id] = record
-        self.jobs_by_hash[content_hash] = record.id
+        with self._lock:
+            self.prune_expired()
+            record = JobRecord(
+                id=_new_id("job"),
+                content_hash=content_hash,
+                source=source,
+                raw=raw,
+                normalized=normalized,
+            )
+            self.jobs[record.id] = record
+            self.jobs_by_hash[content_hash] = record.id
+            self.prune_expired()
 
         if get_supabase_client():
             norm_json = normalized.model_dump(mode="json") if normalized else None
@@ -351,8 +432,9 @@ class Store:
     def check_guest_ip_allowed(self, ip_hash: str) -> bool:
         """Returns True if this salted IP hash has not run a guest analysis in the past 24h."""
         with self._lock:
+            self.prune_expired()
             now = utcnow()
-            cutoff = now - timedelta(hours=24)
+            cutoff = now - timedelta(hours=self._guest_ttl_hours())
 
             last_mem = self.guest_ip_usage.get(ip_hash)
             if last_mem is not None and last_mem > cutoff:
@@ -373,8 +455,10 @@ class Store:
 
     def record_guest_ip_usage(self, ip_hash: str) -> None:
         with self._lock:
+            self.prune_expired()
             now = utcnow()
             self.guest_ip_usage[ip_hash] = now
+            self.prune_expired()
             if get_supabase_client():
                 db_record_guest_ip_usage(ip_hash, now.isoformat())
 
@@ -415,16 +499,20 @@ class Store:
         user_id: str | None = None,
         is_guest: bool = False,
     ) -> AnalysisRecord:
-        record = AnalysisRecord(
-            id=_new_id("an"),
-            resume_id=resume_id,
-            job_id=job_id,
-            country=country,
-            status="queued",
-            user_id=user_id,
-            is_guest=is_guest,
-        )
-        self.analyses[record.id] = record
+        with self._lock:
+            self.prune_expired()
+            record = AnalysisRecord(
+                id=_new_id("an"),
+                resume_id=resume_id,
+                job_id=job_id,
+                country=country,
+                status="queued",
+                user_id=user_id,
+                is_guest=is_guest,
+            )
+            self.analyses[record.id] = record
+            if is_guest or user_id is None:
+                self.prune_expired()
 
         # Phase 1.5: Guest results are returned in memory for the single session,
         # never saved to Supabase.

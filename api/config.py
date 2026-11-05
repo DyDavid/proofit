@@ -38,6 +38,18 @@ class Settings(BaseSettings):
     enforce_quotas: bool = True
     admin_emails: str = "dydavid168@gmail.com"
 
+    # Phase 3 resource exhaustion limits
+    max_response_bytes: int = 2 * 1024 * 1024
+    max_docx_decompressed_bytes: int = 10 * 1024 * 1024
+    parser_timeout_seconds: float = 8.0
+    max_concurrent_parses: int = 3
+    url_cache_max_entries: int = 500
+    url_cache_ttl_hours: int = 24
+    guest_record_ttl_hours: int = 24
+    rate_limit_resumes_per_min: int = 15
+    rate_limit_jobs_per_min: int = 20
+    rate_limit_fetch_per_min: int = 10
+
 
 def is_admin_email(email: str | None) -> bool:
     """Check if the email has unlimited superuser privileges."""

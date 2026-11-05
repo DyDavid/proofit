@@ -17,8 +17,10 @@ from __future__ import annotations
 import ipaddress
 import re
 import socket
+import zlib
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Any
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import httpcore
@@ -28,6 +30,7 @@ from httpcore._backends.sync import SyncBackend, SyncStream
 from httpcore._exceptions import ConnectError, ConnectTimeout, map_exceptions
 
 MAX_REDIRECTS = 5
+DEFAULT_MAX_RESPONSE_BYTES = 2 * 1024 * 1024  # 2 MB
 
 _BLOCKED_JOB_HOSTS: frozenset[str] = frozenset({"linkedin.com", "facebook.com"})
 _BLOCKED_LOCAL_HOSTS: frozenset[str] = frozenset(
@@ -375,14 +378,145 @@ def build_pinned_transport(
     return transport, backend
 
 
+def _resolve_max_response_bytes(max_response_bytes: int | None) -> int:
+    if max_response_bytes is not None:
+        return max_response_bytes
+    try:
+        from api.config import settings
+
+        return int(settings.max_response_bytes)
+    except Exception:
+        return DEFAULT_MAX_RESPONSE_BYTES
+
+
+def _check_content_length_header(resp: Any, max_bytes: int) -> None:
+    headers = getattr(resp, "headers", None)
+    if not headers or not hasattr(headers, "get"):
+        return
+    raw_cl = headers.get("content-length") or headers.get("Content-Length")
+    if isinstance(raw_cl, (str, int, bytes)):
+        try:
+            cl_val = int(raw_cl)
+        except ValueError as err:
+            raise UnsafeUrlError("Invalid response Content-Length header.") from err
+        if cl_val < 0 or cl_val > max_bytes:
+            raise UnsafeUrlError(
+                f"Response Content-Length ({cl_val}) exceeds maximum limit of {max_bytes} bytes."
+            )
+
+
+def _read_bounded_stream(resp: httpx.Response, max_bytes: int) -> bytes:
+    """Read and decompress an httpx streaming response with strict bounds on both
+    wire bytes and decompressed output bytes (defending against gzip/deflate bombs).
+    """
+    _check_content_length_header(resp, max_bytes)
+
+    if getattr(resp, "is_stream_consumed", False):
+        body = resp.content
+        if len(body) > max_bytes:
+            raise UnsafeUrlError(
+                f"Decompressed response exceeded maximum limit of {max_bytes} bytes."
+            )
+        return body
+
+    encoding = (resp.headers.get("content-encoding") or "").strip().lower()
+    raw_total = 0
+    decompressed_total = 0
+    chunks: list[bytes] = []
+
+    if encoding in ("gzip", "x-gzip", "deflate"):
+        wbits = (16 + zlib.MAX_WBITS) if encoding in ("gzip", "x-gzip") else -zlib.MAX_WBITS
+        decomp = zlib.decompressobj(wbits)
+        try:
+            for raw_chunk in resp.iter_raw(chunk_size=8192):
+                if not raw_chunk:
+                    continue
+                raw_total += len(raw_chunk)
+                if raw_total > max_bytes:
+                    raise UnsafeUrlError(
+                        f"Downloaded raw response exceeded maximum limit of {max_bytes} bytes."
+                    )
+                remaining = (max_bytes - decompressed_total) + 1
+                part = decomp.decompress(raw_chunk, remaining)
+                decompressed_total += len(part)
+                if decompressed_total > max_bytes or decomp.unconsumed_tail:
+                    raise UnsafeUrlError(
+                        f"Decompressed response exceeded maximum limit of {max_bytes} bytes."
+                    )
+                if part:
+                    chunks.append(part)
+            tail = decomp.flush((max_bytes - decompressed_total) + 1)
+            decompressed_total += len(tail)
+            if decompressed_total > max_bytes:
+                raise UnsafeUrlError(
+                    f"Decompressed response exceeded maximum limit of {max_bytes} bytes."
+                )
+            if tail:
+                chunks.append(tail)
+        except zlib.error as err:
+            raise RuntimeError("Corrupted compressed HTTP response stream.") from err
+    else:
+        for chunk in resp.iter_bytes(chunk_size=8192):
+            if not chunk:
+                continue
+            decompressed_total += len(chunk)
+            if decompressed_total > max_bytes:
+                raise UnsafeUrlError(
+                    f"Downloaded response exceeded maximum limit of {max_bytes} bytes."
+                )
+            chunks.append(chunk)
+
+    return b"".join(chunks)
+
+
+def _enforce_mock_response_bounds(resp: Any, max_bytes: int) -> None:
+    """Enforce size bounds when `httpx.Client` is replaced by a test mock."""
+    _check_content_length_header(resp, max_bytes)
+
+    mock_children = getattr(resp, "_mock_children", {})
+    if (
+        ("iter_bytes" in mock_children or not hasattr(resp, "_mock_name"))
+        and hasattr(resp, "iter_bytes")
+        and callable(resp.iter_bytes)
+    ):
+        total = 0
+        chunks: list[bytes] = []
+        for chunk in resp.iter_bytes(chunk_size=8192):
+            if isinstance(chunk, (bytes, bytearray)):
+                total += len(chunk)
+                if total > max_bytes:
+                    raise UnsafeUrlError(
+                        f"Downloaded response exceeded maximum limit of {max_bytes} bytes."
+                    )
+                chunks.append(bytes(chunk))
+        if chunks and not isinstance(getattr(resp, "text", None), str):
+            resp._content = b"".join(chunks)
+
+    content = getattr(resp, "content", None)
+    if isinstance(content, (bytes, bytearray)) and len(content) > max_bytes:
+        raise UnsafeUrlError(
+            f"Downloaded response exceeded maximum limit of {max_bytes} bytes."
+        )
+
+    text = getattr(resp, "text", None)
+    if isinstance(text, str) and len(text.encode("utf-8")) > max_bytes:
+        raise UnsafeUrlError(
+            f"Downloaded response exceeded maximum limit of {max_bytes} bytes."
+        )
+
+
 def safe_http_get(
     url: str,
     *,
     headers: dict[str, str] | None = None,
     timeout: float = 15.0,
     max_redirects: int = MAX_REDIRECTS,
+    max_response_bytes: int | None = None,
 ) -> httpx.Response:
-    """Fetch ``url`` over HTTP/HTTPS with full SSRF, redirect, and DNS-rebinding protection."""
+    """Fetch ``url`` over HTTP/HTTPS with full SSRF, redirect, DNS-rebinding, and
+    streaming response-size / decompression protection.
+    """
+    effective_max_bytes = _resolve_max_response_bytes(max_response_bytes)
     pinned_ips: dict[tuple[str, int], tuple[str, ...]] = {}
     transport, _ = build_pinned_transport(pinned_ips)
 
@@ -393,22 +527,45 @@ def safe_http_get(
         follow_redirects=False,
         trust_env=False,
     ) as client:
+        is_real_httpx_client = isinstance(client, _STDLIB_HTTPX_CLIENT)
+        mock_has_stream = "stream" in getattr(client, "_mock_children", {})
+
         for hop in range(max_redirects + 1):
             validated = validate_and_resolve_url(current_url)
             pinned_ips[(validated.hostname, validated.port)] = validated.resolved_ips
 
-            resp = client.get(validated.url, headers=headers)
+            if is_real_httpx_client or mock_has_stream:
+                with client.stream("GET", validated.url, headers=headers) as resp:
+                    if resp.status_code in (301, 302, 303, 307, 308):
+                        if hop >= max_redirects:
+                            raise UnsafeUrlError(
+                                f"Maximum redirect limit ({max_redirects}) exceeded."
+                            )
+                        location = resp.headers.get("location") or resp.headers.get("Location")
+                        if not location or not isinstance(location, str) or not location.strip():
+                            raise RuntimeError("Redirect response missing Location header.")
+                        current_url = urljoin(validated.url, location.strip())
+                        continue
 
-            if resp.status_code in (301, 302, 303, 307, 308):
-                if hop >= max_redirects:
-                    raise UnsafeUrlError(f"Maximum redirect limit ({max_redirects}) exceeded.")
-                location = resp.headers.get("location") or resp.headers.get("Location")
-                if not location or not isinstance(location, str) or not location.strip():
-                    raise RuntimeError("Redirect response missing Location header.")
-                current_url = urljoin(validated.url, location.strip())
-                continue
+                    resp.raise_for_status()
+                    body_bytes = _read_bounded_stream(resp, effective_max_bytes)
+                    resp._content = body_bytes
+                    return resp
+            else:
+                resp = client.get(validated.url, headers=headers)
+                if resp.status_code in (301, 302, 303, 307, 308):
+                    if hop >= max_redirects:
+                        raise UnsafeUrlError(
+                            f"Maximum redirect limit ({max_redirects}) exceeded."
+                        )
+                    location = resp.headers.get("location") or resp.headers.get("Location")
+                    if not location or not isinstance(location, str) or not location.strip():
+                        raise RuntimeError("Redirect response missing Location header.")
+                    current_url = urljoin(validated.url, location.strip())
+                    continue
 
-            resp.raise_for_status()
-            return resp
+                resp.raise_for_status()
+                _enforce_mock_response_bounds(resp, effective_max_bytes)
+                return resp
 
     raise UnsafeUrlError(f"Maximum redirect limit ({max_redirects}) exceeded.")

@@ -20,9 +20,11 @@ load_dotenv(env_file, override=True)
 from api.billing.router import router as billing_router
 from api.config import settings
 from api.errors import install_error_handlers
+from api.middleware import RequestSizeLimitMiddleware
 from api.routes import analyses, auth, countries, health, jobs, resumes
 
 app = FastAPI(title="Proofit API", version=settings.app_version)
+app.add_middleware(RequestSizeLimitMiddleware)
 install_error_handlers(app)
 
 app.include_router(health.router, prefix="/api")

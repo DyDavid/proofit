@@ -8,15 +8,19 @@ test explicitly patches `settings.engine_mode = "live"` or calls
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from api.billing.service import reset_billing_memory
 from api.config import settings
+from api.limiter import reset_rate_limits
 from api.store import store
+from engine.ingest import cache as ingest_cache
 
 
 @pytest.fixture(autouse=True)
-def _default_mock_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+def _default_mock_mode(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("ENGINE_MODE", "mock")
     monkeypatch.delenv("SUPABASE_URL", raising=False)
     monkeypatch.setattr(settings, "engine_mode", "mock")
@@ -28,5 +32,7 @@ def _default_mock_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "billing_provider", "mock")
     monkeypatch.setattr(settings, "turnstile_secret_key", None)
     monkeypatch.delenv("TURNSTILE_SECRET_KEY", raising=False)
+    monkeypatch.setattr(ingest_cache, "CACHE_DIR", tmp_path / ".cache")
     store.guest_ip_usage.clear()
     reset_billing_memory()
+    reset_rate_limits()

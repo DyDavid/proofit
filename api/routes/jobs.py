@@ -8,13 +8,16 @@ stored as-is, not retrieved.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from urllib.parse import urlparse
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
+from api.config import settings
 from api.errors import ApiError
+from api.limiter import enforce_endpoint_rate_limit
 from api.store import store
 
 logger = logging.getLogger(__name__)
@@ -22,6 +25,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _BLOCKED_JOB_HOSTS: frozenset[str] = frozenset({"linkedin.com", "facebook.com"})
+MAX_URL_LENGTH = 2048
+MAX_JOB_TEXT_CHARS = 100_000
 
 
 def _is_blocked_job_host(url: str) -> bool:
@@ -42,9 +47,32 @@ class FetchUrlIn(BaseModel):
     url: str
 
 
+def _fetch_and_cache_job_url_sync(url: str) -> str:
+    """Synchronous helper executed in a worker thread to avoid blocking the event loop."""
+    from engine.ingest.cache import save_cached_text
+    from engine.ingest.scraper import scrape_job_url
+
+    raw_text = scrape_job_url(url)
+    save_cached_text(url, raw_text)
+    return raw_text
+
+
 @router.post("/jobs/fetch-url")
-async def fetch_job_url(payload: FetchUrlIn) -> dict:
+async def fetch_job_url(payload: FetchUrlIn, request: Request) -> dict:
+    enforce_endpoint_rate_limit(
+        request,
+        "jobs_fetch",
+        lambda: settings.rate_limit_fetch_per_min,
+    )
+
     url = payload.url.strip()
+    if len(url) > MAX_URL_LENGTH:
+        raise ApiError(
+            status_code=422,
+            code="JOB_URL_BLOCKED",
+            message="URL exceeds maximum allowed length.",
+        )
+
     # Same two codes docs/errors.md §2 defines for URLs we cannot use. The
     # underlying exception is logged, never returned: scraper errors echo URLs
     # and upstream response details, and this body goes to the browser.
@@ -55,12 +83,8 @@ async def fetch_job_url(payload: FetchUrlIn) -> dict:
             message="Please enter a valid URL starting with http:// or https://.",
         )
 
-    from engine.ingest.cache import save_cached_text
-    from engine.ingest.scraper import scrape_job_url
-
     try:
-        raw_text = scrape_job_url(url)
-        save_cached_text(url, raw_text)
+        raw_text = await asyncio.to_thread(_fetch_and_cache_job_url_sync, url)
         return {
             "url": url,
             "text": raw_text,
@@ -83,7 +107,13 @@ async def fetch_job_url(payload: FetchUrlIn) -> dict:
 
 
 @router.post("/jobs")
-async def submit_job(payload: JobIn) -> dict:
+async def submit_job(payload: JobIn, request: Request) -> dict:
+    enforce_endpoint_rate_limit(
+        request,
+        "jobs_submit",
+        lambda: settings.rate_limit_jobs_per_min,
+    )
+
     # Stripped once, up front: a blank or whitespace-only field counts as "not
     # provided" everywhere below, so `{"text": "", "url": "https://..."}` is a
     # valid url submission rather than a XOR violation.
@@ -105,9 +135,22 @@ async def submit_job(payload: JobIn) -> dict:
                 code="JOB_EMPTY",
                 message="Job text is present but too short to be a real job post.",
             )
+        if len(text) > MAX_JOB_TEXT_CHARS:
+            raise ApiError(
+                status_code=422,
+                code="JOB_EMPTY",
+                message=f"Job text exceeds maximum allowed length of {MAX_JOB_TEXT_CHARS} characters.",
+            )
         record, cached = store.add_job(text, source="text")
     else:
         from engine.ingest.url_safety import validate_and_resolve_url
+
+        if len(url) > MAX_URL_LENGTH:
+            raise ApiError(
+                status_code=422,
+                code="JOB_URL_BLOCKED",
+                message="URL exceeds maximum allowed length.",
+            )
 
         if _is_blocked_job_host(url):
             raise ApiError(
@@ -116,7 +159,7 @@ async def submit_job(payload: JobIn) -> dict:
                 message="Host is on the LinkedIn/Facebook blocklist (PROJECT_SPEC.md §9 rule 6).",
             )
         try:
-            validate_and_resolve_url(url)
+            await asyncio.to_thread(validate_and_resolve_url, url)
         except ValueError as val_err:
             logger.warning("Job URL refused (%s): %s", url, val_err)
             raise ApiError(
