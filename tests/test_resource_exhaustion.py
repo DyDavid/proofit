@@ -29,7 +29,6 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
-import docx
 import httpx
 import pytest
 from fastapi.testclient import TestClient
@@ -106,10 +105,33 @@ def _is_pid_running(pid: int) -> bool:
 
 
 def _build_valid_docx_bytes(text: str = "Sokha Chan — Junior Python & FastAPI Developer") -> bytes:
+    """Build a valid minimal DOCX zip archive using standard library zipfile (no 3rd-party dep)."""
+    escaped = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     buf = io.BytesIO()
-    doc = docx.Document()
-    doc.add_paragraph(text)
-    doc.save(buf)
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        content_types = (
+            b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+            b'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">\n'
+            b'  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>\n'
+            b'  <Default Extension="xml" ContentType="application/xml"/>\n'
+            b'  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>\n'
+            b'</Types>'
+        )
+        rels = (
+            b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+            b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">\n'
+            b'  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>\n'
+            b'</Relationships>'
+        )
+        document_xml = (
+            f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+            f'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">\n'
+            f'  <w:body><w:p><w:r><w:t>{escaped}</w:t></w:r></w:p></w:body>\n'
+            f'</w:document>'
+        ).encode()
+        zf.writestr("[Content_Types].xml", content_types)
+        zf.writestr("_rels/.rels", rels)
+        zf.writestr("word/document.xml", document_xml)
     return buf.getvalue()
 
 

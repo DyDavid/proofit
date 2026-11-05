@@ -207,6 +207,27 @@ def extract_text_from_docx(
         return joined
     except DecompressionLimitError:
         raise
+    except ModuleNotFoundError as err:
+        # Fallback to standard library XML extraction when python-docx is not installed
+        try:
+            import xml.etree.ElementTree as ET
+
+            with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
+                if "word/document.xml" in zf.namelist():
+                    xml_content = zf.read("word/document.xml")
+                    tree = ET.fromstring(xml_content)
+                    texts = [
+                        elem.text
+                        for elem in tree.iter()
+                        if elem.text and elem.text.strip()
+                    ]
+                    joined = "\n".join(texts).strip()
+                    if len(joined) > MAX_EXTRACTED_CHARS:
+                        joined = joined[:MAX_EXTRACTED_CHARS]
+                    return joined
+        except Exception as inner_err:
+            raise ValueError(f"Could not extract text from DOCX: {inner_err}") from inner_err
+        raise ValueError("Could not extract text from DOCX: python-docx not installed") from err
     except Exception as err:
         logger.error("Failed to parse DOCX file: %s", err)
         raise ValueError(f"Could not extract text from DOCX: {err}") from err
