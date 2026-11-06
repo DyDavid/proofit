@@ -165,6 +165,15 @@ commit the result — and, if a screen breaks, to change the fixture, not the UI
 
 ## Analysis admission limits
 
+Outbound job fetching uses `FETCH_TIMEOUT_SECONDS` (default 15 seconds) across DNS,
+redirects and response reads, with `MAX_CONCURRENT_FETCHES=4` per API process.
+AI rewrites use `REWRITE_TIMEOUT_SECONDS=60` and `MAX_CONCURRENT_REWRITES=2`.
+These operations reject overload with 429 and report expired workflow deadlines
+with 504. Capacity stays occupied until the underlying local work really stops;
+a timeout or disconnected client does not free a still-running worker. SDK calls
+use the remaining workflow budget and disable automatic retries. Process limits
+multiply with worker count; account quotas remain database-coordinated.
+
 Live mode defaults to `PERSISTENCE_MODE=required`. Set a valid `SUPABASE_URL` and
 service-role credential before startup; missing, partial, or placeholder settings
 prevent startup. Client initialization and later database failures return a safe

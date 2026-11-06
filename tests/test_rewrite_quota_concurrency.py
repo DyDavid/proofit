@@ -149,11 +149,13 @@ def _dispatch_call_structured(
 # ============================================================================
 
 
-def test_four_simultaneous_rewrite_requests_enforce_single_rewrite_quota() -> None:
+def test_four_simultaneous_rewrite_requests_enforce_single_rewrite_quota(monkeypatch) -> None:
     """Confirmed issue reproduction & regression test:
     Four simultaneous rewrite requests for an account limited to 1 rewrite (Free plan)
     must result in exactly 1 success (200) and 3 quota rejections (402).
     """
+    # Isolate quota coordination from the separate global processing-capacity limit.
+    monkeypatch.setattr(settings, "max_concurrent_rewrites", 4)
     user_id = "user-concurrent-quota"
     headers = _auth_header(user_id, "concurrent@example.com")
 

@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     rate_limit_resumes_per_min: int = 15
     rate_limit_jobs_per_min: int = 20
     rate_limit_fetch_per_min: int = 10
+    fetch_timeout_seconds: float = 15.0
+    max_concurrent_fetches: int = 4
+    rewrite_timeout_seconds: float = 60.0
+    max_concurrent_rewrites: int = 2
 
     # Phase 4 client IP forwarding trust
     trusted_proxies: str = ""

@@ -21,7 +21,14 @@ import json
 import os
 from typing import Any
 
+from engine.execution import remaining_timeout
 from engine.gemini_client import get_default_gemini_model, get_gemini_api_key
+
+try:
+    from google.genai import errors, types
+except ImportError:
+    errors = None  # type: ignore[assignment]
+    types = None  # type: ignore[assignment]
 
 # Rewrites need some variety: when the validator rejects a first attempt, the
 # retry sends the same prompt, and temperature 0 would return the same text.
@@ -49,8 +56,15 @@ def _get_client() -> Any:
         if not api_key:
             raise RuntimeError("GEMINI_API_KEY is not set")
         from google import genai
+        from google.genai import types
 
-        _client = genai.Client(api_key=api_key)
+        _client = genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(
+                timeout=int(float(os.getenv("EXTERNAL_CALL_TIMEOUT_SECONDS", "25")) * 1000),
+                retry_options=types.HttpRetryOptions(attempts=1),
+            ),
+        )
     return _client
 
 
@@ -63,6 +77,7 @@ def call_structured(
     tool_schema: dict[str, Any],
     max_tokens: int = 1024,
     temperature: float | None = None,
+    timeout: float | None = None,
 ) -> dict[str, Any]:
     """Call the model and return its answer as a dict shaped by `tool_schema`.
 
@@ -72,10 +87,14 @@ def call_structured(
     sites need no change; Gemini has no tool-call step, so the description is
     added to the system prompt instead.
     """
-    from google.genai import errors, types
-
     client = _get_client()
+    timeout = remaining_timeout(timeout if timeout is not None else float(os.getenv("EXTERNAL_CALL_TIMEOUT_SECONDS", "25")))
+    assert timeout is not None
     config = types.GenerateContentConfig(
+        http_options=types.HttpOptions(
+            timeout=max(1, int(timeout * 1000)),
+            retry_options=types.HttpRetryOptions(attempts=1),
+        ),
         system_instruction=f"{system}\n\n{tool_description}".strip(),
         response_mime_type="application/json",
         response_json_schema=tool_schema,
@@ -88,6 +107,9 @@ def call_structured(
         if getattr(err, "code", None) == 429:
             raise RateLimitedError("The model provider rate-limited this request.") from err
         raise
+
+    # A mocked or misbehaving SDK may return after the workflow expired.
+    remaining_timeout()
 
     candidates = response.candidates or []
     finish = candidates[0].finish_reason if candidates else None

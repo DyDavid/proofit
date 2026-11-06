@@ -40,6 +40,7 @@ from api.quota import (
 from api.store import STAGE_ORDER, store
 from api.turnstile import verify_turnstile_token
 from engine.country.rules import rules_for
+from engine.execution import BoundedWorkPool, WorkCapacityError, WorkTimeoutError, remaining_timeout
 from engine.normalize.schema import HiddenStrength, Match
 from engine.rewrite.detect import detect_hidden_strengths
 from engine.rewrite.generate import generate_rewrite
@@ -1023,6 +1024,21 @@ def create_rewrites(
     analysis_id: str,
     user: CurrentUser | None = Depends(get_optional_user),  # noqa: B008
 ) -> dict:
+    try:
+        return _rewrite_pool.run(
+            lambda: _create_rewrites_sync(analysis_id, user),
+            timeout=settings.rewrite_timeout_seconds, limit=settings.max_concurrent_rewrites,
+        )
+    except WorkCapacityError as exc:
+        raise ApiError(429, "RATE_LIMITED", "The rewrite service is busy. Try again shortly.") from exc
+    except WorkTimeoutError as exc:
+        raise ApiError(504, "ENGINE_FAILED", "The rewrite took too long. Please try again later.") from exc
+
+
+_rewrite_pool = BoundedWorkPool("ai-rewrite")
+
+
+def _create_rewrites_sync(analysis_id: str, user: CurrentUser | None) -> dict:
     """Runs the F5 pipeline for one completed analysis (PERSON_B_PLAN_v2.md §5
     Phase 3 task 6): detect candidates, generate a rewrite for each, validate
     it, retry generation+validation once on failure, log every failure, and
@@ -1037,6 +1053,7 @@ def create_rewrites(
     the `GET /api/analyses/{id}` poll the Progress screen depends on. FastAPI
     runs a plain `def` route in a threadpool instead, so the LLM I/O blocks
     only that worker thread."""
+    remaining_timeout()
     if settings.enforce_auth_on_rewrites and user is None:
         raise ApiError(
             status_code=401,
@@ -1181,6 +1198,8 @@ def create_rewrites(
                 code="RATE_LIMITED",
                 message="The rewrite service is busy. Try again in a minute.",
             ) from exc
+        except WorkTimeoutError:
+            raise
         except Exception as exc:
             if reservation_id or target_user_id:
                 release_quota(reservation_id, target_user_id, "rewrite")
@@ -1194,6 +1213,7 @@ def create_rewrites(
                 message="The analysis didn't finish. Try again.",
             ) from exc
 
+        remaining_timeout()
         store.update_analysis(analysis_id, match=match)
         with store._lock:
             record.rewrite_status = "done"

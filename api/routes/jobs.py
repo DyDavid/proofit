@@ -19,6 +19,8 @@ from api.config import settings
 from api.errors import ApiError
 from api.limiter import enforce_endpoint_rate_limit
 from api.store import store
+from engine.execution import WorkCapacityError, WorkTimeoutError, remaining_timeout
+from engine.ingest.url_safety import bounded_fetch
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +55,7 @@ def _fetch_and_cache_job_url_sync(url: str) -> str:
     from engine.ingest.scraper import scrape_job_url
 
     raw_text = scrape_job_url(url)
+    remaining_timeout()
     save_cached_text(url, raw_text)
     return raw_text
 
@@ -84,12 +87,16 @@ async def fetch_job_url(payload: FetchUrlIn, request: Request) -> dict:
         )
 
     try:
-        raw_text = await asyncio.to_thread(_fetch_and_cache_job_url_sync, url)
+        raw_text = await asyncio.to_thread(bounded_fetch, lambda: _fetch_and_cache_job_url_sync(url))
         return {
             "url": url,
             "text": raw_text,
             "word_count": len(raw_text.split()),
         }
+    except WorkCapacityError as err:
+        raise ApiError(429, "RATE_LIMITED", "Too many job links are being processed. Try again shortly.") from err
+    except WorkTimeoutError as err:
+        raise ApiError(504, "JOB_FETCH_FAILED", "The job website took too long to respond.") from err
     except ValueError as val_err:
         logger.warning("Job URL refused (%s): %s", url, val_err)
         raise ApiError(
@@ -159,7 +166,11 @@ async def submit_job(payload: JobIn, request: Request) -> dict:
                 message="Host is on the LinkedIn/Facebook blocklist (PROJECT_SPEC.md §9 rule 6).",
             )
         try:
-            await asyncio.to_thread(validate_and_resolve_url, url)
+            await asyncio.to_thread(bounded_fetch, lambda: validate_and_resolve_url(url))
+        except WorkCapacityError as err:
+            raise ApiError(429, "RATE_LIMITED", "Too many job links are being processed. Try again shortly.") from err
+        except WorkTimeoutError as err:
+            raise ApiError(504, "JOB_FETCH_FAILED", "The job website took too long to respond.") from err
         except ValueError as val_err:
             logger.warning("Job URL refused (%s): %s", url, val_err)
             raise ApiError(

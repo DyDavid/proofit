@@ -14,13 +14,15 @@ Enforces:
 
 from __future__ import annotations
 
+import contextvars
 import ipaddress
 import re
 import socket
+import ssl
 import zlib
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeVar
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import httpcore
@@ -28,6 +30,32 @@ import httpx
 from httpcore._backends.base import NetworkStream
 from httpcore._backends.sync import SyncBackend, SyncStream
 from httpcore._exceptions import ConnectError, ConnectTimeout, map_exceptions
+
+from engine.execution import BoundedWorkPool, deadline_scope, remaining_timeout
+
+_fetch_pool = BoundedWorkPool("job-fetch")
+_fetch_admitted: contextvars.ContextVar[bool] = contextvars.ContextVar("fetch_admitted", default=False)
+_T = TypeVar("_T")
+
+
+def bounded_fetch(fn: Callable[[], _T]) -> _T:  # noqa: UP047
+    """Share capacity/deadline across DNS, scraping, redirects and cache writes."""
+    if _fetch_admitted.get():
+        remaining_timeout()
+        return fn()
+    from api.config import settings
+
+    def execute() -> _T:
+        token = _fetch_admitted.set(True)
+        try:
+            remaining_timeout()
+            return fn()
+        finally:
+            _fetch_admitted.reset(token)
+
+    return _fetch_pool.run(
+        execute, timeout=settings.fetch_timeout_seconds, limit=settings.max_concurrent_fetches
+    )
 
 MAX_REDIRECTS = 5
 DEFAULT_MAX_RESPONSE_BYTES = 2 * 1024 * 1024  # 2 MB
@@ -290,6 +318,31 @@ def validate_and_resolve_url(url: str) -> ValidatedUrl:
     )
 
 
+class _DeadlineStream(NetworkStream):
+    """Shorten every socket operation to the remaining overall deadline."""
+
+    def __init__(self, stream: NetworkStream) -> None:
+        self.stream = stream
+
+    def read(self, max_bytes: int, timeout: float | None = None) -> bytes:
+        return self.stream.read(max_bytes, timeout=remaining_timeout(timeout))
+
+    def write(self, buffer: bytes, timeout: float | None = None) -> None:
+        self.stream.write(buffer, timeout=remaining_timeout(timeout))
+
+    def close(self) -> None:
+        self.stream.close()
+
+    def start_tls(self, ssl_context: ssl.SSLContext, server_hostname: str | None = None,
+                  timeout: float | None = None) -> NetworkStream:
+        return _DeadlineStream(self.stream.start_tls(
+            ssl_context, server_hostname, timeout=remaining_timeout(timeout)
+        ))
+
+    def get_extra_info(self, info: str) -> Any:
+        return self.stream.get_extra_info(info)
+
+
 class _PinnedNetworkBackend(SyncBackend):
     """httpcore sync network backend that connects only to pre-validated public IPs.
 
@@ -329,6 +382,7 @@ class _PinnedNetworkBackend(SyncBackend):
 
         last_exc: Exception | None = None
         for ip_str in ips:
+            timeout = remaining_timeout(timeout)
             ip_obj = ipaddress.ip_address(ip_str)
             if not is_public_ip(ip_obj):
                 raise UnsafeUrlError("Refusing TCP connection to non-public IP address.")
@@ -358,7 +412,7 @@ class _PinnedNetworkBackend(SyncBackend):
                     for option in socket_options:
                         sock.setsockopt(*option)
                     sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                return SyncStream(sock)
+                return _DeadlineStream(SyncStream(sock))
             except (ConnectError, ConnectTimeout) as exc:
                 last_exc = exc
 
@@ -420,6 +474,8 @@ def _read_bounded_stream(resp: httpx.Response, max_bytes: int) -> bytes:
         return body
 
     encoding = (resp.headers.get("content-encoding") or "").strip().lower()
+    if encoding not in ("", "identity", "gzip", "x-gzip", "deflate"):
+        raise UnsafeUrlError("Unsupported response content encoding.")
     raw_total = 0
     decompressed_total = 0
     chunks: list[bytes] = []
@@ -429,6 +485,7 @@ def _read_bounded_stream(resp: httpx.Response, max_bytes: int) -> bytes:
         decomp = zlib.decompressobj(wbits)
         try:
             for raw_chunk in resp.iter_raw(chunk_size=8192):
+                remaining_timeout()
                 if not raw_chunk:
                     continue
                 raw_total += len(raw_chunk)
@@ -457,6 +514,7 @@ def _read_bounded_stream(resp: httpx.Response, max_bytes: int) -> bytes:
             raise RuntimeError("Corrupted compressed HTTP response stream.") from err
     else:
         for chunk in resp.iter_bytes(chunk_size=8192):
+            remaining_timeout()
             if not chunk:
                 continue
             decompressed_total += len(chunk)
@@ -513,6 +571,23 @@ def safe_http_get(
     max_redirects: int = MAX_REDIRECTS,
     max_response_bytes: int | None = None,
 ) -> httpx.Response:
+    def fetch() -> httpx.Response:
+        with deadline_scope(timeout):
+            return _safe_http_get(
+                url, headers=headers, timeout=timeout, max_redirects=max_redirects,
+                max_response_bytes=max_response_bytes,
+            )
+    return bounded_fetch(fetch)
+
+
+def _safe_http_get(
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+    timeout: float = 15.0,
+    max_redirects: int = MAX_REDIRECTS,
+    max_response_bytes: int | None = None,
+) -> httpx.Response:
     """Fetch ``url`` over HTTP/HTTPS with full SSRF, redirect, DNS-rebinding, and
     streaming response-size / decompression protection.
     """
@@ -531,11 +606,13 @@ def safe_http_get(
         mock_has_stream = "stream" in getattr(client, "_mock_children", {})
 
         for hop in range(max_redirects + 1):
+            remaining_timeout()
             validated = validate_and_resolve_url(current_url)
+            remaining_timeout()
             pinned_ips[(validated.hostname, validated.port)] = validated.resolved_ips
 
             if is_real_httpx_client or mock_has_stream:
-                with client.stream("GET", validated.url, headers=headers) as resp:
+                with client.stream("GET", validated.url, headers=headers, timeout=remaining_timeout(timeout)) as resp:
                     if resp.status_code in (301, 302, 303, 307, 308):
                         if hop >= max_redirects:
                             raise UnsafeUrlError(

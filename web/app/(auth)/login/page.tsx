@@ -8,15 +8,7 @@ import { TurnstileWidget, isTurnstileConfigured } from "@/components/auth/Turnst
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { createClient } from "@/lib/supabase/client";
-
-function sanitizeNextPath(raw: string | null): string {
-  if (!raw) return "/analyze";
-  const trimmed = raw.trim();
-  if (trimmed.startsWith("/") && !trimmed.startsWith("//")) {
-    return trimmed;
-  }
-  return "/analyze";
-}
+import { sanitizeNextPath } from "@/lib/authRedirect";
 
 function mapAuthError(err: unknown): string {
   const msg =
