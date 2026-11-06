@@ -59,6 +59,10 @@ class Settings(BaseSettings):
     analysis_timeout_seconds: float = 60.0
     external_call_timeout_seconds: float = 25.0
 
+    # Phase 4 multi-worker coordination & abandoned work recovery bounds
+    analysis_abandoned_timeout_seconds: float = 600.0
+    reservation_ttl_seconds: float = 600.0
+
 
 def is_admin_email(email: str | None) -> bool:
     """Check if the email has unlimited superuser privileges."""

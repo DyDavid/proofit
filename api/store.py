@@ -1,12 +1,25 @@
 """Unified store with Supabase PostgreSQL persistence and in-memory cache fallback.
 
-When Supabase credentials are provided, reads and writes persist to Supabase tables:
-`jobs`, `resumes`, `analyses`, `jd_requirements`, and `resume_evidence`.
-When offline or in mock mode without credentials, gracefully falls back to the in-memory store.
+Concurrency & Persistence Model
+-------------------------------
+1. **Multi-Worker Persistent Mode** (`get_supabase_client() is not None`):
+   Reads and writes persist to Supabase PostgreSQL tables (`jobs`, `resumes`, `analyses`,
+   `guest_ip_usage`, `usage_reservations`, `usage_events`, `jd_requirements`, `resume_evidence`).
+   Concurrency-critical operations—such as claiming an analysis retry (`claim_analysis_retry`),
+   reserving guest IP slots (`reserve_guest_usage`), and refreshing analysis state across
+   workers—execute atomically in PostgreSQL using row-level locks (`FOR UPDATE`) and
+   transactional advisory locks (`pg_advisory_xact_lock`). If persistence fails when
+   configured, enforcement operations fail closed with HTTP 503 `SERVICE_UNAVAILABLE`.
+
+2. **Single-Process In-Memory Fallback Mode** (`get_supabase_client() is None`):
+   Used only in `ENGINE_MODE=mock` or offline local development without Supabase credentials.
+   Synchronizes requests within a single Python process using `Store._lock` (`threading.RLock`).
+   Multi-worker / multi-instance deployments MUST configure Supabase database persistence.
 """
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
@@ -18,6 +31,8 @@ from pathlib import Path
 from typing import Literal
 
 from api.db import (
+    DatabasePersistenceError,
+    db_claim_analysis_retry,
     db_create_analysis,
     db_get_analysis,
     db_get_guest_ip_last_used,
@@ -26,6 +41,8 @@ from api.db import (
     db_get_resume,
     db_list_analyses,
     db_record_guest_ip_usage,
+    db_release_guest_usage,
+    db_reserve_guest_usage,
     db_update_analysis_stage,
     db_upsert_job,
     db_upsert_resume,
@@ -178,6 +195,70 @@ class Store:
             return max(0.01, float(settings.guest_record_ttl_hours))
         except Exception:
             return 24.0
+
+    def _abandoned_timeout_seconds(self) -> float:
+        try:
+            from api.config import settings
+
+            return max(1.0, float(settings.analysis_abandoned_timeout_seconds))
+        except Exception:
+            return 600.0
+
+    def _is_analysis_abandoned(
+        self, record: AnalysisRecord, now: datetime | None = None
+    ) -> bool:
+        """Return True if an analysis has been stuck in queued/running past the abandoned threshold."""
+        if record.status not in ("queued", "running"):
+            return False
+        eff_now = now or utcnow()
+        cutoff = eff_now - timedelta(seconds=self._abandoned_timeout_seconds())
+        return record.created_at <= cutoff
+
+    def recover_abandoned_analysis(
+        self, record: AnalysisRecord, now: datetime | None = None
+    ) -> bool:
+        """Transition an abandoned queued/running analysis to failed and release any active reservation."""
+        with self._lock:
+            if not self._is_analysis_abandoned(record, now=now):
+                return False
+
+            safe_msg = "Analysis timed out or was abandoned."
+            err_payload = {
+                "code": "ENGINE_FAILED",
+                "message": safe_msg,
+                "error_id": _new_id("err"),
+            }
+            record.status = "failed"
+            record.match = None
+            record.baseline = None
+            record.error_message = safe_msg
+            record.error = err_payload
+            res_id = record.reservation_id
+            uid = record.user_id
+            is_guest = record.is_guest
+            ip_hash = record.guest_ip_hash
+
+        if get_supabase_client() and not is_guest:
+            db_update_analysis_stage(
+                analysis_id=record.id,
+                status="failed",
+                match_data=None,
+                error_message=safe_msg,
+            )
+
+        if res_id:
+            try:
+                from api.billing.service import release_usage_reservation
+
+                release_usage_reservation(res_id, uid, "analysis")
+            except Exception as err:
+                logger.warning("Failed to release reservation %s during abandoned recovery: %s", res_id, err)
+
+        if is_guest and ip_hash:
+            with contextlib.suppress(Exception):
+                self.release_guest_ip_usage(ip_hash)
+
+        return True
 
     def prune_expired(self, now: datetime | None = None) -> None:
         """Expire old guest records and enforce capacity caps to prevent unbounded memory growth."""
@@ -436,17 +517,23 @@ class Store:
 
     def check_guest_ip_allowed(self, ip_hash: str) -> bool:
         """Returns True if this salted IP hash has not run a guest analysis in the past 24h."""
-        with self._lock:
-            self.prune_expired()
-            now = utcnow()
-            cutoff = now - timedelta(hours=self._guest_ttl_hours())
+        from api.errors import ApiError
 
-            last_mem = self.guest_ip_usage.get(ip_hash)
-            if last_mem is not None and last_mem > cutoff:
-                return False
+        now = utcnow()
+        cutoff = now - timedelta(hours=self._guest_ttl_hours())
 
-            if get_supabase_client():
+        if get_supabase_client():
+            try:
                 last_db_str = db_get_guest_ip_last_used(ip_hash)
+            except DatabasePersistenceError as exc:
+                raise ApiError(
+                    status_code=503,
+                    code="SERVICE_UNAVAILABLE",
+                    message="Persistence service unavailable; cannot verify guest limit safely.",
+                ) from exc
+
+            with self._lock:
+                self.prune_expired(now=now)
                 if last_db_str:
                     try:
                         last_db = datetime.fromisoformat(last_db_str.replace("Z", "+00:00"))
@@ -455,22 +542,64 @@ class Store:
                             return False
                     except ValueError:
                         pass
+                # DB shows no active guest lock: clear any stale local cache entry
+                self.guest_ip_usage.pop(ip_hash, None)
+                return True
 
-            return True
+        with self._lock:
+            self.prune_expired(now=now)
+            last_mem = self.guest_ip_usage.get(ip_hash)
+            return not (last_mem is not None and last_mem > cutoff)
 
     def record_guest_ip_usage(self, ip_hash: str) -> None:
-        with self._lock:
-            self.prune_expired()
-            now = utcnow()
-            self.guest_ip_usage[ip_hash] = now
-            self.prune_expired()
-            if get_supabase_client():
+        from api.errors import ApiError
+
+        now = utcnow()
+        if get_supabase_client():
+            try:
                 db_record_guest_ip_usage(ip_hash, now.isoformat())
+            except DatabasePersistenceError as exc:
+                raise ApiError(
+                    status_code=503,
+                    code="SERVICE_UNAVAILABLE",
+                    message="Persistence service unavailable; cannot record guest usage safely.",
+                ) from exc
+
+        with self._lock:
+            self.prune_expired(now=now)
+            self.guest_ip_usage[ip_hash] = now
+            self.prune_expired(now=now)
 
     def reserve_guest_ip_usage(self, ip_hash: str) -> bool:
         """Atomically checks if guest IP is allowed and reserves a slot if allowed.
         Returns True if reservation succeeded, False if limit reached (already used in 24h).
+        Fails closed with HTTP 503 if database persistence is configured and fails.
         """
+        from api.errors import ApiError
+
+        now = utcnow()
+        if get_supabase_client():
+            try:
+                res = db_reserve_guest_usage(ip_hash, ttl_hours=self._guest_ttl_hours())
+            except DatabasePersistenceError as exc:
+                raise ApiError(
+                    status_code=503,
+                    code="SERVICE_UNAVAILABLE",
+                    message="Persistence service unavailable; cannot reserve guest slot safely.",
+                ) from exc
+
+            allowed = bool(res.get("allowed", False))
+            last_str = res.get("last_analysis_at")
+            parsed_ts = now
+            if isinstance(last_str, str):
+                with contextlib.suppress(ValueError):
+                    parsed_ts = datetime.fromisoformat(last_str.replace("Z", "+00:00"))
+            with self._lock:
+                self.prune_expired(now=now)
+                self.guest_ip_usage[ip_hash] = parsed_ts
+            return allowed
+
+        # Single-process fallback mode (documented: only when Supabase persistence is not configured)
         with self._lock:
             if not self.check_guest_ip_allowed(ip_hash):
                 return False
@@ -485,16 +614,12 @@ class Store:
             else:
                 self.guest_ip_usage.pop(ip_hash, None)
 
-            if get_supabase_client():
-                try:
-                    if prev_time is not None:
-                        db_record_guest_ip_usage(ip_hash, prev_time.isoformat())
-                    else:
-                        client = get_supabase_client()
-                        if client:
-                            client.table("guest_ip_usage").delete().eq("ip_hash", ip_hash).execute()
-                except Exception as err:
-                    logger.debug("Error releasing guest_ip_usage for %s: %s", ip_hash[:8], err)
+        if get_supabase_client():
+            try:
+                prev_iso = prev_time.isoformat() if prev_time is not None else None
+                db_release_guest_usage(ip_hash, prev_iso)
+            except Exception as err:
+                logger.debug("Error releasing guest_ip_usage for %s: %s", ip_hash[:8], err)
 
     def create_analysis(
         self,
@@ -503,6 +628,7 @@ class Store:
         country: str,
         user_id: str | None = None,
         is_guest: bool = False,
+        reservation_id: str | None = None,
     ) -> AnalysisRecord:
         with self._lock:
             self.prune_expired()
@@ -514,6 +640,8 @@ class Store:
                 status="queued",
                 user_id=user_id,
                 is_guest=is_guest,
+                created_at=utcnow(),
+                reservation_id=reservation_id,
             )
             self.analyses[record.id] = record
             if is_guest or user_id is None:
@@ -529,6 +657,7 @@ class Store:
                 country=country,
                 status="queued",
                 user_id=user_id,
+                reservation_id=reservation_id,
             )
 
         return record
@@ -538,13 +667,79 @@ class Store:
         original_id: str,
         user_id: str | None = None,
         is_guest: bool | None = None,
+        reservation_id: str | None = None,
     ) -> AnalysisRecord | None:
         from api.errors import ApiError
 
+        original = self.get_analysis(original_id)
+        if original is None:
+            return None
+
+        target_user_id = user_id if user_id is not None else original.user_id
+        target_is_guest = is_guest if is_guest is not None else original.is_guest
+
+        # Multi-worker persistent path: coordinate atomically in PostgreSQL via row-level lock
+        if get_supabase_client() and not target_is_guest:
+            child_id = _new_id("an")
+            try:
+                rpc_res = db_claim_analysis_retry(
+                    original_id=original_id,
+                    child_id=child_id,
+                    resume_id=original.resume_id,
+                    job_id=original.job_id,
+                    country=original.country,
+                    user_id=target_user_id,
+                    reservation_id=reservation_id,
+                    abandoned_seconds=int(self._abandoned_timeout_seconds()),
+                )
+            except DatabasePersistenceError as exc:
+                raise ApiError(
+                    status_code=503,
+                    code="SERVICE_UNAVAILABLE",
+                    message="Persistence service unavailable; cannot coordinate retry safely.",
+                ) from exc
+
+            if not rpc_res.get("success", False):
+                err_code = rpc_res.get("code", "ANALYSIS_IN_PROGRESS")
+                if err_code == "ANALYSIS_NOT_FOUND":
+                    return None
+                err_msg = rpc_res.get(
+                    "message", "A retry for this analysis is already in progress."
+                )
+                # Refresh local cache so this worker's in-memory record reflects the winning worker's retry
+                active_retry_id = rpc_res.get("active_retry_id")
+                if active_retry_id:
+                    with self._lock:
+                        original.retried_by = str(active_retry_id)
+                raise ApiError(
+                    status_code=409,
+                    code="ANALYSIS_IN_PROGRESS",
+                    message=str(err_msg),
+                )
+
+            with self._lock:
+                self.prune_expired()
+                child_rec = AnalysisRecord(
+                    id=child_id,
+                    resume_id=original.resume_id,
+                    job_id=original.job_id,
+                    country=original.country,
+                    status="queued",
+                    user_id=target_user_id,
+                    is_guest=False,
+                    reservation_id=reservation_id,
+                )
+                self.analyses[child_rec.id] = child_rec
+                original.retried_by = child_rec.id
+                return child_rec
+
+        # Single-process in-memory fallback path (documented: only when DB persistence is not used)
         with self._lock:
             original = self.get_analysis(original_id)
             if original is None:
                 return None
+
+            self.recover_abandoned_analysis(original)
 
             # 1. State eligibility check
             if original.status in ("queued", "running"):
@@ -554,18 +749,17 @@ class Store:
                     message="Cannot retry an analysis that is still queued or running.",
                 )
 
-            # 2. Duplicate in-flight retry check
+            # 2. Duplicate in-flight retry check (with abandoned work recovery)
             if original.retried_by:
                 child = self.get_analysis(original.retried_by)
-                if child and child.status in ("queued", "running"):
-                    raise ApiError(
-                        status_code=409,
-                        code="ANALYSIS_IN_PROGRESS",
-                        message="A retry for this analysis is already in progress.",
-                    )
-
-            target_user_id = user_id if user_id is not None else original.user_id
-            target_is_guest = is_guest if is_guest is not None else original.is_guest
+                if child is not None:
+                    self.recover_abandoned_analysis(child)
+                    if child.status in ("queued", "running"):
+                        raise ApiError(
+                            status_code=409,
+                            code="ANALYSIS_IN_PROGRESS",
+                            message="A retry for this analysis is already in progress.",
+                        )
 
             child_rec = self.create_analysis(
                 original.resume_id,
@@ -573,15 +767,9 @@ class Store:
                 original.country,
                 user_id=target_user_id,
                 is_guest=target_is_guest,
+                reservation_id=reservation_id,
             )
             original.retried_by = child_rec.id
-
-            if get_supabase_client() and not original.is_guest:
-                try:
-                    get_supabase_client().table("analyses").update({"retried_by": child_rec.id}).eq("id", original.id).execute()
-                except Exception as db_err:
-                    logger.debug("Could not update retried_by in DB: %s", db_err)
-
             return child_rec
 
     def analyses_for_resume(
@@ -686,37 +874,67 @@ class Store:
         return record
 
     def get_analysis(self, analysis_id: str) -> AnalysisRecord | None:
-        if analysis_id in self.analyses:
-            return self.analyses[analysis_id]
-
-        if get_supabase_client():
+        cached = self.analyses.get(analysis_id)
+        if get_supabase_client() and (cached is None or not cached.is_guest):
             row = db_get_analysis(analysis_id)
             if row:
                 match_obj = Match.model_validate(row["match"]) if row.get("match") else None
-                baseline_obj: BaselineMatch | None = None
-                if match_obj and match_obj.job and match_obj.resume:
+                baseline_obj: BaselineMatch | None = cached.baseline if cached else None
+                if baseline_obj is None and match_obj and match_obj.job and match_obj.resume:
                     try:
                         from engine.match import run_baseline
 
                         baseline_obj = run_baseline(match_obj.job, match_obj.resume)
                     except Exception:
                         baseline_obj = None
-                rec = AnalysisRecord(
-                    id=row["id"],
-                    resume_id=row.get("resume_id") or "",
-                    job_id=row.get("job_id") or "",
-                    country=row.get("country", "KH"),
-                    status=row.get("status", "done"),
-                    stage=row.get("stage"),
-                    match=match_obj,
-                    baseline=baseline_obj,
-                    error_message=row.get("error_message"),
-                    user_id=row.get("user_id"),
-                    is_guest=False,
-                    retried_by=row.get("retried_by"),
-                )
-                self.analyses[rec.id] = rec
+                created_at = cached.created_at if cached else utcnow()
+                raw_created = row.get("created_at")
+                if isinstance(raw_created, str):
+                    with contextlib.suppress(ValueError):
+                        created_at = datetime.fromisoformat(raw_created.replace("Z", "+00:00"))
+                elif isinstance(raw_created, datetime):
+                    created_at = raw_created
+
+                with self._lock:
+                    if cached is not None:
+                        cached.status = row.get("status", cached.status)
+                        cached.stage = row.get("stage", cached.stage)
+                        if match_obj is not None or cached.status == "failed":
+                            cached.match = None if cached.status == "failed" else match_obj
+                        if baseline_obj is not None and cached.status != "failed":
+                            cached.baseline = baseline_obj
+                        if row.get("error_message") is not None:
+                            cached.error_message = row.get("error_message")
+                        if row.get("retried_by") is not None:
+                            cached.retried_by = row.get("retried_by")
+                        if row.get("reservation_id") is not None:
+                            cached.reservation_id = row.get("reservation_id")
+                        cached.created_at = created_at
+                        rec = cached
+                    else:
+                        rec = AnalysisRecord(
+                            id=row["id"],
+                            resume_id=row.get("resume_id") or "",
+                            job_id=row.get("job_id") or "",
+                            country=row.get("country", "KH"),
+                            status=row.get("status", "done"),
+                            stage=row.get("stage"),
+                            match=match_obj,
+                            baseline=baseline_obj,
+                            error_message=row.get("error_message"),
+                            user_id=row.get("user_id"),
+                            is_guest=False,
+                            created_at=created_at,
+                            retried_by=row.get("retried_by"),
+                            reservation_id=row.get("reservation_id"),
+                        )
+                        self.analyses[rec.id] = rec
+                self.recover_abandoned_analysis(rec)
                 return rec
+
+        if cached is not None:
+            self.recover_abandoned_analysis(cached)
+            return cached
         return None
 
     def pick_fixture_name(self, job_id: str) -> str:

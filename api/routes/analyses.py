@@ -650,6 +650,7 @@ async def create_analysis(
             payload.country,
             user_id=user.id if user else None,
             is_guest=is_guest,
+            reservation_id=reservation_id,
         )
         record.reservation_id = reservation_id
         record.guest_ip_hash = ip_hash
@@ -799,6 +800,7 @@ async def retry_analysis(
             analysis_id,
             user_id=user.id if user else None,
             is_guest=is_guest,
+            reservation_id=reservation_id,
         )
         assert record is not None
         record.reservation_id = reservation_id

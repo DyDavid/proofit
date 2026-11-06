@@ -17,6 +17,25 @@ logger = logging.getLogger(__name__)
 _supabase_client = None
 
 
+class DatabasePersistenceError(RuntimeError):
+    """Raised when database persistence is configured and required for safety/enforcement,
+    but a database operation fails. Callers must fail closed rather than bypassing limits."""
+
+
+def _unwrap_rpc_result(res: Any, op_name: str) -> dict[str, Any]:
+    """Normalize a Supabase PostgREST RPC response into a dict, or raise DatabasePersistenceError."""
+    if res is None:
+        raise DatabasePersistenceError(f"Empty RPC response from {op_name}")
+    data = getattr(res, "data", None)
+    if isinstance(data, list):
+        if len(data) == 1 and isinstance(data[0], dict):
+            return data[0]
+        raise DatabasePersistenceError(f"Unexpected list RPC payload from {op_name}: {data!r}")
+    if isinstance(data, dict):
+        return data
+    raise DatabasePersistenceError(f"Unexpected RPC payload from {op_name}: {data!r}")
+
+
 def get_supabase_client() -> Any | None:
     """Lazily instantiate and cache the Supabase client."""
     global _supabase_client
@@ -175,6 +194,7 @@ def db_create_analysis(
     country: str,
     status: str = "queued",
     user_id: str | None = None,
+    reservation_id: str | None = None,
 ) -> bool:
     client = get_supabase_client()
     if not client:
@@ -189,6 +209,8 @@ def db_create_analysis(
         }
         if user_id is not None:
             row["user_id"] = user_id
+        if reservation_id is not None:
+            row["reservation_id"] = reservation_id
         client.table("analyses").upsert(row).execute()
         return True
     except Exception as err:
@@ -269,8 +291,8 @@ def db_get_guest_ip_last_used(ip_hash: str) -> str | None:
             return res.data.get("last_analysis_at")
         return None
     except Exception as err:
-        logger.debug("Error checking guest_ip_usage for %s: %s", ip_hash[:8], err)
-        return None
+        logger.error("Error checking guest_ip_usage for %s: %s", ip_hash[:8], err)
+        raise DatabasePersistenceError(f"Failed to check guest IP usage: {err}") from err
 
 
 def db_record_guest_ip_usage(ip_hash: str, timestamp_iso: str) -> bool:
@@ -284,8 +306,169 @@ def db_record_guest_ip_usage(ip_hash: str, timestamp_iso: str) -> bool:
         }).execute()
         return True
     except Exception as err:
-        logger.debug("Error recording guest_ip_usage for %s: %s", ip_hash[:8], err)
-        return False
+        logger.error("Error recording guest_ip_usage for %s: %s", ip_hash[:8], err)
+        raise DatabasePersistenceError(f"Failed to record guest IP usage: {err}") from err
+
+
+# ============================================================================
+# Atomic Multi-Worker Concurrency & Quota RPCs (Phase 4)
+# ============================================================================
+
+def db_reserve_user_quota(
+    user_id: str,
+    kind: str,
+    reservation_id: str,
+    limit: int | None,
+    window_start_iso: str,
+    expires_at_iso: str,
+) -> dict[str, Any]:
+    """Atomically check and reserve a quota slot in PostgreSQL across workers."""
+    client = get_supabase_client()
+    if not client:
+        raise DatabasePersistenceError("Supabase client is not initialized.")
+    try:
+        res = client.rpc(
+            "reserve_user_quota",
+            {
+                "p_user_id": user_id,
+                "p_kind": kind,
+                "p_reservation_id": reservation_id,
+                "p_limit": limit,
+                "p_window_start": window_start_iso,
+                "p_expires_at": expires_at_iso,
+            },
+        ).execute()
+        return _unwrap_rpc_result(res, "reserve_user_quota")
+    except DatabasePersistenceError:
+        raise
+    except Exception as err:
+        logger.error("Database error in reserve_user_quota for user=%s kind=%s: %s", user_id, kind, err)
+        raise DatabasePersistenceError(f"Quota reservation persistence failed: {err}") from err
+
+
+def db_commit_usage_reservation(
+    reservation_id: str | None,
+    user_id: str | None,
+    kind: str,
+) -> dict[str, Any]:
+    """Idempotently transition an active reservation to committed and record one usage_event."""
+    client = get_supabase_client()
+    if not client:
+        raise DatabasePersistenceError("Supabase client is not initialized.")
+    try:
+        res = client.rpc(
+            "commit_usage_reservation",
+            {
+                "p_reservation_id": reservation_id,
+                "p_user_id": user_id,
+                "p_kind": kind,
+            },
+        ).execute()
+        return _unwrap_rpc_result(res, "commit_usage_reservation")
+    except DatabasePersistenceError:
+        raise
+    except Exception as err:
+        logger.error("Database error in commit_usage_reservation id=%s: %s", reservation_id, err)
+        raise DatabasePersistenceError(f"Quota commit persistence failed: {err}") from err
+
+
+def db_release_usage_reservation(reservation_id: str | None) -> dict[str, Any]:
+    """Idempotently release an active reservation without recording usage."""
+    client = get_supabase_client()
+    if not client:
+        raise DatabasePersistenceError("Supabase client is not initialized.")
+    try:
+        res = client.rpc(
+            "release_usage_reservation",
+            {"p_reservation_id": reservation_id},
+        ).execute()
+        return _unwrap_rpc_result(res, "release_usage_reservation")
+    except DatabasePersistenceError:
+        raise
+    except Exception as err:
+        logger.error("Database error in release_usage_reservation id=%s: %s", reservation_id, err)
+        raise DatabasePersistenceError(f"Quota release persistence failed: {err}") from err
+
+
+def db_claim_analysis_retry(
+    original_id: str,
+    child_id: str,
+    resume_id: str,
+    job_id: str,
+    country: str,
+    user_id: str | None = None,
+    reservation_id: str | None = None,
+    abandoned_seconds: int = 600,
+) -> dict[str, Any]:
+    """Atomically claim an analysis retry in PostgreSQL and recover abandoned in-flight work."""
+    client = get_supabase_client()
+    if not client:
+        raise DatabasePersistenceError("Supabase client is not initialized.")
+    try:
+        res = client.rpc(
+            "claim_analysis_retry",
+            {
+                "p_original_id": original_id,
+                "p_child_id": child_id,
+                "p_resume_id": resume_id,
+                "p_job_id": job_id,
+                "p_country": country,
+                "p_user_id": user_id,
+                "p_reservation_id": reservation_id,
+                "p_abandoned_seconds": max(1, int(abandoned_seconds)),
+            },
+        ).execute()
+        return _unwrap_rpc_result(res, "claim_analysis_retry")
+    except DatabasePersistenceError:
+        raise
+    except Exception as err:
+        logger.error("Database error in claim_analysis_retry original=%s: %s", original_id, err)
+        raise DatabasePersistenceError(f"Retry claim persistence failed: {err}") from err
+
+
+def db_reserve_guest_usage(ip_hash: str, ttl_hours: float = 24.0) -> dict[str, Any]:
+    """Atomically check and reserve guest IP usage across workers."""
+    client = get_supabase_client()
+    if not client:
+        raise DatabasePersistenceError("Supabase client is not initialized.")
+    try:
+        res = client.rpc(
+            "reserve_guest_usage",
+            {
+                "p_ip_hash": ip_hash,
+                "p_ttl_hours": float(ttl_hours),
+            },
+        ).execute()
+        return _unwrap_rpc_result(res, "reserve_guest_usage")
+    except DatabasePersistenceError:
+        raise
+    except Exception as err:
+        logger.error("Database error in reserve_guest_usage ip=%s: %s", ip_hash[:8], err)
+        raise DatabasePersistenceError(f"Guest usage reservation persistence failed: {err}") from err
+
+
+def db_release_guest_usage(
+    ip_hash: str,
+    prev_last_analysis_at_iso: str | None = None,
+) -> dict[str, Any]:
+    """Atomically release or rollback guest IP usage in PostgreSQL."""
+    client = get_supabase_client()
+    if not client:
+        raise DatabasePersistenceError("Supabase client is not initialized.")
+    try:
+        res = client.rpc(
+            "release_guest_usage",
+            {
+                "p_ip_hash": ip_hash,
+                "p_prev_last_analysis_at": prev_last_analysis_at_iso,
+            },
+        ).execute()
+        return _unwrap_rpc_result(res, "release_guest_usage")
+    except DatabasePersistenceError:
+        raise
+    except Exception as err:
+        logger.error("Database error in release_guest_usage ip=%s: %s", ip_hash[:8], err)
+        raise DatabasePersistenceError(f"Guest usage release persistence failed: {err}") from err
 
 
 # ============================================================================

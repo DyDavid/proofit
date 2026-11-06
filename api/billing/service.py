@@ -1,8 +1,26 @@
-"""Billing service: checkout sessions, idempotent plan granting, status polling, and usage."""
+"""Billing service: checkout sessions, idempotent plan granting, status polling, and usage.
+
+Concurrency & Persistence Model
+-------------------------------
+1. **Multi-Worker Persistent Mode** (`get_supabase_client() is not None`):
+   Quota checking, reservation creation, completion (`commit`), and cancellation (`release`)
+   are coordinated across all server processes / worker instances through atomic PostgreSQL
+   RPCs (`reserve_user_quota`, `commit_usage_reservation`, `release_usage_reservation`) using
+   transactional advisory locks (`pg_advisory_xact_lock`) and row-level locking (`FOR UPDATE`).
+   When database persistence is configured, any database error during quota check or
+   reservation raises `DatabasePersistenceError` (failing closed) and NEVER falls back to
+   process-local memory.
+
+2. **Single-Process Fallback Mode** (`get_supabase_client() is None`):
+   Used only in `ENGINE_MODE=mock` or offline local development without Supabase credentials.
+   Synchronizes requests within a single Python OS process using `_reservations_lock`
+   (`threading.RLock`). Multi-worker deployments MUST configure Supabase persistence.
+"""
 
 from __future__ import annotations
 
 import contextlib
+import logging
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -17,7 +35,15 @@ from api.billing.providers.base import BillingProvider
 from api.billing.providers.mock import MockProvider
 from api.billing.providers.stripe_sandbox import StripeSandboxProvider
 from api.config import settings
-from api.db import get_supabase_client
+from api.db import (
+    DatabasePersistenceError,
+    db_commit_usage_reservation,
+    db_release_usage_reservation,
+    db_reserve_user_quota,
+    get_supabase_client,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class UsageBucket(BaseModel):
@@ -110,11 +136,12 @@ class UsageReservationRecord:
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
-# In-memory store for tests and offline fallback
+# In-memory store for single-process tests and offline fallback (when get_supabase_client() is None)
 _checkout_sessions: dict[str, CheckoutSessionRecord] = {}
 _subscriptions: list[SubscriptionRecord] = []
 _usage_events: list[UsageEventRecord] = []
 _usage_reservations: dict[str, UsageReservationRecord] = {}
+_finalized_reservations: dict[str, Literal["committed", "released"]] = {}
 _reservations_lock = threading.RLock()
 _stripe_events: set[str] = set()
 
@@ -126,6 +153,7 @@ def reset_billing_memory() -> None:
         _subscriptions.clear()
         _usage_events.clear()
         _usage_reservations.clear()
+        _finalized_reservations.clear()
         _stripe_events.clear()
 
 
@@ -142,7 +170,7 @@ def set_test_subscription(
     active_from: datetime | None = None,
     checkout_session_id: str | None = None,
 ) -> SubscriptionRecord:
-    """Helper to seed an active subscription in memory for tests."""
+    """Helper to seed an active subscription in memory (and shared DB if configured) for tests."""
     now = datetime.now(UTC)
     rec = SubscriptionRecord(
         id=str(uuid.uuid4()),
@@ -154,6 +182,21 @@ def set_test_subscription(
         checkout_session_id=checkout_session_id,
     )
     _subscriptions.append(rec)
+    client = get_supabase_client()
+    if client is not None:
+        with contextlib.suppress(Exception):
+            client.table("subscriptions").insert(
+                {
+                    "id": rec.id,
+                    "user_id": rec.user_id,
+                    "plan_id": rec.plan_id,
+                    "current_period_start": rec.current_period_start.isoformat(),
+                    "current_period_end": rec.current_period_end.isoformat(),
+                    "provider": rec.provider,
+                    "checkout_session_id": rec.checkout_session_id,
+                    "created_at": rec.created_at.isoformat(),
+                }
+            ).execute()
     return rec
 
 
@@ -186,8 +229,10 @@ def _get_active_subscription_for_user(user_id: str) -> SubscriptionRecord | None
                     provider=row.get("provider", "mock"),
                     checkout_session_id=row.get("checkout_session_id"),
                 )
-        except Exception:
-            pass
+            return None
+        except Exception as err:
+            logger.error("Failed to query active subscription for user=%s: %s", user_id, err)
+            raise DatabasePersistenceError(f"Subscription lookup failed: {err}") from err
 
     active = [
         s
@@ -218,8 +263,10 @@ def _count_usage(
             )
             if res.count is not None:
                 return int(res.count)
-        except Exception:
-            pass
+            return len(res.data or [])
+        except Exception as err:
+            logger.error("Failed to count usage_events for user=%s kind=%s: %s", user_id, kind, err)
+            raise DatabasePersistenceError(f"Usage count query failed: {err}") from err
 
     return sum(
         1
@@ -234,11 +281,9 @@ def record_usage_event(
 ) -> None:
     """Record a usage event after a successful analysis or rewrite."""
     now = datetime.now(UTC)
-    with _reservations_lock:
-        _usage_events.append(UsageEventRecord(user_id=user_id, kind=kind, created_at=now))
     client = get_supabase_client()
     if client is not None:
-        with contextlib.suppress(Exception):
+        try:
             client.table("usage_events").insert(
                 {
                     "user_id": user_id,
@@ -246,6 +291,13 @@ def record_usage_event(
                     "created_at": now.isoformat(),
                 }
             ).execute()
+        except Exception as err:
+            logger.error("Failed to insert usage_event for user=%s kind=%s: %s", user_id, kind, err)
+            raise DatabasePersistenceError(f"Failed to record usage event: {err}") from err
+        return
+
+    with _reservations_lock:
+        _usage_events.append(UsageEventRecord(user_id=user_id, kind=kind, created_at=now))
 
 
 def _clean_expired_reservations() -> None:
@@ -253,6 +305,8 @@ def _clean_expired_reservations() -> None:
     expired = [rid for rid, r in _usage_reservations.items() if r.expires_at <= now]
     for rid in expired:
         _usage_reservations.pop(rid, None)
+        if _finalized_reservations.get(rid) != "committed":
+            _finalized_reservations[rid] = "released"
 
 
 def _count_active_reservations(
@@ -260,10 +314,31 @@ def _count_active_reservations(
     kind: Literal["analysis", "rewrite"],
     since: datetime | None = None,
 ) -> int:
+    now = datetime.now(UTC)
+    client = get_supabase_client()
+    if client is not None:
+        try:
+            query = (
+                client.table("usage_reservations")
+                .select("id", count="exact")
+                .eq("user_id", user_id)
+                .eq("kind", kind)
+                .eq("status", "active")
+                .gt("expires_at", now.isoformat())
+            )
+            if since is not None:
+                query = query.gte("created_at", since.isoformat())
+            res = query.execute()
+            if res.count is not None:
+                return int(res.count)
+            return len(res.data or [])
+        except Exception as err:
+            logger.error("Failed to count active reservations for user=%s kind=%s: %s", user_id, kind, err)
+            raise DatabasePersistenceError(f"Active reservation count failed: {err}") from err
+
     with _reservations_lock:
         _clean_expired_reservations()
-        now = datetime.now(UTC)
-        count = sum(
+        return sum(
             1
             for r in _usage_reservations.values()
             if r.user_id == user_id
@@ -271,23 +346,81 @@ def _count_active_reservations(
             and r.expires_at > now
             and (since is None or r.created_at >= since)
         )
-        client = get_supabase_client()
-        if client is not None:
-            try:
-                res = (
-                    client.table("usage_reservations")
-                    .select("id", count="exact")
-                    .eq("user_id", user_id)
-                    .eq("kind", kind)
-                    .eq("status", "active")
-                    .gt("expires_at", now.isoformat())
-                    .execute()
-                )
-                if res.count is not None and int(res.count) > count:
-                    count = int(res.count)
-            except Exception:
-                pass
-        return count
+
+
+def get_user_quota_window_and_limit(
+    user_id: str,
+    kind: Literal["analysis", "rewrite"],
+) -> tuple[PlanId, int | None, datetime]:
+    """Return `(plan_id, limit, window_start)` for `user_id` and `kind`."""
+    now = datetime.now(UTC)
+    active_sub = _get_active_subscription_for_user(user_id)
+    if active_sub is not None:
+        plan_id: PlanId = active_sub.plan_id
+        window_start = active_sub.current_period_start
+    else:
+        plan_id = "free"
+        window_start = now - timedelta(days=30)
+
+    plan_def = PLANS[plan_id]
+    limit = plan_def.limits.analyses if kind == "analysis" else plan_def.limits.rewrites
+    return plan_id, limit, window_start
+
+
+def atomic_reserve_quota(
+    user_id: str,
+    kind: Literal["analysis", "rewrite"],
+    reservation_id: str | None = None,
+) -> tuple[bool, str, int | None]:
+    """Atomically verify quota and reserve a slot across workers (when DB is active)
+    or under the single-process lock (when running in offline fallback mode).
+
+    Returns `(allowed, reservation_id, limit)`.
+    Raises `DatabasePersistenceError` if persistence is configured and fails.
+    """
+    rid = reservation_id or str(uuid.uuid4())
+    now = datetime.now(UTC)
+    ttl_seconds = max(1.0, float(settings.reservation_ttl_seconds))
+    expires = now + timedelta(seconds=ttl_seconds)
+
+    _plan_id, limit, window_start = get_user_quota_window_and_limit(user_id, kind)
+
+    client = get_supabase_client()
+    if client is not None:
+        rpc_res = db_reserve_user_quota(
+            user_id=user_id,
+            kind=kind,
+            reservation_id=rid,
+            limit=limit,
+            window_start_iso=window_start.isoformat(),
+            expires_at_iso=expires.isoformat(),
+        )
+        allowed = bool(rpc_res.get("allowed", False))
+        return allowed, rid, limit
+
+    # Single-process fallback mode (documented: only when Supabase persistence is not configured)
+    with _reservations_lock:
+        _clean_expired_reservations()
+        existing = _usage_reservations.get(rid)
+        if existing is not None and existing.expires_at > now:
+            return True, rid, limit
+
+        used = _count_usage(user_id, kind, window_start) + _count_active_reservations(
+            user_id, kind, window_start
+        )
+        if limit is not None and used >= limit:
+            return False, rid, limit
+
+        rec = UsageReservationRecord(
+            id=rid,
+            user_id=user_id,
+            kind=kind,
+            created_at=now,
+            expires_at=expires,
+        )
+        _usage_reservations[rid] = rec
+        _finalized_reservations.pop(rid, None)
+        return True, rid, limit
 
 
 def create_usage_reservation(
@@ -297,7 +430,24 @@ def create_usage_reservation(
 ) -> str:
     rid = reservation_id or str(uuid.uuid4())
     now = datetime.now(UTC)
-    expires = now + timedelta(minutes=10)
+    ttl_seconds = max(1.0, float(settings.reservation_ttl_seconds))
+    expires = now + timedelta(seconds=ttl_seconds)
+
+    client = get_supabase_client()
+    if client is not None:
+        _plan_id, limit, window_start = get_user_quota_window_and_limit(user_id, kind)
+        rpc_res = db_reserve_user_quota(
+            user_id=user_id,
+            kind=kind,
+            reservation_id=rid,
+            limit=limit,
+            window_start_iso=window_start.isoformat(),
+            expires_at_iso=expires.isoformat(),
+        )
+        if not rpc_res.get("allowed", False):
+            raise DatabasePersistenceError(f"Reservation rejected by database: {rpc_res}")
+        return rid
+
     rec = UsageReservationRecord(
         id=rid,
         user_id=user_id,
@@ -306,21 +456,9 @@ def create_usage_reservation(
         expires_at=expires,
     )
     with _reservations_lock:
+        _clean_expired_reservations()
         _usage_reservations[rid] = rec
-
-    client = get_supabase_client()
-    if client is not None:
-        with contextlib.suppress(Exception):
-            client.table("usage_reservations").insert(
-                {
-                    "id": rid,
-                    "user_id": user_id,
-                    "kind": kind,
-                    "status": "active",
-                    "created_at": now.isoformat(),
-                    "expires_at": expires.isoformat(),
-                }
-            ).execute()
+        _finalized_reservations.pop(rid, None)
     return rid
 
 
@@ -329,18 +467,37 @@ def commit_usage_reservation(
     user_id: str | None,
     kind: Literal["analysis", "rewrite"],
 ) -> None:
+    """Idempotently commit an in-flight reservation into a single permanent usage event."""
     client = get_supabase_client()
-    with _reservations_lock:
-        if reservation_id:
-            popped = _usage_reservations.pop(reservation_id, None)
-            if popped is None and client is None:
-                return
-        if user_id:
-            record_usage_event(user_id, kind)
+    if client is not None:
+        db_commit_usage_reservation(reservation_id, user_id, kind)
+        with _reservations_lock:
+            if reservation_id:
+                _usage_reservations.pop(reservation_id, None)
+                _finalized_reservations[reservation_id] = "committed"
+        return
 
-    if reservation_id and client is not None:
-        with contextlib.suppress(Exception):
-            client.table("usage_reservations").update({"status": "committed"}).eq("id", reservation_id).execute()
+    with _reservations_lock:
+        _clean_expired_reservations()
+        if reservation_id:
+            state = _finalized_reservations.get(reservation_id)
+            if state == "committed":
+                return  # Idempotent: already committed
+            if state == "released":
+                return  # Already released: do not commit
+            popped = _usage_reservations.pop(reservation_id, None)
+            if popped is None:
+                return
+            _finalized_reservations[reservation_id] = "committed"
+            target_user = user_id or popped.user_id
+            if target_user:
+                _usage_events.append(
+                    UsageEventRecord(user_id=target_user, kind=kind, created_at=datetime.now(UTC))
+                )
+        elif user_id:
+            _usage_events.append(
+                UsageEventRecord(user_id=user_id, kind=kind, created_at=datetime.now(UTC))
+            )
 
 
 def release_usage_reservation(
@@ -348,14 +505,27 @@ def release_usage_reservation(
     user_id: str | None,
     kind: Literal["analysis", "rewrite"],
 ) -> None:
+    """Idempotently release an active reservation without recording usage."""
+    client = get_supabase_client()
+    if client is not None:
+        if reservation_id:
+            db_release_usage_reservation(reservation_id)
+        with _reservations_lock:
+            if reservation_id:
+                _usage_reservations.pop(reservation_id, None)
+                if _finalized_reservations.get(reservation_id) != "committed":
+                    _finalized_reservations[reservation_id] = "released"
+        return
+
     with _reservations_lock:
         if reservation_id:
+            state = _finalized_reservations.get(reservation_id)
+            if state == "committed":
+                return  # Already committed: cannot release
+            if state == "released":
+                return  # Idempotent: already released
             _usage_reservations.pop(reservation_id, None)
-
-    client = get_supabase_client()
-    if reservation_id and client is not None:
-        with contextlib.suppress(Exception):
-            client.table("usage_reservations").update({"status": "released"}).eq("id", reservation_id).execute()
+            _finalized_reservations[reservation_id] = "released"
 
 
 def get_subscription_summary(user_id: str) -> SubscriptionOut:
