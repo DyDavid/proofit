@@ -314,6 +314,25 @@ def db_record_guest_ip_usage(ip_hash: str, timestamp_iso: str) -> bool:
 # Atomic Multi-Worker Concurrency & Quota RPCs (Phase 4)
 # ============================================================================
 
+def db_reserve_analysis_attempt(subject: str, limit: int) -> bool:
+    """Consume a non-refundable attempt atomically across database-backed workers."""
+    client = get_supabase_client()
+    if client is None:
+        raise DatabasePersistenceError("Supabase client is not initialized.")
+    try:
+        res = client.rpc(
+            "reserve_analysis_attempt", {"p_subject": subject, "p_limit": limit}
+        ).execute()
+        data = _unwrap_rpc_result(res, "reserve_analysis_attempt")
+        if not isinstance(data.get("allowed"), bool):
+            raise DatabasePersistenceError("Invalid analysis attempt response.")
+        return data["allowed"] is True
+    except DatabasePersistenceError:
+        raise
+    except Exception as exc:
+        raise DatabasePersistenceError("Analysis attempt persistence failed.") from exc
+
+
 def db_reserve_user_quota(
     user_id: str,
     kind: str,

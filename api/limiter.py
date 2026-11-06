@@ -6,6 +6,7 @@ Bounds per-client request rates on `/api/resumes`, `/api/jobs/fetch-url`, and
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 from collections import OrderedDict, deque
@@ -13,7 +14,9 @@ from collections.abc import Callable
 
 from fastapi import Request
 
-from api.auth import hash_guest_ip
+from api.auth import CurrentUser, hash_guest_ip
+from api.config import settings
+from api.db import DatabasePersistenceError, db_reserve_analysis_attempt, get_supabase_client
 from api.errors import ApiError
 
 MAX_TRACKED_CLIENT_BUCKETS = 5_000
@@ -22,8 +25,11 @@ MAX_TRACKED_CLIENT_BUCKETS = 5_000
 class SlidingWindowRateLimiter:
     """Thread-safe, memory-bounded sliding-window rate limiter."""
 
-    def __init__(self, max_buckets: int = MAX_TRACKED_CLIENT_BUCKETS) -> None:
+    def __init__(
+        self, max_buckets: int = MAX_TRACKED_CLIENT_BUCKETS, *, evict_active: bool = True
+    ) -> None:
         self._max_buckets = max_buckets
+        self._evict_active = evict_active
         self._buckets: OrderedDict[str, deque[float]] = OrderedDict()
         self._lock = threading.RLock()
 
@@ -57,6 +63,12 @@ class SlidingWindowRateLimiter:
                 # Evict expired or oldest LRU buckets if at capacity
                 if len(self._buckets) >= self._max_buckets:
                     self._prune_expired_locked(cutoff)
+                if len(self._buckets) >= self._max_buckets and not self._evict_active:
+                    raise ApiError(
+                        status_code=429,
+                        code="RATE_LIMITED",
+                        message="Too many analysis attempts. Please try again later.",
+                    )
                 while len(self._buckets) >= self._max_buckets:
                     self._buckets.popitem(last=False)
                 self._buckets[key] = deque([now])
@@ -82,11 +94,50 @@ class SlidingWindowRateLimiter:
 
 
 rate_limiter = SlidingWindowRateLimiter()
+analysis_attempt_limiter = SlidingWindowRateLimiter(evict_active=False)
 
 
 def reset_rate_limits() -> None:
     """Clear all in-memory rate limit state."""
     rate_limiter.reset()
+    analysis_attempt_limiter.reset()
+
+
+def enforce_analysis_attempt_limit(request: Request, user: CurrentUser | None) -> None:
+    """Consume a non-refundable hourly attempt shared by creation and retries.
+
+    Persisted deployments coordinate across workers; intentionally offline deployments
+    use a bounded single-process limiter. No attempt is refunded after admission.
+    """
+    subject = f"user:{user.id}" if user else f"guest:{hash_guest_ip(request)}"
+    limit = settings.analysis_attempts_per_hour if user else settings.guest_analysis_attempts_per_hour
+    if limit <= 0:
+        allowed = False
+    elif get_supabase_client() is not None:
+        try:
+            allowed = db_reserve_analysis_attempt(subject, limit)
+        except DatabasePersistenceError as exc:
+            raise ApiError(
+                status_code=503,
+                code="SERVICE_UNAVAILABLE",
+                message="Analysis limits could not be verified. Please try again later.",
+            ) from exc
+    else:
+        # A configured database failure must never silently reset the attempt budget.
+        if settings.engine_mode != "mock" and (settings.supabase_url or os.getenv("SUPABASE_URL")):
+            raise ApiError(
+                status_code=503,
+                code="SERVICE_UNAVAILABLE",
+                message="Analysis limits could not be verified. Please try again later.",
+            )
+        analysis_attempt_limiter.check(subject, limit=limit, window_seconds=3600)
+        return
+    if not allowed:
+        raise ApiError(
+            status_code=429,
+            code="RATE_LIMITED",
+            message="Too many analysis attempts in the past hour. Please try again later.",
+        )
 
 
 def enforce_endpoint_rate_limit(

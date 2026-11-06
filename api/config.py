@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     max_queued_analyses: int = 10
     analysis_timeout_seconds: float = 60.0
     external_call_timeout_seconds: float = 25.0
+    # Admission attempts are separate from refundable success quotas.
+    analysis_attempts_per_hour: int = 10
+    guest_analysis_attempts_per_hour: int = 3
 
     # Phase 4 multi-worker coordination & abandoned work recovery bounds
     analysis_abandoned_timeout_seconds: float = 600.0

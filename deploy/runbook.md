@@ -163,6 +163,26 @@ commit the result — and, if a screen breaks, to change the fixture, not the UI
 
 ---
 
+## Analysis admission limits
+
+Before deploying the API with the analysis attempt budget, apply
+`data/migrations/005_analysis_attempt_limits.sql` after the existing migrations.
+It adds a server-only RPC and a rolling one-hour attempt ledger shared by workers.
+If the RPC is missing or unavailable, live analysis admission returns 503 rather
+than falling back to a fresh local budget.
+
+New analyses and retries share `ANALYSIS_ATTEMPTS_PER_HOUR` (default 10 per account)
+or `GUEST_ANALYSIS_ATTEMPTS_PER_HOUR` (default 3 per salted guest IP). These safety
+limits also apply to admins and are separate from plan quotas. Failures can refund
+the normal quota but never refund an admitted attempt. Adjust these settings to
+the service's expected load and AI budget. Intentionally offline operation uses
+an in-memory budget and must run with a single worker; it resets on restart.
+
+Timed-out work retains its concurrency slot until local execution ends. SDK and
+model fallbacks share the remaining timeout budget and SDK retries are disabled.
+Ending a local request does not guarantee cancellation of a request already
+accepted by the remote AI provider.
+
 ## 11. Rehearsal checklist
 
 - [ ] Render `/api/health` returns 200 OK.

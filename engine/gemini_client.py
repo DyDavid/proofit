@@ -78,6 +78,14 @@ def _get_eff_timeout(timeout: float | None = None) -> float:
         return float(os.getenv("EXTERNAL_CALL_TIMEOUT_SECONDS", "25.0"))
 
 
+def _remaining_timeout(deadline: float) -> float:
+    """Use one wall-clock budget across SDKs and model fallbacks."""
+    remaining = deadline - time.monotonic()
+    if remaining < 0.001:
+        raise TimeoutError("Gemini request exceeded its time budget.")
+    return remaining
+
+
 def generate_structured_json(  # noqa: UP047
     prompt: str,
     response_schema: type[T],
@@ -110,10 +118,7 @@ def generate_structured_json(  # noqa: UP047
                     break
 
         for candidate in candidates:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0.1:
-                break
-            attempt_timeout = max(0.1, remaining)
+            _remaining_timeout(deadline)
             target_model = _MODEL_MAP.get(candidate, candidate)
 
             # 1. Prefer modern google.genai SDK
@@ -124,7 +129,10 @@ def generate_structured_json(  # noqa: UP047
 
                     client = genai.Client(
                         api_key=api_key,
-                        http_options=types.HttpOptions(timeout=int(attempt_timeout * 1000)),
+                        http_options=types.HttpOptions(
+                            timeout=int(_remaining_timeout(deadline) * 1000),
+                            retry_options=types.HttpRetryOptions(attempts=1),
+                        ),
                     )
                     config: dict = {
                         "response_mime_type": "application/json",
@@ -148,6 +156,7 @@ def generate_structured_json(  # noqa: UP047
 
             # 2. Fall back to google.generativeai if available
             if _GENAI_LEGACY:
+                _remaining_timeout(deadline)
                 try:
                     import google.generativeai as genai  # noqa: F401
 
@@ -163,12 +172,16 @@ def generate_structured_json(  # noqa: UP047
                     )
                     response = model.generate_content(
                         prompt,
-                        request_options={"timeout": attempt_timeout},
+                        request_options={"timeout": _remaining_timeout(deadline), "retry": None},
                     )
                     if response and response.text:
                         return response_schema.model_validate_json(response.text)
+                except TimeoutError:
+                    raise
                 except Exception as err:
                     logger.warning("google.generativeai call for %s failed (%s). Trying fallback.", target_model, err)
+
+        _remaining_timeout(deadline)
 
     raise RuntimeError(
         f"Gemini API unavailable or invalid configuration for prompt: {prompt[:50]}... "
@@ -201,10 +214,7 @@ def generate_gemini_text(
                     break
 
         for candidate in candidates:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0.1:
-                break
-            attempt_timeout = max(0.1, remaining)
+            _remaining_timeout(deadline)
             target_model = _MODEL_MAP.get(candidate, candidate)
 
             if _GENAI_NEW:
@@ -214,7 +224,10 @@ def generate_gemini_text(
 
                     client = genai.Client(
                         api_key=api_key,
-                        http_options=types.HttpOptions(timeout=int(attempt_timeout * 1000)),
+                        http_options=types.HttpOptions(
+                            timeout=int(_remaining_timeout(deadline) * 1000),
+                            retry_options=types.HttpRetryOptions(attempts=1),
+                        ),
                     )
                     config: dict = {"temperature": temperature}
                     if json_mode:
@@ -235,6 +248,7 @@ def generate_gemini_text(
                     logger.warning("google.genai text call for %s failed (%s). Trying fallback.", target_model, err)
 
             if _GENAI_LEGACY:
+                _remaining_timeout(deadline)
                 try:
                     import google.generativeai as genai  # noqa: F401
 
@@ -249,12 +263,16 @@ def generate_gemini_text(
                     )
                     response = model.generate_content(
                         prompt,
-                        request_options={"timeout": attempt_timeout},
+                        request_options={"timeout": _remaining_timeout(deadline), "retry": None},
                     )
                     if response and response.text:
                         return response.text
+                except TimeoutError:
+                    raise
                 except Exception as err:
                     logger.warning("google.generativeai text call for %s failed (%s). Trying fallback.", target_model, err)
+
+        _remaining_timeout(deadline)
 
     raise RuntimeError(
         f"Gemini API unavailable or invalid configuration for prompt: {prompt[:50]}... "
@@ -271,6 +289,7 @@ def get_embedding(
     api_key = get_gemini_api_key()
     if api_key and os.getenv("ENGINE_MODE") != "mock":
         eff_timeout = _get_eff_timeout(timeout)
+        deadline = time.monotonic() + eff_timeout
         # 1. Prefer modern google.genai SDK
         if _GENAI_NEW:
             try:
@@ -279,7 +298,10 @@ def get_embedding(
 
                 client = genai.Client(
                     api_key=api_key,
-                    http_options=types.HttpOptions(timeout=int(eff_timeout * 1000)),
+                    http_options=types.HttpOptions(
+                        timeout=int(_remaining_timeout(deadline) * 1000),
+                        retry_options=types.HttpRetryOptions(attempts=1),
+                    ),
                 )
                 target_model = "gemini-embedding-001" if "text-embedding" in model_name else model_name
                 response = client.models.embed_content(
@@ -294,6 +316,7 @@ def get_embedding(
 
         # 2. Fall back to legacy SDK
         if _GENAI_LEGACY:
+            _remaining_timeout(deadline)
             try:
                 import google.generativeai as genai  # noqa: F401
 
@@ -302,12 +325,16 @@ def get_embedding(
                     model="models/gemini-embedding-001",
                     content=text,
                     output_dimensionality=768,
-                    request_options={"timeout": eff_timeout},
+                    request_options={"timeout": _remaining_timeout(deadline), "retry": None},
                 )
                 if isinstance(result, dict) and "embedding" in result:
                     return list(result["embedding"])
+            except TimeoutError:
+                raise
             except Exception as err:
                 logger.warning("Gemini embedding call failed (%s).", err)
+
+        _remaining_timeout(deadline)
 
     # Deterministic fallback vector for offline testing (768 dimensions)
     seed_hash = hashlib.sha256(text.encode("utf-8")).digest()

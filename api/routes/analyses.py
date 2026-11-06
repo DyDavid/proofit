@@ -30,6 +30,7 @@ from api.db import (
     get_supabase_client,
 )
 from api.errors import ApiError, new_error_id
+from api.limiter import enforce_analysis_attempt_limit
 from api.quota import (
     commit_quota,
     release_quota,
@@ -819,6 +820,8 @@ async def create_analysis(
         elif user is not None:
             reservation_id = reserve_quota(user.id, "analysis")
 
+        if is_live:
+            await asyncio.to_thread(enforce_analysis_attempt_limit, request, user)
         record = store.create_analysis(
             payload.resume_id,
             payload.job_id,
@@ -971,6 +974,8 @@ async def retry_analysis(
         else:
             reservation_id = reserve_quota(user.id, "analysis")
 
+        if is_live:
+            await asyncio.to_thread(enforce_analysis_attempt_limit, request, user)
         record = store.create_retry(
             analysis_id,
             user_id=user.id if user else None,
