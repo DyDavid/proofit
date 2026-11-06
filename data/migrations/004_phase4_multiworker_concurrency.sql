@@ -6,8 +6,37 @@
 -- abandoned work recovery across multiple server processes / worker instances.
 -- ============================================================================
 
--- 1. Schema additions for idempotency and abandoned work tracking
+-- ============================================================================
+-- 1. Ensure required tables exist with proper schema and indexes
+-- ============================================================================
+
+-- Guest IP usage tracking (salted SHA-256 hash only)
+create table if not exists public.guest_ip_usage (
+  ip_hash text primary key,
+  last_analysis_at timestamptz not null default now()
+);
+
+-- Usage reservations table for concurrency-safe quota reservations
+create table if not exists public.usage_reservations (
+  id text primary key,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  kind text not null check (kind in ('analysis', 'rewrite')),
+  status text not null default 'active' check (status in ('active', 'committed', 'released')),
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null default (now() + interval '10 minutes')
+);
+
+-- Usage events table
+create table if not exists public.usage_events (
+  id bigint generated always as identity primary key,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  kind text not null check (kind in ('analysis', 'rewrite')),
+  created_at timestamptz not null default now()
+);
+
+-- Schema additions for idempotency and abandoned work tracking
 alter table public.analyses
+  add column if not exists retried_by text references public.analyses(id) on delete set null,
   add column if not exists reservation_id text,
   add column if not exists updated_at timestamptz not null default now();
 
