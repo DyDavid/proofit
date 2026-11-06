@@ -33,6 +33,7 @@ from typing import Literal
 from api.db import (
     DatabasePersistenceError,
     db_claim_analysis_retry,
+    db_commit_resume_slot,
     db_create_analysis,
     db_get_analysis,
     db_get_guest_ip_last_used,
@@ -42,7 +43,9 @@ from api.db import (
     db_list_analyses,
     db_record_guest_ip_usage,
     db_release_guest_usage,
+    db_release_resume_slot,
     db_reserve_guest_usage,
+    db_reserve_resume_slot,
     db_update_analysis_stage,
     db_upsert_job,
     db_upsert_resume,
@@ -184,6 +187,7 @@ class Store:
     #: from an unrelated fixture. Caching makes the pick idempotent per job_id.
     _picked_fixture_names: dict[str, str] = field(default_factory=dict)
     max_guest_ip_entries: int = 5_000
+    _resume_slots: dict[str, tuple[str, datetime]] = field(default_factory=dict, repr=False)
     max_guest_resumes: int = 100
     max_guest_analyses: int = 200
     max_jobs_cache: int = 500
@@ -320,6 +324,32 @@ class Store:
                         self.jobs_by_hash.pop(job_rec.content_hash, None)
                     self._picked_fixture_names.pop(job_rec.id, None)
 
+    def reserve_resume_slot(self, user_id: str, limit: int) -> str | None:
+        """Reserve before parsing; count committed and pending uploads atomically."""
+        from api.config import settings
+
+        slot_id = _new_id("res")
+        ttl = max(1.0, settings.reservation_ttl_seconds)
+        if get_supabase_client() is not None:
+            return slot_id if db_reserve_resume_slot(user_id, slot_id, limit, ttl) else None
+        with self._lock:
+            now = utcnow()
+            self._resume_slots = {rid: value for rid, value in self._resume_slots.items() if value[1] > now}
+            used = sum(r.user_id == user_id for r in self.resumes.values())
+            pending = sum(uid == user_id for uid, _ in self._resume_slots.values())
+            if used + pending >= limit:
+                return None
+            self._resume_slots[slot_id] = (user_id, now + timedelta(seconds=ttl))
+            return slot_id
+
+    def release_resume_slot(self, user_id: str, slot_id: str) -> None:
+        if get_supabase_client() is not None:
+            db_release_resume_slot(user_id, slot_id)
+        with self._lock:
+            pending = self._resume_slots.get(slot_id)
+            if pending is not None and pending[0] == user_id:
+                self._resume_slots.pop(slot_id)
+
     def add_resume(
         self,
         filename: str,
@@ -329,11 +359,12 @@ class Store:
         raw_text: str | None = None,
         normalized: Resume | None = None,
         user_id: str | None = None,
+        slot_id: str | None = None,
     ) -> ResumeRecord:
         with self._lock:
             self.prune_expired()
             record = ResumeRecord(
-                id=_new_id("res"),
+                id=slot_id or _new_id("res"),
                 filename=filename,
                 content_type=content_type,
                 size=size,
@@ -342,8 +373,30 @@ class Store:
                 normalized=normalized,
                 user_id=user_id,
             )
-        # Persist to Supabase if available (only for authenticated users; guest resumes stay in memory)
-        if get_supabase_client() and user_id is not None:
+        client = get_supabase_client()
+        if slot_id is not None:
+            from api.errors import ApiError
+
+            if user_id is None:
+                raise DatabasePersistenceError("Resume reservation requires an owner.")
+            if client is not None:
+                saved = db_commit_resume_slot(user_id, slot_id, {
+                    "filename": filename, "content_type": content_type, "size_bytes": size,
+                    "raw_text": raw_text,
+                    "normalized": normalized.model_dump(mode="json") if normalized else None,
+                })
+            else:
+                with self._lock:
+                    pending = self._resume_slots.get(slot_id)
+                    saved = pending is not None and pending[0] == user_id and pending[1] > utcnow()
+                    if saved:
+                        self.resumes[record.id] = record
+                        self._resume_slots.pop(slot_id)
+                        return record
+            if not saved:
+                raise ApiError(409, "RESUME_UNREADABLE", "The upload slot expired. Please upload again.")
+        # Unlimited users and guests do not require a quota reservation.
+        elif client is not None and user_id is not None:
             norm_json = normalized.model_dump(mode="json") if normalized else None
             db_upsert_resume(
                 resume_id=record.id,

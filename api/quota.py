@@ -115,6 +115,30 @@ def check_saved_resumes_quota(user_id: str, existing_count: int) -> None:
         )
 
 
+def reserve_saved_resume_slot(user: CurrentUser) -> str | None:
+    """Enforce saved-resume quota before parsing, including in-flight uploads."""
+    if not settings.enforce_quotas or user.is_admin:
+        return None
+    from api.store import store
+
+    try:
+        summary = get_subscription_summary(user.id)
+        plan = PLANS[summary.plan_id]
+        limit = plan.limits.saved_resumes
+        if limit is None:
+            return None
+        slot_id = store.reserve_resume_slot(user.id, limit)
+    except DatabasePersistenceError as exc:
+        _raise_persistence_unavailable(exc)
+    if slot_id is None:
+        raise HTTPException(402, detail={
+            "code": "quota_exceeded", "kind": "saved_resumes", "limit": limit,
+            "upgrade_url": "/pricing",
+            "message": f"Your {plan.name} plan includes up to {limit} saved resume(s).",
+        })
+    return slot_id
+
+
 def record_usage(user_id: str | None, kind: QuotaKind) -> None:
     """Record a usage event after a successful analysis or rewrite."""
     if user_id:

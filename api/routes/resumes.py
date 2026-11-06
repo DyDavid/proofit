@@ -8,6 +8,7 @@ extraction (`engine.normalize.normalize_resume`) is wired in when
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, File, Request, UploadFile
@@ -16,7 +17,7 @@ from api.auth import CurrentUser, get_optional_user
 from api.config import settings
 from api.errors import ApiError
 from api.limiter import enforce_endpoint_rate_limit
-from api.quota import check_saved_resumes_quota
+from api.quota import reserve_saved_resume_slot
 from api.store import store
 from engine.normalize.parser import (
     DecompressionLimitError,
@@ -77,9 +78,20 @@ async def upload_resume(
 
     body = await _read_upload_bounded(file, settings.max_upload_bytes)
 
-    if user is not None:
-        check_saved_resumes_quota(user.id, store.count_user_resumes(user.id))
+    slot_id = await asyncio.to_thread(reserve_saved_resume_slot, user) if user else None
+    saved = False
+    try:
+        result = await _parse_and_save(file, body, user, slot_id)
+        saved = True
+        return result
+    finally:
+        if slot_id is not None and not saved and user is not None:
+            await asyncio.shield(asyncio.to_thread(store.release_resume_slot, user.id, slot_id))
 
+
+async def _parse_and_save(
+    file: UploadFile, body: bytes, user: CurrentUser | None, slot_id: str | None,
+) -> dict:
     try:
         raw_text: str | None = await parse_resume_bytes_async(
             body,
@@ -108,14 +120,16 @@ async def upload_resume(
         ) from err
     except Exception as err:
         logger.warning("Resume text extraction failed: %s", err)
-        raw_text = None
+        raise ApiError(422, "RESUME_UNREADABLE", "Could not read the resume. Please try another file.") from err
 
-    record = store.add_resume(
+    record = await asyncio.to_thread(
+        store.add_resume,
         filename=file.filename or "resume",
         content_type=file.content_type,
         size=len(body),
         data=body,
         raw_text=raw_text,
         user_id=user.id if user else None,
+        slot_id=slot_id,
     )
     return {"resume_id": record.id}

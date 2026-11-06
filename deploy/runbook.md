@@ -192,6 +192,14 @@ It adds a server-only RPC and a rolling one-hour attempt ledger shared by worker
 If the RPC is missing or unavailable, live analysis admission returns 503 rather
 than falling back to a fresh local budget.
 
+Before deploying the saved-resume upload fix, also apply
+`data/migrations/006_resume_upload_slots.sql`. With `ENFORCE_QUOTAS=true`, each
+limited-plan upload reserves a slot before parsing. Saved resumes and pending
+uploads count toward the same limit across workers. Saving consumes the slot in
+the same database transaction; failed uploads release it. Abandoned reservations
+expire after `RESERVATION_TTL_SECONDS` (default 600). Expired uploads cannot save
+late and must be uploaded again. A missing or unavailable RPC returns 503.
+
 New analyses and retries share `ANALYSIS_ATTEMPTS_PER_HOUR` (default 10 per account)
 or `GUEST_ANALYSIS_ATTEMPTS_PER_HOUR` (default 3 per salted guest IP). These safety
 limits also apply to admins and are separate from plan quotas. Failures can refund

@@ -180,6 +180,43 @@ def db_get_resume(resume_id: str) -> dict[str, Any] | None:
         raise DatabasePersistenceError("Persistence operation failed: db_get_resume.") from None
 
 
+def _resume_slot_rpc(name: str, params: dict[str, Any]) -> dict[str, Any]:
+    client = get_supabase_client()
+    if client is None:
+        raise DatabasePersistenceError("Persistence service is unavailable.")
+    try:
+        return _unwrap_rpc_result(client.rpc(name, params).execute(), name)
+    except DatabasePersistenceError:
+        raise
+    except Exception:
+        raise DatabasePersistenceError("Resume slot persistence failed.") from None
+
+
+def db_reserve_resume_slot(user_id: str, slot_id: str, limit: int, ttl: float) -> bool:
+    result = _resume_slot_rpc("reserve_resume_slot", {
+        "p_user_id": user_id, "p_slot_id": slot_id, "p_limit": limit,
+        "p_ttl_seconds": ttl,
+    })
+    if not isinstance(result.get("allowed"), bool):
+        raise DatabasePersistenceError("Invalid resume slot response.")
+    return result["allowed"] is True
+
+
+def db_commit_resume_slot(user_id: str, slot_id: str, resume: dict[str, Any]) -> bool:
+    result = _resume_slot_rpc("commit_resume_slot", {
+        "p_user_id": user_id, "p_slot_id": slot_id, "p_resume": resume,
+    })
+    if not isinstance(result.get("saved"), bool):
+        raise DatabasePersistenceError("Invalid resume save response.")
+    return result["saved"] is True
+
+
+def db_release_resume_slot(user_id: str, slot_id: str) -> None:
+    result = _resume_slot_rpc("release_resume_slot", {"p_user_id": user_id, "p_slot_id": slot_id})
+    if result.get("released") is not True:
+        raise DatabasePersistenceError("Invalid resume release response.")
+
+
 def db_upsert_resume(
     resume_id: str,
     filename: str,
