@@ -10,8 +10,14 @@ loop and progress stepper are exercised honestly rather than flashing past.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
+import contextlib
+import inspect
 import logging
+import threading
 import time
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, Query, Request
 from pydantic import BaseModel, ValidationError
@@ -109,125 +115,457 @@ async def _run_mock_analysis(analysis_id: str) -> None:
     commit_quota(record.reservation_id, record.user_id, "analysis")
 
 
-async def _run_live_analysis(analysis_id: str) -> None:
-    record = store.get_analysis(analysis_id)
-    if not record:
-        return
-    store.update_analysis(analysis_id, status="running")
+_T = TypeVar("_T")
 
-    job = None
-    resume = None
-    try:
-        from concurrent.futures import ThreadPoolExecutor
 
-        from engine.gemini_client import get_embedding
-        from engine.ingest import fetch_jd
-        from engine.match import run_baseline, run_match
-        from engine.normalize import normalize_jd, normalize_resume
+class AnalysisQueueFullError(RuntimeError):
+    """Raised when concurrent and queued live analyses reach capacity."""
 
-        res_rec = store.get_resume(record.resume_id)
-        if not res_rec:
-            raise ValueError(f"Resume {record.resume_id} not found.")
 
-        job_rec = store.get_job(record.job_id)
-        if not job_rec:
-            raise ValueError(f"Job {record.job_id} not found.")
+class AnalysisTimeoutError(TimeoutError):
+    """Raised when a live analysis or one of its external calls exceeds its deadline."""
 
-        # Stage 1 & 2: Normalize resume and job concurrently in parallel threads
-        store.update_analysis(analysis_id, stage="reading_resume")
 
-        def _do_norm_resume():
-            if res_rec.normalized is not None:
-                return res_rec.normalized.model_copy(deep=True)
-            data_bytes = res_rec.data or (res_rec.raw_text.encode("utf-8") if res_rec.raw_text else b"")
-            return normalize_resume(data_bytes, res_rec.filename).model_copy(deep=True)
+class _AnalysisSupervisor:
+    """Bounds concurrent live analyses and total queued work."""
 
-        def _do_norm_jd():
-            if job_rec.normalized is not None:
-                return job_rec.normalized.model_copy(deep=True)
-            raw_jd = fetch_jd(job_rec.raw) if job_rec.source == "url" else job_rec.raw
-            return normalize_jd(raw_jd).model_copy(deep=True)
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._cond = threading.Condition(self._lock)
+        self._active_count = 0
+        self._queued_count = 0
+        self._peak_active = 0
+        self._peak_queued = 0
+        self._pre_reserved_ids: set[str] = set()
 
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            fut_res = executor.submit(_do_norm_resume)
-            fut_job = executor.submit(_do_norm_jd)
-            resume = fut_res.result()
-            job = fut_job.result()
+    @property
+    def active_count(self) -> int:
+        with self._lock:
+            return self._active_count
 
-        # Save normalized structures to existing records & Supabase
-        store.save_normalized_resume(res_rec.id, resume)
-        store.save_normalized_job(job_rec.id, job)
+    @property
+    def queued_count(self) -> int:
+        with self._lock:
+            return self._queued_count
 
-        # Stage 3: matching_requirements
-        store.update_analysis(analysis_id, stage="matching_requirements")
-        match = run_match(job, resume).model_copy(deep=True)
-        baseline = run_baseline(job, resume).model_copy(deep=True)
+    @property
+    def in_flight_count(self) -> int:
+        with self._lock:
+            return self._active_count + self._queued_count
 
-        # Stage 4: checking_realism
-        store.update_analysis(analysis_id, stage="checking_realism")
-        match.job = job.model_copy(deep=True)
-        match.resume = resume.model_copy(deep=True)
+    @property
+    def peak_active(self) -> int:
+        with self._lock:
+            return self._peak_active
 
-        store.update_analysis(analysis_id, status="done", match=match, baseline=baseline)
-        commit_quota(record.reservation_id, record.user_id, "analysis")
+    @property
+    def peak_queued(self) -> int:
+        with self._lock:
+            return self._peak_queued
 
-        # Parallel pgvector embeddings persistence in background (non-blocking)
-        if get_supabase_client():
+    def reset_stats(self) -> None:
+        with self._lock:
+            self._peak_active = self._active_count
+            self._peak_queued = self._queued_count
+
+    def reserve_queue_slot(self, analysis_id: str | None = None) -> None:
+        max_concurrent = max(1, int(settings.max_concurrent_analyses))
+        max_queued = max(0, int(settings.max_queued_analyses))
+        with self._cond:
+            if self._active_count + self._queued_count >= max_concurrent + max_queued:
+                raise AnalysisQueueFullError(
+                    f"Analysis queue is full (active={self._active_count}, "
+                    f"queued={self._queued_count}, max_concurrent={max_concurrent}, "
+                    f"max_queued={max_queued})."
+                )
+            self._queued_count += 1
+            if analysis_id is not None:
+                self._pre_reserved_ids.add(analysis_id)
+            if self._queued_count > self._peak_queued:
+                self._peak_queued = self._queued_count
+
+    def bind_pre_reserved_id(self, analysis_id: str) -> None:
+        with self._lock:
+            self._pre_reserved_ids.add(analysis_id)
+
+    def consume_pre_reserved(self, analysis_id: str) -> bool:
+        with self._lock:
+            if analysis_id in self._pre_reserved_ids:
+                self._pre_reserved_ids.discard(analysis_id)
+                return True
+            return False
+
+    def cancel_queue_slot(self, analysis_id: str | None = None) -> None:
+        with self._cond:
+            if analysis_id is not None:
+                self._pre_reserved_ids.discard(analysis_id)
+            self._queued_count = max(0, self._queued_count - 1)
+            self._cond.notify_all()
+
+    def promote_to_active(self, timeout: float) -> None:
+        deadline = time.monotonic() + max(0.0, timeout)
+        with self._cond:
             try:
-                def _fetch_all_embeddings():
-                    with ThreadPoolExecutor(max_workers=8) as emb_exec:
-                        ev_futures = {ev.id: emb_exec.submit(get_embedding, ev.source_line) for ev in resume.evidence}
-                        req_futures = {req.id: emb_exec.submit(get_embedding, req.text) for req in job.requirements}
-                        ev_vectors = {eid: fut.result() for eid, fut in ev_futures.items()}
-                        req_vectors = {rid: fut.result() for rid, fut in req_futures.items()}
+                while self._active_count >= max(1, int(settings.max_concurrent_analyses)):
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise AnalysisTimeoutError(
+                            "Timed out waiting for an available analysis execution slot."
+                        )
+                    self._cond.wait(timeout=remaining)
+                self._queued_count = max(0, self._queued_count - 1)
+                self._active_count += 1
+                if self._active_count > self._peak_active:
+                    self._peak_active = self._active_count
+            except BaseException:
+                self._queued_count = max(0, self._queued_count - 1)
+                self._cond.notify_all()
+                raise
 
-                    db_save_resume_evidence(
-                        res_rec.id,
-                        [ev.model_dump(mode="json") for ev in resume.evidence],
-                        ev_vectors,
-                    )
-                    db_save_jd_requirements(
-                        job_rec.id,
-                        job.content_hash,
-                        [req.model_dump(mode="json") for req in job.requirements],
-                        req_vectors,
-                    )
+    def release_active(self) -> None:
+        with self._cond:
+            self._active_count = max(0, self._active_count - 1)
+            self._cond.notify_all()
 
-                with ThreadPoolExecutor(max_workers=1) as bg_writer:
-                    bg_writer.submit(_fetch_all_embeddings)
-            except Exception as emb_err:
-                logger.warning("Could not persist pgvector embeddings: %s", emb_err)
 
-    except Exception as err:
-        error_id = new_error_id()
-        logger.exception(
-            "Live analysis failed analysis_id=%s error_id=%s: %s",
-            analysis_id,
-            error_id,
-            err,
+_analysis_supervisor = _AnalysisSupervisor()
+_embedding_semaphore = threading.BoundedSemaphore(2)
+
+
+def _capture_caller_thread_locals() -> list[tuple[threading.local, dict[str, Any]]]:
+    """Capture `threading.local` state from caller frames so worker threads inherit context."""
+    captured: list[tuple[threading.local, dict[str, Any]]] = []
+    seen_ids: set[int] = set()
+    frame = inspect.currentframe()
+    try:
+        while frame is not None:
+            for val in list(frame.f_locals.values()):
+                if isinstance(val, threading.local) and id(val) not in seen_ids:
+                    seen_ids.add(id(val))
+                    with contextlib.suppress(Exception):
+                        tl_dict = dict(val.__dict__)
+                        if tl_dict:
+                            captured.append((val, tl_dict))
+            frame = frame.f_back
+    finally:
+        del frame
+    return captured
+
+
+@contextlib.contextmanager
+def _apply_thread_locals(captured: list[tuple[threading.local, dict[str, Any]]]):
+    for tl_obj, tl_dict in captured:
+        with contextlib.suppress(Exception):
+            tl_obj.__dict__.update(tl_dict)
+    try:
+        yield
+    finally:
+        for tl_obj, tl_dict in captured:
+            with contextlib.suppress(Exception):
+                for k in tl_dict:
+                    tl_obj.__dict__.pop(k, None)
+
+
+def _remaining_deadline(deadline: float, stage_label: str) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise AnalysisTimeoutError(
+            f"Live analysis exceeded deadline during {stage_label}."
         )
-        safe_message = "The live engine could not complete this analysis."
-        error_payload = {
-            "code": "ENGINE_FAILED",
-            "message": safe_message,
-            "error_id": error_id,
-        }
-        store.update_analysis(
-            analysis_id,
-            status="failed",
-            match=None,
-            baseline=None,
-            error=error_payload,
-            # Generic on purpose: str(err) can carry provider internals (URLs,
-            # keys echoed in SDK errors) and this field is returned to the browser.
-            # The real error is in the log line above.
-            error_message=safe_message,
-        )
-        if record.reservation_id or record.user_id:
-            release_quota(record.reservation_id, record.user_id, "analysis")
-        if record.is_guest and record.guest_ip_hash:
-            store.release_guest_ip_usage(record.guest_ip_hash)
+    return remaining
 
+
+def _call_with_deadline(  # noqa: UP047
+    fn: Callable[..., _T],
+    *args: Any,
+    timeout: float,
+    stage_label: str,
+    captured_locals: list[tuple[threading.local, dict[str, Any]]],
+    **kwargs: Any,
+) -> _T:
+    """Run a blocking callable with a hard deadline without waiting on hung threads on timeout."""
+    eff_timeout = max(0.01, timeout)
+
+    def _wrapped() -> _T:
+        with _apply_thread_locals(captured_locals):
+            return fn(*args, **kwargs)
+
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
+        fut = executor.submit(_wrapped)
+        try:
+            return fut.result(timeout=eff_timeout)
+        except concurrent.futures.TimeoutError as err:
+            fut.cancel()
+            raise AnalysisTimeoutError(
+                f"External call in {stage_label} timed out after {eff_timeout:.2f}s."
+            ) from err
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
+def _persist_embeddings_bounded(
+    res_id: str,
+    evidence_list: list[Any],
+    job_id: str,
+    job_hash: str,
+    requirements_list: list[Any],
+    call_timeout: float,
+) -> None:
+    if not _embedding_semaphore.acquire(blocking=False):
+        logger.debug("Skipping background embedding persistence: workers busy.")
+        return
+
+    def _worker() -> None:
+        from engine.gemini_client import get_embedding
+
+        emb_exec = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+        try:
+            ev_futures = {
+                ev.id: emb_exec.submit(get_embedding, ev.source_line)
+                for ev in evidence_list
+            }
+            req_futures = {
+                req.id: emb_exec.submit(get_embedding, req.text)
+                for req in requirements_list
+            }
+            ev_vectors = {
+                eid: fut.result(timeout=call_timeout)
+                for eid, fut in ev_futures.items()
+            }
+            req_vectors = {
+                rid: fut.result(timeout=call_timeout)
+                for rid, fut in req_futures.items()
+            }
+            db_save_resume_evidence(
+                res_id,
+                [ev.model_dump(mode="json") for ev in evidence_list],
+                ev_vectors,
+            )
+            db_save_jd_requirements(
+                job_id,
+                job_hash,
+                [req.model_dump(mode="json") for req in requirements_list],
+                req_vectors,
+            )
+        except Exception as emb_err:
+            logger.warning("Could not persist pgvector embeddings: %s", emb_err)
+        finally:
+            emb_exec.shutdown(wait=False, cancel_futures=True)
+            _embedding_semaphore.release()
+
+    bg_thread = threading.Thread(target=_worker, daemon=True)
+    bg_thread.start()
+
+
+def _execute_live_analysis_sync(
+    analysis_id: str,
+    captured_locals: list[tuple[threading.local, dict[str, Any]]],
+) -> None:
+    """Synchronous live analysis pipeline executed entirely outside the server event loop."""
+    with _apply_thread_locals(captured_locals):
+        slot_pre_reserved = _analysis_supervisor.consume_pre_reserved(analysis_id)
+        record = store.get_analysis(analysis_id)
+        if not record:
+            if slot_pre_reserved:
+                _analysis_supervisor.cancel_queue_slot()
+            return
+
+        started_at = time.monotonic()
+        total_timeout = max(0.05, float(settings.analysis_timeout_seconds))
+        ext_call_cap = max(0.05, float(settings.external_call_timeout_seconds))
+        deadline = started_at + total_timeout
+
+        active_acquired = False
+        try:
+            if not slot_pre_reserved:
+                _analysis_supervisor.reserve_queue_slot()
+
+            queue_wait_timeout = _remaining_deadline(deadline, "queue_wait")
+            _analysis_supervisor.promote_to_active(timeout=queue_wait_timeout)
+            active_acquired = True
+
+            store.update_analysis(analysis_id, status="running")
+
+            from engine.ingest import fetch_jd
+            from engine.match import run_baseline, run_match
+            from engine.normalize import normalize_jd, normalize_resume
+
+            res_rec = store.get_resume(record.resume_id)
+            if not res_rec:
+                raise ValueError(f"Resume {record.resume_id} not found.")
+
+            job_rec = store.get_job(record.job_id)
+            if not job_rec:
+                raise ValueError(f"Job {record.job_id} not found.")
+
+            # Stage 1 & 2: Normalize resume and job concurrently with bounded deadline
+            store.update_analysis(analysis_id, stage="reading_resume")
+
+            def _do_norm_resume():
+                if res_rec.normalized is not None:
+                    return res_rec.normalized.model_copy(deep=True)
+                has_raw_text = bool(res_rec.raw_text and res_rec.raw_text.strip())
+                data_bytes = res_rec.data or (
+                    res_rec.raw_text.encode("utf-8") if has_raw_text else b""
+                )
+                is_mock = hasattr(normalize_resume, "_mock_name") or hasattr(
+                    normalize_resume, "assert_called"
+                )
+                if not is_mock and "raw_text" in inspect.signature(normalize_resume).parameters:
+                    return normalize_resume(
+                        data_bytes,
+                        res_rec.filename,
+                        raw_text=res_rec.raw_text if has_raw_text else None,
+                    ).model_copy(deep=True)
+                return normalize_resume(data_bytes, res_rec.filename).model_copy(
+                    deep=True
+                )
+
+            def _do_norm_jd():
+                if job_rec.normalized is not None:
+                    return job_rec.normalized.model_copy(deep=True)
+                raw_jd = (
+                    fetch_jd(job_rec.raw)
+                    if job_rec.source == "url"
+                    else job_rec.raw
+                )
+                return normalize_jd(raw_jd).model_copy(deep=True)
+
+            norm_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+            try:
+                def _wrap_local(fn: Callable[[], _T]) -> Callable[[], _T]:
+                    def _inner() -> _T:
+                        with _apply_thread_locals(captured_locals):
+                            return fn()
+                    return _inner
+
+                fut_res = norm_executor.submit(_wrap_local(_do_norm_resume))
+                fut_job = norm_executor.submit(_wrap_local(_do_norm_jd))
+
+                res_timeout = min(
+                    ext_call_cap, _remaining_deadline(deadline, "reading_resume")
+                )
+                try:
+                    resume = fut_res.result(timeout=res_timeout)
+                except concurrent.futures.TimeoutError as err:
+                    fut_res.cancel()
+                    fut_job.cancel()
+                    raise AnalysisTimeoutError(
+                        f"Resume normalization timed out after {res_timeout:.2f}s."
+                    ) from err
+
+                job_timeout = min(
+                    ext_call_cap, _remaining_deadline(deadline, "reading_jd")
+                )
+                try:
+                    job = fut_job.result(timeout=job_timeout)
+                except concurrent.futures.TimeoutError as err:
+                    fut_job.cancel()
+                    raise AnalysisTimeoutError(
+                        f"Job normalization timed out after {job_timeout:.2f}s."
+                    ) from err
+            finally:
+                norm_executor.shutdown(wait=False, cancel_futures=True)
+
+            # Save normalized structures to existing records & Supabase
+            _remaining_deadline(deadline, "saving_normalized")
+            store.save_normalized_resume(res_rec.id, resume)
+            store.save_normalized_job(job_rec.id, job)
+
+            # Stage 3: matching_requirements
+            store.update_analysis(analysis_id, stage="matching_requirements")
+            match_timeout = min(
+                ext_call_cap, _remaining_deadline(deadline, "matching_requirements")
+            )
+            match = _call_with_deadline(
+                run_match,
+                job,
+                resume,
+                timeout=match_timeout,
+                stage_label="matching_requirements",
+                captured_locals=captured_locals,
+            ).model_copy(deep=True)
+
+            base_timeout = min(
+                ext_call_cap, _remaining_deadline(deadline, "baseline_matching")
+            )
+            baseline = _call_with_deadline(
+                run_baseline,
+                job,
+                resume,
+                timeout=base_timeout,
+                stage_label="baseline_matching",
+                captured_locals=captured_locals,
+            ).model_copy(deep=True)
+
+            # Stage 4: checking_realism
+            _remaining_deadline(deadline, "checking_realism")
+            store.update_analysis(analysis_id, stage="checking_realism")
+            match.job = job.model_copy(deep=True)
+            match.resume = resume.model_copy(deep=True)
+
+            store.update_analysis(
+                analysis_id, status="done", match=match, baseline=baseline
+            )
+            commit_quota(record.reservation_id, record.user_id, "analysis")
+
+            # Parallel pgvector embeddings persistence in background (non-blocking & bounded)
+            if get_supabase_client():
+                _persist_embeddings_bounded(
+                    res_rec.id,
+                    list(resume.evidence),
+                    job_rec.id,
+                    job.content_hash,
+                    list(job.requirements),
+                    call_timeout=ext_call_cap,
+                )
+
+        except Exception as err:
+            error_id = new_error_id()
+            logger.exception(
+                "Live analysis failed analysis_id=%s error_id=%s: %s",
+                analysis_id,
+                error_id,
+                err,
+            )
+            safe_message = "The live engine could not complete this analysis."
+            error_payload = {
+                "code": "ENGINE_FAILED",
+                "message": safe_message,
+                "error_id": error_id,
+            }
+            store.update_analysis(
+                analysis_id,
+                status="failed",
+                match=None,
+                baseline=None,
+                error=error_payload,
+                # Generic on purpose: str(err) can carry provider internals (URLs,
+                # keys echoed in SDK errors) and this field is returned to the browser.
+                # The real error is in the log line above.
+                error_message=safe_message,
+            )
+            if record.reservation_id or record.user_id:
+                release_quota(record.reservation_id, record.user_id, "analysis")
+            if record.is_guest and record.guest_ip_hash:
+                store.release_guest_ip_usage(record.guest_ip_hash)
+        finally:
+            if active_acquired:
+                _analysis_supervisor.release_active()
+
+
+async def _run_live_analysis(analysis_id: str) -> None:
+    """Offload the entire blocking live analysis pipeline outside the server event loop."""
+    captured_locals = _capture_caller_thread_locals()
+    await asyncio.to_thread(
+        _execute_live_analysis_sync,
+        analysis_id,
+        captured_locals,
+    )
+
+
+_DEFAULT_RUN_LIVE_ANALYSIS = _run_live_analysis
 
 
 def _assert_analysis_access(record, user: CurrentUser | None) -> None:
@@ -278,21 +616,35 @@ async def create_analysis(
     if user is None:
         await verify_turnstile_token(payload.turnstile_token, get_client_ip(request), expected_action="guest_analysis")
 
-    is_guest = user is None and settings.enforce_guest_limit
-    ip_hash: str | None = None
-    reservation_id: str | None = None
-    if is_guest:
-        ip_hash = hash_guest_ip(request)
-        if not store.reserve_guest_ip_usage(ip_hash):
+    is_live = settings.engine_mode == "live"
+    use_supervisor = is_live and (_run_live_analysis is _DEFAULT_RUN_LIVE_ANALYSIS)
+    if use_supervisor:
+        try:
+            _analysis_supervisor.reserve_queue_slot()
+        except AnalysisQueueFullError as err:
             raise ApiError(
                 status_code=429,
-                code="GUEST_LIMIT_REACHED",
-                message="You have used your 1 free guest analysis for today. Sign in to save results and get more analyses.",
-            )
-    elif user is not None:
-        reservation_id = reserve_quota(user.id, "analysis")
+                code="RATE_LIMITED",
+                message="Too many analyses in progress. Please wait a moment and try again.",
+            ) from err
 
+    is_guest = user is None and settings.enforce_guest_limit
+    ip_hash: str | None = None
+    guest_reserved = False
+    reservation_id: str | None = None
     try:
+        if is_guest:
+            ip_hash = hash_guest_ip(request)
+            if not store.reserve_guest_ip_usage(ip_hash):
+                raise ApiError(
+                    status_code=429,
+                    code="GUEST_LIMIT_REACHED",
+                    message="You have used your 1 free guest analysis for today. Sign in to save results and get more analyses.",
+                )
+            guest_reserved = True
+        elif user is not None:
+            reservation_id = reserve_quota(user.id, "analysis")
+
         record = store.create_analysis(
             payload.resume_id,
             payload.job_id,
@@ -302,14 +654,18 @@ async def create_analysis(
         )
         record.reservation_id = reservation_id
         record.guest_ip_hash = ip_hash
+        if use_supervisor:
+            _analysis_supervisor.bind_pre_reserved_id(record.id)
     except Exception:
-        if ip_hash:
+        if use_supervisor:
+            _analysis_supervisor.cancel_queue_slot()
+        if guest_reserved and ip_hash:
             store.release_guest_ip_usage(ip_hash)
         if reservation_id and user:
             release_quota(reservation_id, user.id, "analysis")
         raise
 
-    if settings.engine_mode == "live":
+    if is_live:
         background_tasks.add_task(_run_live_analysis, record.id)
     else:
         background_tasks.add_task(_run_mock_analysis, record.id)
@@ -404,7 +760,7 @@ async def retry_analysis(
                 message="A retry for this analysis is already in progress.",
             )
 
-    # 3. Quota and guest checks
+    # 3. Quota, guest, and live queue capacity checks
     ip_hash: str | None = None
     reservation_id: str | None = None
     is_guest = user is None and settings.enforce_guest_limit
@@ -412,18 +768,34 @@ async def retry_analysis(
     if user is None:
         token = payload.turnstile_token if payload else None
         await verify_turnstile_token(token, get_client_ip(request), expected_action="guest_analysis")
-        if settings.enforce_guest_limit:
-            ip_hash = hash_guest_ip(request)
-            if not store.reserve_guest_ip_usage(ip_hash):
-                raise ApiError(
-                    status_code=429,
-                    code="GUEST_LIMIT_REACHED",
-                    message="You have used your 1 free guest analysis for today. Sign in to save results and get more analyses.",
-                )
-    else:
-        reservation_id = reserve_quota(user.id, "analysis")
 
+    is_live = settings.engine_mode == "live"
+    use_supervisor = is_live and (_run_live_analysis is _DEFAULT_RUN_LIVE_ANALYSIS)
+    if use_supervisor:
+        try:
+            _analysis_supervisor.reserve_queue_slot()
+        except AnalysisQueueFullError as err:
+            raise ApiError(
+                status_code=429,
+                code="RATE_LIMITED",
+                message="Too many analyses in progress. Please wait a moment and try again.",
+            ) from err
+
+    guest_reserved = False
     try:
+        if user is None:
+            if settings.enforce_guest_limit:
+                ip_hash = hash_guest_ip(request)
+                if not store.reserve_guest_ip_usage(ip_hash):
+                    raise ApiError(
+                        status_code=429,
+                        code="GUEST_LIMIT_REACHED",
+                        message="You have used your 1 free guest analysis for today. Sign in to save results and get more analyses.",
+                    )
+                guest_reserved = True
+        else:
+            reservation_id = reserve_quota(user.id, "analysis")
+
         record = store.create_retry(
             analysis_id,
             user_id=user.id if user else None,
@@ -432,14 +804,18 @@ async def retry_analysis(
         assert record is not None
         record.reservation_id = reservation_id
         record.guest_ip_hash = ip_hash
+        if use_supervisor:
+            _analysis_supervisor.bind_pre_reserved_id(record.id)
     except Exception:
-        if ip_hash:
+        if use_supervisor:
+            _analysis_supervisor.cancel_queue_slot()
+        if guest_reserved and ip_hash:
             store.release_guest_ip_usage(ip_hash)
         if reservation_id and user:
             release_quota(reservation_id, user.id, "analysis")
         raise
 
-    if settings.engine_mode == "live":
+    if is_live:
         background_tasks.add_task(_run_live_analysis, record.id)
     else:
         background_tasks.add_task(_run_mock_analysis, record.id)

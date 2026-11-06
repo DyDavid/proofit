@@ -87,6 +87,7 @@ __all__ = [
     # ── contract callables owned by Person A ──────────────────────────────────
     "normalize_jd",
     "normalize_resume",
+    "normalize_resume_text",
 ]
 
 
@@ -96,7 +97,21 @@ def normalize_jd(text: str) -> Job:
     return normalize_jd_text(text)
 
 
-def normalize_resume(file_bytes: bytes, filename: str) -> Resume:
-    """Normalize an uploaded resume file into a Resume."""
+def normalize_resume_text(text: str) -> Resume:
+    """Normalize extracted resume text into a Resume without reparsing file bytes."""
+    from .normalizer import normalize_resume_text as _normalize_resume_text
+    return _normalize_resume_text(text)
+
+
+def normalize_resume(
+    file_bytes: bytes,
+    filename: str,
+    *,
+    raw_text: str | None = None,
+) -> Resume:
+    """Normalize an uploaded resume file (or safely pre-extracted text) into a Resume."""
+    if raw_text is not None and raw_text.strip():
+        from .normalizer import normalize_resume_text as _normalize_resume_text
+        return _normalize_resume_text(raw_text)
     from .normalizer import normalize_resume_file
     return normalize_resume_file(file_bytes, filename)

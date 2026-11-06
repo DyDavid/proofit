@@ -53,6 +53,12 @@ class Settings(BaseSettings):
     # Phase 4 client IP forwarding trust
     trusted_proxies: str = ""
 
+    # Phase 2 live analysis concurrency and execution bounds
+    max_concurrent_analyses: int = 3
+    max_queued_analyses: int = 10
+    analysis_timeout_seconds: float = 60.0
+    external_call_timeout_seconds: float = 25.0
+
 
 def is_admin_email(email: str | None) -> bool:
     """Check if the email has unlimited superuser privileges."""

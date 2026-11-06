@@ -18,7 +18,7 @@ from engine.gemini_client import (
     get_extract_model,
     get_gemini_api_key,
 )
-from engine.normalize.parser import parse_resume_bytes
+from engine.normalize.parser import run_parser_in_process_with_timeout
 from engine.normalize.schema import (
     Education,
     Evidence,
@@ -220,9 +220,8 @@ def normalize_jd_text(text: str) -> Job:
 
 
 
-def normalize_resume_file(file_bytes: bytes, filename: str) -> Resume:
-    """Normalize raw uploaded resume file into a schema Resume."""
-    raw_text = parse_resume_bytes(file_bytes, filename)
+def normalize_resume_text(raw_text: str) -> Resume:
+    """Normalize extracted resume text into a schema Resume."""
     if not raw_text or not raw_text.strip():
         raise ValueError("Resume file yielded no extractable text")
 
@@ -256,7 +255,7 @@ def normalize_resume_file(file_bytes: bytes, filename: str) -> Resume:
     Keep source_line verbatim or as close as possible to the resume text.
 
     Resume text:
-    {raw_text}
+    {clean_text}
     """
 
     try:
@@ -328,4 +327,10 @@ def normalize_resume_file(file_bytes: bytes, filename: str) -> Resume:
         logger.warning("Gemini Resume normalizer failed: %s. Using fallback fixture.", err)
         fixture_data = _load_golden_fixture()
         return Resume.model_validate(fixture_data["resume"])
+
+
+def normalize_resume_file(file_bytes: bytes, filename: str) -> Resume:
+    """Normalize raw uploaded resume file into a schema Resume via the supervised parser."""
+    raw_text = run_parser_in_process_with_timeout(file_bytes, filename)
+    return normalize_resume_text(raw_text)
 
