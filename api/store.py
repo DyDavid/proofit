@@ -342,10 +342,6 @@ class Store:
                 normalized=normalized,
                 user_id=user_id,
             )
-            self.resumes[record.id] = record
-            if user_id is None:
-                self.prune_expired()
-
         # Persist to Supabase if available (only for authenticated users; guest resumes stay in memory)
         if get_supabase_client() and user_id is not None:
             norm_json = normalized.model_dump(mode="json") if normalized else None
@@ -359,6 +355,10 @@ class Store:
                 user_id=user_id,
             )
 
+        with self._lock:
+            self.resumes[record.id] = record
+            if user_id is None:
+                self.prune_expired()
         return record
 
     def count_user_resumes(self, user_id: str) -> int:
@@ -374,7 +374,8 @@ class Store:
                 if res.count is not None:
                     return int(res.count)
             except Exception:
-                pass
+                raise DatabasePersistenceError("Saved resume count failed.") from None
+            raise DatabasePersistenceError("Saved resume count unavailable.")
         return sum(1 for r in self.resumes.values() if r.user_id == user_id)
 
     def get_resume(self, resume_id: str) -> ResumeRecord | None:
@@ -608,18 +609,14 @@ class Store:
 
     def release_guest_ip_usage(self, ip_hash: str, prev_time: datetime | None = None) -> None:
         """Rollback or release guest IP usage when an analysis fails."""
+        if get_supabase_client():
+            prev_iso = prev_time.isoformat() if prev_time is not None else None
+            db_release_guest_usage(ip_hash, prev_iso)
         with self._lock:
             if prev_time is not None:
                 self.guest_ip_usage[ip_hash] = prev_time
             else:
                 self.guest_ip_usage.pop(ip_hash, None)
-
-        if get_supabase_client():
-            try:
-                prev_iso = prev_time.isoformat() if prev_time is not None else None
-                db_release_guest_usage(ip_hash, prev_iso)
-            except Exception as err:
-                logger.debug("Error releasing guest_ip_usage for %s: %s", ip_hash[:8], err)
 
     def create_analysis(
         self,
@@ -643,10 +640,6 @@ class Store:
                 created_at=utcnow(),
                 reservation_id=reservation_id,
             )
-            self.analyses[record.id] = record
-            if is_guest or user_id is None:
-                self.prune_expired()
-
         # Phase 1.5: Guest results are returned in memory for the single session,
         # never saved to Supabase.
         if get_supabase_client() and not is_guest:
@@ -660,6 +653,10 @@ class Store:
                 reservation_id=reservation_id,
             )
 
+        with self._lock:
+            self.analyses[record.id] = record
+            if is_guest or user_id is None:
+                self.prune_expired()
         return record
 
     def create_retry(

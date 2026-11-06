@@ -25,6 +25,7 @@ def _default_mock_mode(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("ENGINE_MODE", "mock")
     monkeypatch.delenv("SUPABASE_URL", raising=False)
     monkeypatch.setattr(settings, "engine_mode", "mock")
+    monkeypatch.setattr(settings, "persistence_mode", "offline")
     monkeypatch.setattr(settings, "supabase_url", None)
     monkeypatch.setattr(settings, "mock_delay_seconds", 0.01)
     monkeypatch.setattr(settings, "enforce_guest_limit", False)

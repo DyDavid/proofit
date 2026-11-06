@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     supabase_service_role_key: str | None = None
     supabase_key: str | None = None
     supabase_jwt_secret: str | None = None
+    # Live deployments require persistence unless offline operation is explicit.
+    persistence_mode: Literal["required", "offline"] = "required"
 
     guest_ip_salt: str = "proofit-default-guest-salt"
     enforce_guest_limit: bool = True

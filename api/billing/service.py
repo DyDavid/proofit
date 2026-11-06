@@ -230,9 +230,8 @@ def _get_active_subscription_for_user(user_id: str) -> SubscriptionRecord | None
                     checkout_session_id=row.get("checkout_session_id"),
                 )
             return None
-        except Exception as err:
-            logger.error("Failed to query active subscription for user=%s: %s", user_id, err)
-            raise DatabasePersistenceError(f"Subscription lookup failed: {err}") from err
+        except Exception:
+            raise DatabasePersistenceError("Subscription lookup failed.") from None
 
     active = [
         s
@@ -264,9 +263,8 @@ def _count_usage(
             if res.count is not None:
                 return int(res.count)
             return len(res.data or [])
-        except Exception as err:
-            logger.error("Failed to count usage_events for user=%s kind=%s: %s", user_id, kind, err)
-            raise DatabasePersistenceError(f"Usage count query failed: {err}") from err
+        except Exception:
+            raise DatabasePersistenceError("Usage count query failed.") from None
 
     return sum(
         1
@@ -291,9 +289,8 @@ def record_usage_event(
                     "created_at": now.isoformat(),
                 }
             ).execute()
-        except Exception as err:
-            logger.error("Failed to insert usage_event for user=%s kind=%s: %s", user_id, kind, err)
-            raise DatabasePersistenceError(f"Failed to record usage event: {err}") from err
+        except Exception:
+            raise DatabasePersistenceError("Usage recording failed.") from None
         return
 
     with _reservations_lock:
@@ -332,9 +329,8 @@ def _count_active_reservations(
             if res.count is not None:
                 return int(res.count)
             return len(res.data or [])
-        except Exception as err:
-            logger.error("Failed to count active reservations for user=%s kind=%s: %s", user_id, kind, err)
-            raise DatabasePersistenceError(f"Active reservation count failed: {err}") from err
+        except Exception:
+            raise DatabasePersistenceError("Active reservation count failed.") from None
 
     with _reservations_lock:
         _clean_expired_reservations()

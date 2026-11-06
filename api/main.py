@@ -7,6 +7,8 @@ server-side, so the browser only ever talks to its own origin
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import find_dotenv, load_dotenv
@@ -19,11 +21,20 @@ load_dotenv(env_file, override=True)
 
 from api.billing.router import router as billing_router
 from api.config import settings
+from api.db import validate_persistence_config
 from api.errors import install_error_handlers
 from api.middleware import RequestSizeLimitMiddleware
 from api.routes import analyses, auth, countries, health, jobs, resumes
 
-app = FastAPI(title="Proofit API", version=settings.app_version)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # Validate configuration, but leave network recovery to individual requests.
+    validate_persistence_config()
+    yield
+
+
+app = FastAPI(title="Proofit API", version=settings.app_version, lifespan=lifespan)
 app.add_middleware(RequestSizeLimitMiddleware)
 install_error_handlers(app)
 

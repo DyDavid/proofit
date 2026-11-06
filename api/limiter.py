@@ -6,7 +6,6 @@ Bounds per-client request rates on `/api/resumes`, `/api/jobs/fetch-url`, and
 
 from __future__ import annotations
 
-import os
 import threading
 import time
 from collections import OrderedDict, deque
@@ -124,7 +123,7 @@ def enforce_analysis_attempt_limit(request: Request, user: CurrentUser | None) -
             ) from exc
     else:
         # A configured database failure must never silently reset the attempt budget.
-        if settings.engine_mode != "mock" and (settings.supabase_url or os.getenv("SUPABASE_URL")):
+        if settings.engine_mode != "mock" and settings.persistence_mode != "offline":
             raise ApiError(
                 status_code=503,
                 code="SERVICE_UNAVAILABLE",

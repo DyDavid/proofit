@@ -165,6 +165,18 @@ commit the result — and, if a screen breaks, to change the fixture, not the UI
 
 ## Analysis admission limits
 
+Live mode defaults to `PERSISTENCE_MODE=required`. Set a valid `SUPABASE_URL` and
+service-role credential before startup; missing, partial, or placeholder settings
+prevent startup. Client initialization and later database failures return a safe
+503 response on affected requests and never switch enforcement to local memory.
+Initialization is retried on a subsequent request after a failure; database query
+failures keep using persisted accounting and its idempotent reservation IDs.
+
+For intentional local use without a database, explicitly set
+`PERSISTENCE_MODE=offline` and run only one worker. Offline mode ignores Supabase
+credentials and resets local accounting on restart. `ENGINE_MODE=mock` is always
+offline. Do not use either offline option to recover from a production outage.
+
 Before deploying the API with the analysis attempt budget, apply
 `data/migrations/005_analysis_attempt_limits.sql` after the existing migrations.
 It adds a server-only RPC and a rolling one-hour attempt ledger shared by workers.

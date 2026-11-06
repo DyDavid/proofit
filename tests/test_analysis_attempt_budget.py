@@ -112,6 +112,7 @@ def test_persisted_attempt_budget_and_failures_are_not_bypassed(monkeypatch):
 
 def test_database_initialization_failure_does_not_reset_attempts(monkeypatch):
     monkeypatch.setattr(settings, "engine_mode", "live")
+    monkeypatch.setattr(settings, "persistence_mode", "required")
     monkeypatch.setattr(settings, "supabase_url", "https://placeholder.supabase.co")
     monkeypatch.setattr("api.limiter.get_supabase_client", lambda: None)
     request = Request({"type": "http", "client": ("198.51.100.1", 1234), "headers": []})
