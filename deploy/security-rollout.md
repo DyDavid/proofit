@@ -118,6 +118,11 @@ availability against distributed network floods.
 
 ## Phase 6: checks
 
+Install the test environment with `python -m pip install -e ".[api,parse,dev]"`.
+The CI Python job includes the parsing extra and checks `pdfminer`/`docx` imports
+before testing. PDF security tests remain mandatory. A missing PDF dependency
+rejects uploads with safe 503 responses instead of falling back to raw PDF bytes.
+
 Run `python -m pytest`, `ruff check .`, and in `web/`: `npm run lint`,
 `node --test tests/authRedirect.test.mjs`, and `npx tsc --noEmit`.
 Security tests use constrained child allocations, small PDF fixtures, mocked
@@ -134,7 +139,7 @@ the server. Its deadline and socket-cleanup assertions remain intact.
 
 | Check | Result |
 | --- | --- |
-| Full Python regression suite | 693 passed; 3 dependency deprecation warnings |
+| Full Python regression suite | 696 passed; 3 dependency deprecation warnings |
 | Ruff and whitespace check | Passed |
 | Frontend regression tests | 2 passed |
 | TypeScript | Passed |

@@ -17,3 +17,9 @@ def slow_parser(file_bytes, filename):
 
 def allocate_too_much(file_bytes, filename):
     return str(len(bytearray(384 * 1024 * 1024)))
+
+
+def missing_parser_dependency(file_bytes, filename):
+    from engine.normalize.parser import ParserDependencyError
+
+    raise ParserDependencyError("Synthetic missing PDF dependency")

@@ -45,6 +45,10 @@ class DecompressionLimitError(ValueError):
     """Raised when a compressed document (e.g. DOCX/ZIP) violates decompression bounds."""
 
 
+class ParserDependencyError(RuntimeError):
+    """A required parser is unavailable; never treat document bytes as extracted text."""
+
+
 class ParserTimeoutError(TimeoutError):
     """Raised when document parsing exceeds the time limit and the worker process is killed."""
 
@@ -192,6 +196,8 @@ def extract_text_from_pdf(file_bytes: bytes) -> str:
         return cleaned
     except (PDFResourceLimitError, MemoryError) as err:
         raise DecompressionLimitError("PDF resource limit exceeded") from err
+    except ImportError as err:
+        raise ParserDependencyError("PDF parsing is unavailable. Install the parse dependencies.") from err
     except Exception as err:
         logger.error("Failed to parse PDF file: %s", err)
         raise ValueError(f"Could not extract text from PDF: {err}") from err
@@ -283,7 +289,7 @@ def parse_resume_bytes(
     if not raw_text and (is_pdf_magic or ext == "pdf"):
         try:
             raw_text = extract_text_from_pdf(file_bytes)
-        except DecompressionLimitError:
+        except (DecompressionLimitError, ParserDependencyError):
             raise
         except Exception as err:
             logger.warning("PDF parser failed: %s. Trying fallback text decoder.", err)
@@ -341,6 +347,8 @@ def _parser_worker_loop(child_conn: Connection, memory_mb: int) -> None:
                     max_docx_decompressed_bytes=max_docx_bytes,
                 )
             child_conn.send(("ok", result))
+        except ParserDependencyError:
+            child_conn.send(("dependency_err", "Document parsing service unavailable."))
         except (DecompressionLimitError, MemoryError) as err:
             child_conn.send(("decomp_err", str(err)))
         except BaseException as err:
@@ -468,6 +476,9 @@ class _SupervisedParserWorker:
         if status == "decomp_err":
             self.kill()
             raise DecompressionLimitError(str(value))
+        if status == "dependency_err":
+            self.kill()
+            raise ParserDependencyError(str(value))
         raise ValueError(str(value))
 
 

@@ -22,6 +22,7 @@ from api.store import store
 from engine.normalize.parser import (
     DecompressionLimitError,
     ParserConcurrencyError,
+    ParserDependencyError,
     ParserTimeoutError,
     parse_resume_bytes_async,
 )
@@ -97,6 +98,8 @@ async def _parse_and_save(
             body,
             file.filename or "resume.pdf",
         )
+    except ParserDependencyError as err:
+        raise ApiError(503, "SERVICE_UNAVAILABLE", "Document parsing service unavailable. Please try again later.") from err
     except DecompressionLimitError as err:
         logger.warning("Resume rejected due to decompression limit: %s", err)
         raise ApiError(

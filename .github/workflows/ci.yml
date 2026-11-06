@@ -52,13 +52,17 @@ jobs:
           # setup-python reads pyproject.toml's dependency set to key the cache.
           cache: pip
 
-      - name: Install engine with api + dev extras
+      - name: Install engine with api + parse + dev extras
         # Editable install so `engine` resolves the same way it does in
         # api/Dockerfile and in a developer's .venv — one import path, no
         # sys.path games (pyproject.toml [tool.setuptools] packages).
         run: |
           python -m pip install --upgrade "pip>=26.3"
-          pip install -e ".[api,dev]"
+          python -m pip install -e ".[api,parse,dev]"
+
+      - name: Check document parsing dependencies
+        # Security tests must exercise the real parsers rather than skip coverage.
+        run: python -c "import pdfminer.high_level; import docx"
 
       - name: ruff check
         # Config lives in pyproject.toml [tool.ruff]: line-length 100,

@@ -1,11 +1,16 @@
 """Small PDF fixtures and OS-limited workers; never exhaust the test host."""
 
+import builtins
 import zlib
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from parser_helpers import allocate_too_much
+from fastapi.testclient import TestClient
+from parser_helpers import allocate_too_much, missing_parser_dependency
 
 from api.config import settings
+from api.main import app
+from api.routes import resumes
 from engine.normalize import parser
 from engine.normalize.memory_limit import limit_process_memory
 
@@ -56,6 +61,36 @@ def test_pdf_text_limit_applies_during_extraction(monkeypatch):
 
 def test_normal_pdf_is_read():
     assert "Hello" in parser.parse_resume_bytes(make_pdf([b"BT /F1 12 Tf (Hello) Tj ET"]), "resume.pdf")
+
+
+def test_missing_pdf_dependency_never_falls_back_to_document_bytes(monkeypatch):
+    original = builtins.__import__
+
+    def missing_pdfminer(name, *args, **kwargs):
+        if name == "pdfminer.high_level":
+            raise ModuleNotFoundError("Synthetic missing pdfminer")
+        return original(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", missing_pdfminer)
+    with pytest.raises(parser.ParserDependencyError):
+        parser.parse_resume_bytes(make_pdf([b"BT /F1 12 Tf (Hello) Tj ET"]), "resume.pdf")
+
+
+def test_parser_dependency_error_survives_worker_transport_and_worker_recovers():
+    with pytest.raises(parser.ParserDependencyError):
+        parser.run_parser_in_process_with_timeout(b"test", "resume.pdf", custom_fn=missing_parser_dependency)
+    assert parser.run_parser_in_process_with_timeout(b"ordinary resume", "resume.pdf") == "ordinary resume"
+
+
+def test_upload_returns_safe_503_when_parser_dependency_is_unavailable(monkeypatch):
+    monkeypatch.setattr(resumes, "parse_resume_bytes_async", AsyncMock(side_effect=parser.ParserDependencyError("private failure")))
+    save = MagicMock()
+    monkeypatch.setattr(resumes.store, "add_resume", save)
+    response = TestClient(app).post("/api/resumes", files={"file": ("resume.pdf", b"%PDF test", "application/pdf")})
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "SERVICE_UNAVAILABLE"
+    assert "private failure" not in response.text
+    save.assert_not_called()
 
 
 def test_os_memory_limit_stops_allocation_and_worker_recovers(monkeypatch):
