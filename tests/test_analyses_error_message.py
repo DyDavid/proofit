@@ -22,7 +22,13 @@ def test_live_failure_does_not_leak_the_raw_error_to_the_record() -> None:
 
     done = store.get_analysis(record.id)
     assert done is not None
-    assert done.status == "done"
+    assert done.status == "failed"
+    assert done.match is None
+    assert done.baseline is None
+    assert done.error is not None
+    assert done.error["code"] == "ENGINE_FAILED"
+    assert SECRET not in done.error["message"]
+    assert "AIza" not in done.error["message"]
     assert done.error_message
     assert SECRET not in done.error_message
     assert "AIza" not in done.error_message

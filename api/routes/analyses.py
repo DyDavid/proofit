@@ -138,16 +138,15 @@ async def _run_live_analysis(analysis_id: str) -> None:
 
         def _do_norm_resume():
             if res_rec.normalized is not None:
-                return res_rec.normalized
+                return res_rec.normalized.model_copy(deep=True)
             data_bytes = res_rec.data or (res_rec.raw_text.encode("utf-8") if res_rec.raw_text else b"")
-            return normalize_resume(data_bytes, res_rec.filename)
-
+            return normalize_resume(data_bytes, res_rec.filename).model_copy(deep=True)
 
         def _do_norm_jd():
             if job_rec.normalized is not None:
-                return job_rec.normalized
+                return job_rec.normalized.model_copy(deep=True)
             raw_jd = fetch_jd(job_rec.raw) if job_rec.source == "url" else job_rec.raw
-            return normalize_jd(raw_jd)
+            return normalize_jd(raw_jd).model_copy(deep=True)
 
         with ThreadPoolExecutor(max_workers=4) as executor:
             fut_res = executor.submit(_do_norm_resume)
@@ -155,22 +154,19 @@ async def _run_live_analysis(analysis_id: str) -> None:
             resume = fut_res.result()
             job = fut_job.result()
 
-        res_rec.normalized = resume
-        job_rec.normalized = job
-
         # Save normalized structures to existing records & Supabase
         store.save_normalized_resume(res_rec.id, resume)
         store.save_normalized_job(job_rec.id, job)
 
         # Stage 3: matching_requirements
         store.update_analysis(analysis_id, stage="matching_requirements")
-        match = run_match(job, resume)
-        baseline = run_baseline(job, resume)
+        match = run_match(job, resume).model_copy(deep=True)
+        baseline = run_baseline(job, resume).model_copy(deep=True)
 
         # Stage 4: checking_realism
         store.update_analysis(analysis_id, stage="checking_realism")
-        match.job = job
-        match.resume = resume
+        match.job = job.model_copy(deep=True)
+        match.resume = resume.model_copy(deep=True)
 
         store.update_analysis(analysis_id, status="done", match=match, baseline=baseline)
         commit_quota(record.reservation_id, record.user_id, "analysis")
@@ -203,32 +199,34 @@ async def _run_live_analysis(analysis_id: str) -> None:
                 logger.warning("Could not persist pgvector embeddings: %s", emb_err)
 
     except Exception as err:
-        logger.exception("Live analysis failed (%s). Generating fallback match.", err)
-        fixture_name = store.pick_fixture_name(record.job_id)
-        fixture_match = store.pick_fixture(record.job_id)
-        if job:
-            fixture_match.job = job
-        if resume:
-            fixture_match.resume = resume
-        if job and resume:
-            try:
-                from engine.match import run_baseline as _run_baseline_fallback
-
-                fallback_baseline = _run_baseline_fallback(job, resume)
-            except Exception:
-                fallback_baseline = store.pick_baseline(fixture_name)
-        else:
-            fallback_baseline = store.pick_baseline(fixture_name)
+        error_id = new_error_id()
+        logger.exception(
+            "Live analysis failed analysis_id=%s error_id=%s: %s",
+            analysis_id,
+            error_id,
+            err,
+        )
+        safe_message = "The live engine could not complete this analysis."
+        error_payload = {
+            "code": "ENGINE_FAILED",
+            "message": safe_message,
+            "error_id": error_id,
+        }
         store.update_analysis(
             analysis_id,
-            status="done",
-            match=fixture_match,
-            baseline=fallback_baseline,
+            status="failed",
+            match=None,
+            baseline=None,
+            error=error_payload,
             # Generic on purpose: str(err) can carry provider internals (URLs,
             # keys echoed in SDK errors) and this field is returned to the browser.
             # The real error is in the log line above.
-            error_message="The live engine could not complete this analysis.",
+            error_message=safe_message,
         )
+        if record.reservation_id or record.user_id:
+            release_quota(record.reservation_id, record.user_id, "analysis")
+        if record.is_guest and record.guest_ip_hash:
+            store.release_guest_ip_usage(record.guest_ip_hash)
 
 
 

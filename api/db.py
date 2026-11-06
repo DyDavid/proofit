@@ -206,7 +206,9 @@ def db_update_analysis_stage(analysis_id: str, stage: str | None = None, status:
             row["stage"] = stage
         if status is not None:
             row["status"] = status
-        if match_data is not None:
+        if status == "failed":
+            row["match"] = None
+        elif match_data is not None:
             row["match"] = match_data
         if error_message is not None:
             row["error_message"] = error_message

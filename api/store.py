@@ -397,9 +397,10 @@ class Store:
         return None
 
     def save_normalized_resume(self, resume_id: str, normalized: Resume) -> ResumeRecord | None:
-        rec = self.resumes.get(resume_id)
-        if rec is not None:
-            rec.normalized = normalized
+        with self._lock:
+            rec = self.resumes.get(resume_id)
+            if rec is not None:
+                rec.normalized = normalized.model_copy(deep=True)
         if get_supabase_client() and rec is not None and rec.user_id is not None:
             db_upsert_resume(
                 resume_id=rec.id,
@@ -413,9 +414,10 @@ class Store:
         return rec
 
     def save_normalized_job(self, job_id: str, normalized: Job) -> JobRecord | None:
-        rec = self.jobs.get(job_id)
-        if rec is not None:
-            rec.normalized = normalized
+        with self._lock:
+            rec = self.jobs.get(job_id)
+            if rec is not None:
+                rec.normalized = normalized.model_copy(deep=True)
         if get_supabase_client() and rec is not None:
             db_upsert_job(
                 job_id=rec.id,
@@ -632,26 +634,38 @@ class Store:
         match: Match | None = None,
         baseline: BaselineMatch | None = None,
         error_message: str | None = None,
+        error: dict | None = None,
     ) -> AnalysisRecord | None:
         """Live-mode (F1 task 5) analysis mutation, with a best-effort Supabase
         mirror. Mock mode does not call this — `_run_mock_analysis` mutates
         `AnalysisRecord` fields directly and stays entirely in-memory, matching
         this codebase's convention that mock mode never touches a database."""
-        record = self.analyses.get(analysis_id)
-        if record:
-            if stage is not None:
-                record.stage = stage
-            if status is not None:
-                record.status = status
-            if match is not None:
-                record.match = match
-            if baseline is not None:
-                record.baseline = baseline
-            if error_message is not None:
-                record.error_message = error_message
+        with self._lock:
+            record = self.analyses.get(analysis_id)
+            if record:
+                if stage is not None:
+                    record.stage = stage
+                if status is not None:
+                    record.status = status
+                if status == "failed":
+                    record.match = None
+                    record.baseline = None
+                else:
+                    if match is not None:
+                        record.match = match.model_copy(deep=True)
+                    if baseline is not None:
+                        record.baseline = baseline.model_copy(deep=True)
+                if error_message is not None:
+                    record.error_message = error_message
+                if error is not None:
+                    record.error = dict(error)
 
         if get_supabase_client() and (record is None or not record.is_guest):
-            match_json = match.model_dump(mode="json") if match else None
+            match_json = (
+                match.model_dump(mode="json")
+                if (match is not None and status != "failed")
+                else None
+            )
             db_update_analysis_stage(
                 analysis_id=analysis_id,
                 stage=stage,
@@ -705,27 +719,31 @@ class Store:
         direct call plus one via `pick_fixture`'s internal delegation, in the
         same analysis run) always agree — otherwise the rotation fallback
         would advance on the second call and hand back a different name."""
-        cached = self._picked_fixture_names.get(job_id)
-        if cached is not None:
-            return cached
+        with self._lock:
+            if job_id in _FIXTURES:
+                return job_id
 
-        job = self.jobs.get(job_id)
-        text_lower = (job.raw if job else "").lower()
-        for company, name in _FIXTURE_BY_COMPANY.items():
-            if company in text_lower:
-                self._picked_fixture_names[job_id] = name
-                return name
+            cached = self._picked_fixture_names.get(job_id)
+            if cached is not None:
+                return cached
 
-        name = _FIXTURE_ROTATION[self._rotation_index % len(_FIXTURE_ROTATION)]
-        self._rotation_index += 1
-        self._picked_fixture_names[job_id] = name
-        return name
+            job = self.jobs.get(job_id)
+            text_lower = (job.raw if job else "").lower()
+            for company, name in _FIXTURE_BY_COMPANY.items():
+                if company in text_lower:
+                    self._picked_fixture_names[job_id] = name
+                    return name
+
+            name = _FIXTURE_ROTATION[self._rotation_index % len(_FIXTURE_ROTATION)]
+            self._rotation_index += 1
+            self._picked_fixture_names[job_id] = name
+            return name
 
     def pick_fixture(self, job_id: str) -> Match:
-        return _FIXTURES[self.pick_fixture_name(job_id)]
+        return _FIXTURES[self.pick_fixture_name(job_id)].model_copy(deep=True)
 
     def pick_baseline(self, fixture_name: str) -> BaselineMatch:
-        return _BASELINES[fixture_name]
+        return _BASELINES[fixture_name].model_copy(deep=True)
 
     def log_rewrite_rejection(
         self,
