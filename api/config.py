@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     enforce_auth_on_rewrites: bool = True
     turnstile_secret_key: str | None = None
 
-    billing_provider: Literal["stripe_sandbox", "mock"] = "mock"
+    billing_provider: Literal["disabled", "stripe_sandbox", "mock"] = "mock"
     app_environment: Literal["local", "demo", "production"] = "local"
     allow_mock_payments: bool = False
     stripe_secret_key: str | None = None
@@ -110,7 +110,7 @@ def validate_billing_config(cfg: Settings | None = None) -> None:
     active = cfg or settings
     production = active.app_environment == "production" or os.getenv("RENDER") == "true" or os.getenv("VERCEL") == "1"
     if production and (active.allow_mock_payments or active.billing_provider == "mock"):
-        raise RuntimeError("Production requires Stripe sandbox billing with mock payments disabled.")
+        raise RuntimeError("Production requires disabled or Stripe sandbox billing, with mock payments disabled.")
     if production and (active.engine_mode != "live" or active.persistence_mode != "required"):
         raise RuntimeError("Production requires live engine mode and required database persistence.")
     key = (active.stripe_secret_key or "").strip()

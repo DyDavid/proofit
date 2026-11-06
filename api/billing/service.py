@@ -163,6 +163,10 @@ def reset_billing_memory() -> None:
 
 
 def get_active_provider() -> BillingProvider:
+    if settings.billing_provider == "disabled":
+        from api.errors import ApiError
+
+        raise ApiError(503, "SERVICE_UNAVAILABLE", "Payments are currently unavailable.")
     if settings.billing_provider == "stripe_sandbox":
         return StripeSandboxProvider()
     return MockProvider()
@@ -795,8 +799,8 @@ def create_checkout(
     from api.errors import ApiError
     from api.limiter import enforce_operation_attempt_limit
 
-    enforce_operation_attempt_limit("checkout", f"user:{user_id}", settings.checkout_attempts_per_hour)
     provider = get_active_provider()
+    enforce_operation_attempt_limit("checkout", f"user:{user_id}", settings.checkout_attempts_per_hour)
     rec, claimed = _reserve_checkout_session(user_id, provider.name)
     if not claimed and rec.provider_ref is None:
         raise HTTPException(409, detail={"code": "checkout_in_progress", "message": "Your checkout is being prepared. Please try again shortly."})

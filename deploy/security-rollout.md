@@ -43,14 +43,23 @@ Simulation defaults off. Local/demo simulation requires
 `BILLING_PROVIDER=mock`, plus an authenticated owner and a mock checkout.
 Expired, canceled, and Stripe-backed records are rejected. Repetition is idempotent.
 
-Production requires `APP_ENVIRONMENT=production`, `ALLOW_MOCK_PAYMENTS=false`,
-`BILLING_PROVIDER=stripe_sandbox`, and existing Stripe **test** credentials.
+Production requires `APP_ENVIRONMENT=production` and `ALLOW_MOCK_PAYMENTS=false`.
+Without Stripe credentials, set `BILLING_PROVIDER=disabled`: the app starts, free
+features and existing subscriptions remain available, and checkout creation returns
+a safe 503 before contacting providers or reserving a checkout. Simulation stays
+disabled. The Render blueprint defaults to this key-free configuration.
+
+To enable checkout later, set `BILLING_PROVIDER=stripe_sandbox` and add Stripe
+**test** credentials (`STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`) directly in
+Render. Existing signed webhooks and paid-pass activation retries retain their
+normal paths. Pending Stripe status refreshes require test credentials; without
+them they fail safely and make no Stripe request.
 Production also requires `ENGINE_MODE=live` and `PERSISTENCE_MODE=required` so mock
 engine mode cannot silently switch coordination to local memory. This activates
 the existing live AI flow after deployment; it does not switch Stripe to live mode.
 Startup also detects Render/Vercel platform flags. Live Stripe keys stay forbidden.
-The blueprint declares secret names with `sync: false`, never values. Public
-production simulation cannot be enabled by changing only the billing provider.
+No Stripe secret is required by the default blueprint. Public production simulation
+cannot be enabled by changing only the billing provider.
 
 ## Phase 3: webhook recovery
 
@@ -139,7 +148,7 @@ the server. Its deadline and socket-cleanup assertions remain intact.
 
 | Check | Result |
 | --- | --- |
-| Full Python regression suite | 696 passed; 3 dependency deprecation warnings |
+| Full Python regression suite | 701 passed; 3 dependency deprecation warnings |
 | Ruff and whitespace check | Passed |
 | Frontend regression tests | 2 passed |
 | TypeScript | Passed |

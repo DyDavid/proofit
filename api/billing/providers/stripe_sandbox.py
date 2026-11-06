@@ -16,7 +16,12 @@ class StripeSandboxProvider:
 
     def _api_key(self) -> str:
         validate_billing_config(settings)
-        return (settings.stripe_secret_key or "").strip()
+        key = (settings.stripe_secret_key or "").strip()
+        # Historical Stripe checkouts may still be polled after billing is disabled.
+        # Fail before constructing a client when no test credentials are available.
+        if not key.startswith(("sk_test_", "rk_test_")):
+            raise RuntimeError("Stripe test credentials are unavailable.")
+        return key
 
     def create_session(
         self,

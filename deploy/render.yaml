@@ -64,11 +64,9 @@ services:
       - key: ALLOW_MOCK_PAYMENTS
         value: "false"
       - key: BILLING_PROVIDER
-        value: stripe_sandbox
-      - key: STRIPE_SECRET_KEY
-        sync: false
-      - key: STRIPE_WEBHOOK_SECRET
-        sync: false
+        value: disabled
+      # To enable Stripe test checkout later, set BILLING_PROVIDER=stripe_sandbox
+      # and add STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET in Render's environment.
       # One 192 MiB parser plus the API must fit this 512 MiB instance.
       - key: MAX_CONCURRENT_PARSES
         value: "1"

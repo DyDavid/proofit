@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from api.auth import CurrentUser, get_current_user
 from api.billing import service
+from api.billing.providers.stripe_sandbox import StripeSandboxProvider
 from api.config import Settings, settings, validate_billing_config
 from api.db import DatabasePersistenceError
 from api.main import app
@@ -71,14 +72,72 @@ def test_unsafe_production_billing_configuration_is_rejected(allow, provider):
 @pytest.mark.parametrize("engine,persistence", [("mock", "required"), ("live", "offline")])
 def test_production_cannot_silently_use_local_coordination(engine, persistence):
     cfg = Settings(_env_file=None, app_environment="production", billing_provider="stripe_sandbox",
-                   stripe_secret_key="sk_test_only", engine_mode=engine, persistence_mode=persistence)
+                   allow_mock_payments=False, stripe_secret_key="sk_test_only",
+                   engine_mode=engine, persistence_mode=persistence)
     with pytest.raises(RuntimeError, match="database persistence"):
         validate_billing_config(cfg)
 
 
 def test_safe_production_configuration_is_accepted():
     validate_billing_config(Settings(_env_file=None, app_environment="production", billing_provider="stripe_sandbox",
-                                    stripe_secret_key="sk_test_only", engine_mode="live", persistence_mode="required"))
+                                    allow_mock_payments=False, stripe_secret_key="sk_test_only",
+                                    engine_mode="live", persistence_mode="required"))
+
+
+def test_production_can_start_with_billing_disabled_and_no_stripe_key():
+    validate_billing_config(Settings(_env_file=None, app_environment="production", billing_provider="disabled",
+                                    stripe_secret_key=None, allow_mock_payments=False,
+                                    engine_mode="live", persistence_mode="required"))
+
+
+def test_disabled_billing_rejects_checkout_before_coordination_or_provider_work(payment, monkeypatch):
+    monkeypatch.setattr(settings, "billing_provider", "disabled")
+    reservation = MagicMock()
+    limit = MagicMock()
+    provider = MagicMock()
+    monkeypatch.setattr(service, "_reserve_checkout_session", reservation)
+    monkeypatch.setattr("api.limiter.enforce_operation_attempt_limit", limit)
+    monkeypatch.setattr(service, "StripeSandboxProvider", provider)
+    response = TestClient(app).post("/api/billing/checkout", json={"plan_id": "pass"})
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "SERVICE_UNAVAILABLE"
+    reservation.assert_not_called()
+    limit.assert_not_called()
+    provider.assert_not_called()
+    assert not service._subscriptions
+
+
+def test_disabled_billing_rejects_simulation_even_if_local_opt_in_is_left_enabled(payment, monkeypatch):
+    monkeypatch.setattr(settings, "billing_provider", "disabled")
+    assert TestClient(app).post(f"/api/billing/checkout/{payment.id}/simulate").status_code == 404
+    assert payment.status == "pending"
+    assert not service._subscriptions
+
+
+def test_pending_stripe_lookup_without_key_never_constructs_provider_client(monkeypatch):
+    monkeypatch.setattr(settings, "billing_provider", "disabled")
+    monkeypatch.setattr(settings, "stripe_secret_key", None)
+    client = MagicMock()
+    monkeypatch.setattr(stripe, "StripeClient", client)
+    with pytest.raises(RuntimeError, match="credentials"):
+        StripeSandboxProvider().get_status("cs_test_historical")
+    client.assert_not_called()
+
+
+def test_disabled_billing_preserves_paid_status_and_idempotent_activation(payment, monkeypatch):
+    monkeypatch.setattr(settings, "billing_provider", "disabled")
+    monkeypatch.setattr(settings, "stripe_secret_key", None)
+    payment.provider = "stripe_sandbox"
+    payment.status = "paid"
+    lookup = MagicMock()
+    monkeypatch.setattr(StripeSandboxProvider, "get_status", lookup)
+    for _ in range(2):
+        response = TestClient(app).get(f"/api/billing/checkout/{payment.id}")
+        assert response.status_code == 200
+        assert response.json()["status"] == "paid"
+        assert response.json()["active_until"] is not None
+    assert len(service._subscriptions) == 1
+    lookup.assert_not_called()
 
 
 def _event(rec):
