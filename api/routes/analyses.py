@@ -126,7 +126,7 @@ class AnalysisTimeoutError(TimeoutError):
 
 
 class _AnalysisSupervisor:
-    """Bounds concurrent live analyses and total queued work."""
+    """Bounds concurrent live analyses and total queued work, holding capacity until running workers stop."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -136,10 +136,43 @@ class _AnalysisSupervisor:
         self._peak_active = 0
         self._peak_queued = 0
         self._pre_reserved_ids: set[str] = set()
+        self._analysis_workers: dict[str, set[threading.Thread]] = {}
+        self._pending_release: set[str] = set()
+
+    def _reap_finished_workers_locked(self) -> None:
+        """Check all pending releases and decrement active_count when workers stop."""
+        reaped_any = False
+        to_remove: list[str] = []
+        for aid in list(self._pending_release):
+            workers = self._analysis_workers.get(aid, set())
+            alive = {t for t in workers if t.is_alive()}
+            if alive:
+                self._analysis_workers[aid] = alive
+            else:
+                self._analysis_workers.pop(aid, None)
+                to_remove.append(aid)
+                self._active_count = max(0, self._active_count - 1)
+                reaped_any = True
+        for aid in to_remove:
+            self._pending_release.remove(aid)
+        if reaped_any:
+            self._cond.notify_all()
 
     @property
     def active_count(self) -> int:
         with self._lock:
+            self._reap_finished_workers_locked()
+            pending_threads = [
+                t for aid in self._pending_release
+                for t in self._analysis_workers.get(aid, set())
+                if t.is_alive()
+            ]
+
+        for t in pending_threads:
+            t.join(timeout=0.1)
+
+        with self._lock:
+            self._reap_finished_workers_locked()
             return self._active_count
 
     @property
@@ -150,11 +183,13 @@ class _AnalysisSupervisor:
     @property
     def in_flight_count(self) -> int:
         with self._lock:
+            self._reap_finished_workers_locked()
             return self._active_count + self._queued_count
 
     @property
     def peak_active(self) -> int:
         with self._lock:
+            self._reap_finished_workers_locked()
             return self._peak_active
 
     @property
@@ -164,13 +199,66 @@ class _AnalysisSupervisor:
 
     def reset_stats(self) -> None:
         with self._lock:
+            self._reap_finished_workers_locked()
             self._peak_active = self._active_count
             self._peak_queued = self._queued_count
+
+    def register_worker(self, analysis_id: str | None, worker_thread: threading.Thread) -> None:
+        if not analysis_id:
+            return
+        with self._lock:
+            if analysis_id not in self._analysis_workers:
+                self._analysis_workers[analysis_id] = set()
+            self._analysis_workers[analysis_id].add(worker_thread)
+
+    def unregister_worker(self, analysis_id: str | None, worker_thread: threading.Thread) -> None:
+        if not analysis_id:
+            return
+        with self._lock:
+            workers = self._analysis_workers.get(analysis_id)
+            if workers:
+                workers.discard(worker_thread)
+                if not workers:
+                    self._analysis_workers.pop(analysis_id, None)
+            self._reap_finished_workers_locked()
+
+    def _is_analysis_running_locked(self, analysis_id: str) -> bool:
+        self._reap_finished_workers_locked()
+        workers = self._analysis_workers.get(analysis_id)
+        if workers:
+            return any(t.is_alive() for t in workers)
+        return analysis_id in self._pending_release
+
+    def is_analysis_running(self, analysis_id: str) -> bool:
+        with self._lock:
+            self._reap_finished_workers_locked()
+            pending_threads = [
+                t for t in self._analysis_workers.get(analysis_id, set())
+                if t.is_alive()
+            ]
+
+        for t in pending_threads:
+            t.join(timeout=0.1)
+
+        with self._lock:
+            return self._is_analysis_running_locked(analysis_id)
+
+    def wait_for_analysis(self, analysis_id: str, timeout: float = 2.0) -> bool:
+        """Wait until all workers for analysis_id have stopped, or timeout expires."""
+        deadline = time.monotonic() + timeout
+        with self._cond:
+            while self._is_analysis_running_locked(analysis_id):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return not self._is_analysis_running_locked(analysis_id)
+                self._cond.wait(timeout=remaining)
+            return True
 
     def reserve_queue_slot(self, analysis_id: str | None = None) -> None:
         max_concurrent = max(1, int(settings.max_concurrent_analyses))
         max_queued = max(0, int(settings.max_queued_analyses))
         with self._cond:
+            self._reap_finished_workers_locked()
             if self._active_count + self._queued_count >= max_concurrent + max_queued:
                 raise AnalysisQueueFullError(
                     f"Analysis queue is full (active={self._active_count}, "
@@ -204,7 +292,9 @@ class _AnalysisSupervisor:
     def promote_to_active(self, timeout: float) -> None:
         deadline = time.monotonic() + max(0.0, timeout)
         with self._cond:
+            promoted = False
             try:
+                self._reap_finished_workers_locked()
                 while self._active_count >= max(1, int(settings.max_concurrent_analyses)):
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
@@ -212,19 +302,35 @@ class _AnalysisSupervisor:
                             "Timed out waiting for an available analysis execution slot."
                         )
                     self._cond.wait(timeout=remaining)
+                    self._reap_finished_workers_locked()
                 self._queued_count = max(0, self._queued_count - 1)
+                promoted = True
                 self._active_count += 1
                 if self._active_count > self._peak_active:
                     self._peak_active = self._active_count
             except BaseException:
-                self._queued_count = max(0, self._queued_count - 1)
+                if not promoted:
+                    self._queued_count = max(0, self._queued_count - 1)
                 self._cond.notify_all()
                 raise
 
-    def release_active(self) -> None:
+    def release_active(self, analysis_id: str | None = None) -> None:
         with self._cond:
-            self._active_count = max(0, self._active_count - 1)
-            self._cond.notify_all()
+            if not analysis_id:
+                self._active_count = max(0, self._active_count - 1)
+                self._cond.notify_all()
+                return
+
+            workers = self._analysis_workers.get(analysis_id, set())
+            alive = {t for t in workers if t.is_alive()}
+            if alive:
+                self._analysis_workers[analysis_id] = alive
+                self._pending_release.add(analysis_id)
+            else:
+                self._analysis_workers.pop(analysis_id, None)
+                self._pending_release.discard(analysis_id)
+                self._active_count = max(0, self._active_count - 1)
+                self._cond.notify_all()
 
 
 _analysis_supervisor = _AnalysisSupervisor()
@@ -280,20 +386,44 @@ def _call_with_deadline(  # noqa: UP047
     timeout: float,
     stage_label: str,
     captured_locals: list[tuple[threading.local, dict[str, Any]]],
+    analysis_id: str | None = None,
     **kwargs: Any,
 ) -> _T:
-    """Run a blocking callable with a hard deadline without waiting on hung threads on timeout."""
+    """Run a blocking callable with a hard deadline without releasing capacity until the thread stops."""
     eff_timeout = max(0.01, timeout)
+    worker_started = threading.Event()
+    worker_th: list[threading.Thread] = []
+
+    # If fn accepts timeout in signature, forward eff_timeout
+    try:
+        sig = inspect.signature(fn)
+        if "timeout" in sig.parameters and "timeout" not in kwargs:
+            kwargs["timeout"] = eff_timeout
+    except Exception:
+        pass
 
     def _wrapped() -> _T:
-        with _apply_thread_locals(captured_locals):
-            return fn(*args, **kwargs)
+        th = threading.current_thread()
+        worker_th.append(th)
+        if analysis_id:
+            _analysis_supervisor.register_worker(analysis_id, th)
+        worker_started.set()
+        try:
+            with _apply_thread_locals(captured_locals):
+                return fn(*args, **kwargs)
+        finally:
+            if analysis_id:
+                _analysis_supervisor.unregister_worker(analysis_id, th)
 
+    t_start = time.monotonic()
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     try:
         fut = executor.submit(_wrapped)
+        worker_started.wait(timeout=eff_timeout)
+        elapsed = time.monotonic() - t_start
+        remaining = max(0.001, eff_timeout - elapsed)
         try:
-            return fut.result(timeout=eff_timeout)
+            return fut.result(timeout=remaining)
         except concurrent.futures.TimeoutError as err:
             fut.cancel()
             raise AnalysisTimeoutError(
@@ -321,11 +451,11 @@ def _persist_embeddings_bounded(
         emb_exec = concurrent.futures.ThreadPoolExecutor(max_workers=4)
         try:
             ev_futures = {
-                ev.id: emb_exec.submit(get_embedding, ev.source_line)
+                ev.id: emb_exec.submit(get_embedding, ev.source_line, timeout=call_timeout)
                 for ev in evidence_list
             }
             req_futures = {
-                req.id: emb_exec.submit(get_embedding, req.text)
+                req.id: emb_exec.submit(get_embedding, req.text, timeout=call_timeout)
                 for req in requirements_list
             }
             ev_vectors = {
@@ -350,7 +480,7 @@ def _persist_embeddings_bounded(
         except Exception as emb_err:
             logger.warning("Could not persist pgvector embeddings: %s", emb_err)
         finally:
-            emb_exec.shutdown(wait=False, cancel_futures=True)
+            emb_exec.shutdown(wait=True, cancel_futures=True)
             _embedding_semaphore.release()
 
     bg_thread = threading.Thread(target=_worker, daemon=True)
@@ -401,6 +531,10 @@ def _execute_live_analysis_sync(
             # Stage 1 & 2: Normalize resume and job concurrently with bounded deadline
             store.update_analysis(analysis_id, stage="reading_resume")
 
+            norm_timeout = min(
+                ext_call_cap, _remaining_deadline(deadline, "normalization")
+            )
+
             def _do_norm_resume():
                 if res_rec.normalized is not None:
                     return res_rec.normalized.model_copy(deep=True)
@@ -411,13 +545,14 @@ def _execute_live_analysis_sync(
                 is_mock = hasattr(normalize_resume, "_mock_name") or hasattr(
                     normalize_resume, "assert_called"
                 )
-                if not is_mock and "raw_text" in inspect.signature(normalize_resume).parameters:
-                    return normalize_resume(
-                        data_bytes,
-                        res_rec.filename,
-                        raw_text=res_rec.raw_text if has_raw_text else None,
-                    ).model_copy(deep=True)
-                return normalize_resume(data_bytes, res_rec.filename).model_copy(
+                norm_kwargs: dict[str, Any] = {}
+                if not is_mock:
+                    sig = inspect.signature(normalize_resume)
+                    if "raw_text" in sig.parameters and has_raw_text:
+                        norm_kwargs["raw_text"] = res_rec.raw_text
+                    if "timeout" in sig.parameters:
+                        norm_kwargs["timeout"] = norm_timeout
+                return normalize_resume(data_bytes, res_rec.filename, **norm_kwargs).model_copy(
                     deep=True
                 )
 
@@ -429,18 +564,45 @@ def _execute_live_analysis_sync(
                     if job_rec.source == "url"
                     else job_rec.raw
                 )
-                return normalize_jd(raw_jd).model_copy(deep=True)
+                is_mock = hasattr(normalize_jd, "_mock_name") or hasattr(
+                    normalize_jd, "assert_called"
+                )
+                norm_kwargs: dict[str, Any] = {}
+                if not is_mock:
+                    sig = inspect.signature(normalize_jd)
+                    if "timeout" in sig.parameters:
+                        norm_kwargs["timeout"] = norm_timeout
+                return normalize_jd(raw_jd, **norm_kwargs).model_copy(deep=True)
 
             norm_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
-            try:
-                def _wrap_local(fn: Callable[[], _T]) -> Callable[[], _T]:
-                    def _inner() -> _T:
-                        with _apply_thread_locals(captured_locals):
-                            return fn()
-                    return _inner
+            res_started = threading.Event()
+            job_started = threading.Event()
 
-                fut_res = norm_executor.submit(_wrap_local(_do_norm_resume))
-                fut_job = norm_executor.submit(_wrap_local(_do_norm_jd))
+            def _wrapped_res() -> Any:
+                th = threading.current_thread()
+                _analysis_supervisor.register_worker(analysis_id, th)
+                res_started.set()
+                try:
+                    with _apply_thread_locals(captured_locals):
+                        return _do_norm_resume()
+                finally:
+                    _analysis_supervisor.unregister_worker(analysis_id, th)
+
+            def _wrapped_job() -> Any:
+                th = threading.current_thread()
+                _analysis_supervisor.register_worker(analysis_id, th)
+                job_started.set()
+                try:
+                    with _apply_thread_locals(captured_locals):
+                        return _do_norm_jd()
+                finally:
+                    _analysis_supervisor.unregister_worker(analysis_id, th)
+
+            try:
+                fut_res = norm_executor.submit(_wrapped_res)
+                fut_job = norm_executor.submit(_wrapped_job)
+                res_started.wait(timeout=norm_timeout)
+                job_started.wait(timeout=norm_timeout)
 
                 res_timeout = min(
                     ext_call_cap, _remaining_deadline(deadline, "reading_resume")
@@ -469,6 +631,9 @@ def _execute_live_analysis_sync(
 
             # Save normalized structures to existing records & Supabase
             _remaining_deadline(deadline, "saving_normalized")
+            cur_rec = store.get_analysis(analysis_id)
+            if not cur_rec or cur_rec.status == "failed" or cur_rec.retried_by is not None:
+                return
             store.save_normalized_resume(res_rec.id, resume)
             store.save_normalized_job(job_rec.id, job)
 
@@ -484,6 +649,7 @@ def _execute_live_analysis_sync(
                 timeout=match_timeout,
                 stage_label="matching_requirements",
                 captured_locals=captured_locals,
+                analysis_id=analysis_id,
             ).model_copy(deep=True)
 
             base_timeout = min(
@@ -496,10 +662,19 @@ def _execute_live_analysis_sync(
                 timeout=base_timeout,
                 stage_label="baseline_matching",
                 captured_locals=captured_locals,
+                analysis_id=analysis_id,
             ).model_copy(deep=True)
 
-            # Stage 4: checking_realism
+            # Stage 4: checking_realism & completion
             _remaining_deadline(deadline, "checking_realism")
+            cur_rec = store.get_analysis(analysis_id)
+            if not cur_rec or cur_rec.status == "failed" or cur_rec.retried_by is not None:
+                logger.warning(
+                    "Analysis %s was failed or retried before completion; dropping late result",
+                    analysis_id,
+                )
+                return
+
             store.update_analysis(analysis_id, stage="checking_realism")
             match.job = job.model_copy(deep=True)
             match.resume = resume.model_copy(deep=True)
@@ -551,7 +726,7 @@ def _execute_live_analysis_sync(
                 store.release_guest_ip_usage(record.guest_ip_hash)
         finally:
             if active_acquired:
-                _analysis_supervisor.release_active()
+                _analysis_supervisor.release_active(analysis_id)
 
 
 async def _run_live_analysis(analysis_id: str) -> None:
@@ -743,7 +918,7 @@ async def retry_analysis(
     _assert_analysis_access(original, user)
 
     # 1. State eligibility check: only "failed" or "done" can be retried
-    if original.status in ("queued", "running"):
+    if original.status in ("queued", "running") or _analysis_supervisor.is_analysis_running(analysis_id):
         raise ApiError(
             status_code=409,
             code="ANALYSIS_IN_PROGRESS",
@@ -753,7 +928,7 @@ async def retry_analysis(
     # 2. Check if a duplicate retry is already in flight
     if original.retried_by:
         child = store.get_analysis(original.retried_by)
-        if child and child.status in ("queued", "running"):
+        if child and (child.status in ("queued", "running") or _analysis_supervisor.is_analysis_running(child.id)):
             raise ApiError(
                 status_code=409,
                 code="ANALYSIS_IN_PROGRESS",

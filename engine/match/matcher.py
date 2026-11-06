@@ -60,7 +60,11 @@ def _load_golden_fixture() -> dict:
         return json.load(f)
 
 
-def run_match_engine(job: Job, resume: Resume) -> Match:
+def run_match_engine(
+    job: Job,
+    resume: Resume,
+    timeout: float | None = None,
+) -> Match:
     """Run batch requirement match analysis comparing job requirements against resume evidence."""
     api_key = get_gemini_api_key()
     if os.getenv("ENGINE_MODE") == "mock" or not api_key:
@@ -129,6 +133,7 @@ def run_match_engine(job: Job, resume: Resume) -> Match:
             temperature=0.0,
             system_instruction="You are a strict, ultra-concise recruitment matcher. Output concise single-sentence rationales under 15 words.",
             thinking_budget=0,
+            timeout=timeout,
         )
 
         results_by_id = {item.requirement_id: item for item in dto.results}

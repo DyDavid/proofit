@@ -12,6 +12,7 @@ import hashlib
 import importlib.util
 import logging
 import os
+import time
 from typing import TypeVar
 
 from dotenv import load_dotenv
@@ -67,6 +68,16 @@ def get_analysis_model() -> str:
     return os.getenv("GEMINI_ANALYSIS_MODEL") or get_default_gemini_model()
 
 
+def _get_eff_timeout(timeout: float | None = None) -> float:
+    if timeout is not None:
+        return max(0.05, float(timeout))
+    try:
+        from api.config import settings
+        return max(0.05, float(settings.external_call_timeout_seconds))
+    except Exception:
+        return float(os.getenv("EXTERNAL_CALL_TIMEOUT_SECONDS", "25.0"))
+
+
 def generate_structured_json(  # noqa: UP047
     prompt: str,
     response_schema: type[T],
@@ -74,25 +85,35 @@ def generate_structured_json(  # noqa: UP047
     temperature: float = 0.0,
     system_instruction: str | None = None,
     thinking_budget: int | None = None,
+    timeout: float | None = None,
 ) -> T:
     """Generate structured JSON matching a Pydantic schema using Gemini API.
 
     Automatically retries with fallback models if the primary model hits rate limits or quota caps.
+    Enforces deadlines and socket/network timeouts at the SDK level with bounded retry attempts.
     Supports thinking_budget parameter (e.g. 0 to disable reasoning overhead during extraction).
     Falls back to RuntimeError if GEMINI_API_KEY is not configured or in offline mode.
     """
     api_key = get_gemini_api_key()
 
     if api_key and os.getenv("ENGINE_MODE") != "mock":
+        eff_timeout = _get_eff_timeout(timeout)
+        deadline = time.monotonic() + eff_timeout
         preferred = model_name or get_default_gemini_model()
 
-        # Build candidate list: start with preferred, then remaining fallbacks
+        # Build candidate list with bounded retries (at most preferred + 1 fallback)
         candidates: list[str] = [preferred]
         for fb in FALLBACK_MODELS:
             if fb not in candidates and fb != preferred:
                 candidates.append(fb)
+                if len(candidates) >= 2:
+                    break
 
         for candidate in candidates:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0.1:
+                break
+            attempt_timeout = max(0.1, remaining)
             target_model = _MODEL_MAP.get(candidate, candidate)
 
             # 1. Prefer modern google.genai SDK
@@ -101,7 +122,10 @@ def generate_structured_json(  # noqa: UP047
                     from google import genai
                     from google.genai import types
 
-                    client = genai.Client(api_key=api_key)
+                    client = genai.Client(
+                        api_key=api_key,
+                        http_options=types.HttpOptions(timeout=int(attempt_timeout * 1000)),
+                    )
                     config: dict = {
                         "response_mime_type": "application/json",
                         "response_schema": response_schema,
@@ -137,7 +161,10 @@ def generate_structured_json(  # noqa: UP047
                         },
                         system_instruction=system_instruction,
                     )
-                    response = model.generate_content(prompt)
+                    response = model.generate_content(
+                        prompt,
+                        request_options={"timeout": attempt_timeout},
+                    )
                     if response and response.text:
                         return response_schema.model_validate_json(response.text)
                 except Exception as err:
@@ -156,19 +183,28 @@ def generate_gemini_text(
     temperature: float = 0.0,
     system_instruction: str | None = None,
     thinking_budget: int | None = None,
+    timeout: float | None = None,
 ) -> str:
     """Generate text output using Gemini API with automatic model fallback."""
     api_key = get_gemini_api_key()
 
     if api_key and os.getenv("ENGINE_MODE") != "mock":
+        eff_timeout = _get_eff_timeout(timeout)
+        deadline = time.monotonic() + eff_timeout
         preferred = model_name or get_default_gemini_model()
 
         candidates: list[str] = [preferred]
         for fb in FALLBACK_MODELS:
             if fb not in candidates and fb != preferred:
                 candidates.append(fb)
+                if len(candidates) >= 2:
+                    break
 
         for candidate in candidates:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0.1:
+                break
+            attempt_timeout = max(0.1, remaining)
             target_model = _MODEL_MAP.get(candidate, candidate)
 
             if _GENAI_NEW:
@@ -176,7 +212,10 @@ def generate_gemini_text(
                     from google import genai
                     from google.genai import types
 
-                    client = genai.Client(api_key=api_key)
+                    client = genai.Client(
+                        api_key=api_key,
+                        http_options=types.HttpOptions(timeout=int(attempt_timeout * 1000)),
+                    )
                     config: dict = {"temperature": temperature}
                     if json_mode:
                         config["response_mime_type"] = "application/json"
@@ -208,7 +247,10 @@ def generate_gemini_text(
                         generation_config=gen_config,
                         system_instruction=system_instruction,
                     )
-                    response = model.generate_content(prompt)
+                    response = model.generate_content(
+                        prompt,
+                        request_options={"timeout": attempt_timeout},
+                    )
                     if response and response.text:
                         return response.text
                 except Exception as err:
@@ -220,20 +262,25 @@ def generate_gemini_text(
     )
 
 
-
 def get_embedding(
     text: str,
     model_name: str = "gemini-embedding-001",
+    timeout: float | None = None,
 ) -> list[float]:
     """Generate text embedding vector using Gemini (768 dims)."""
     api_key = get_gemini_api_key()
     if api_key and os.getenv("ENGINE_MODE") != "mock":
+        eff_timeout = _get_eff_timeout(timeout)
         # 1. Prefer modern google.genai SDK
         if _GENAI_NEW:
             try:
                 from google import genai
+                from google.genai import types
 
-                client = genai.Client(api_key=api_key)
+                client = genai.Client(
+                    api_key=api_key,
+                    http_options=types.HttpOptions(timeout=int(eff_timeout * 1000)),
+                )
                 target_model = "gemini-embedding-001" if "text-embedding" in model_name else model_name
                 response = client.models.embed_content(
                     model=target_model,
@@ -255,6 +302,7 @@ def get_embedding(
                     model="models/gemini-embedding-001",
                     content=text,
                     output_dimensionality=768,
+                    request_options={"timeout": eff_timeout},
                 )
                 if isinstance(result, dict) and "embedding" in result:
                     return list(result["embedding"])

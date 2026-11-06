@@ -835,7 +835,29 @@ class Store:
         this codebase's convention that mock mode never touches a database."""
         with self._lock:
             record = self.analyses.get(analysis_id)
+            if record is None and get_supabase_client():
+                row = db_get_analysis(analysis_id)
+                if row and (row.get("status") == "failed" or row.get("retried_by") is not None) and status != "failed":
+                    logger.warning(
+                        "Dropping late DB update for analysis %s: current_status=%s retried_by=%s target_status=%s",
+                        analysis_id,
+                        row.get("status"),
+                        row.get("retried_by"),
+                        status,
+                    )
+                    return None
             if record:
+                # Prevent late results from modifying failed or retried analyses
+                if (record.status == "failed" or record.retried_by is not None) and status != "failed":
+                    logger.warning(
+                        "Dropping late update for analysis %s: current_status=%s retried_by=%s target_status=%s",
+                        analysis_id,
+                        record.status,
+                        record.retried_by,
+                        status,
+                    )
+                    return record
+
                 if stage is not None:
                     record.stage = stage
                 if status is not None:

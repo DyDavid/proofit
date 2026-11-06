@@ -24,13 +24,13 @@ from engine.normalize.schema import BaselineMatch, Job, Match, Resume
 __all__ = ["run_baseline", "run_match"]
 
 
-def run_match(job: Job, resume: Resume) -> Match:
+def run_match(job: Job, resume: Resume, timeout: float | None = None) -> Match:
     """Produce the full requirement-coverage analysis of one resume against one job."""
     from .matcher import run_match_engine
-    return run_match_engine(job, resume)
+    return run_match_engine(job, resume, timeout=timeout)
 
 
-def run_baseline(job: Job, resume: Resume) -> BaselineMatch:
+def run_baseline(job: Job, resume: Resume, timeout: float | None = None) -> BaselineMatch:
     """Run the TF-IDF keyword-overlap baseline on the same pair."""
     from .baseline import run_baseline_tfidf
     return run_baseline_tfidf(job, resume)
