@@ -25,6 +25,8 @@ import zipfile
 from collections.abc import Callable
 from multiprocessing.connection import Connection
 
+from engine.normalize.pdf_limits import PDFResourceLimitError, pdf_decode_budget
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_DOCX_DECOMPRESSED_BYTES = 10 * 1024 * 1024  # 10 MB total decompressed
@@ -168,15 +170,28 @@ def validate_docx_zip_safety(
 def extract_text_from_pdf(file_bytes: bytes) -> str:
     """Extract plain text from PDF file bytes using pdfminer.six with page and size bounds."""
     try:
-        from pdfminer.high_level import extract_text
+        from pdfminer.high_level import extract_text_to_fp
 
-        text = extract_text(io.BytesIO(file_bytes), maxpages=MAX_PDF_PAGES)
+        from api.config import settings
+
+        class BoundedText(io.StringIO):
+            def write(self, value):
+                if self.tell() + len(value) > MAX_EXTRACTED_CHARS:
+                    raise PDFResourceLimitError("PDF text limit exceeded")
+                return super().write(value)
+
+        output = BoundedText()
+        with pdf_decode_budget(settings.max_pdf_decompressed_bytes):
+            extract_text_to_fp(io.BytesIO(file_bytes), output, maxpages=MAX_PDF_PAGES, codec=None)
+        text = output.getvalue()
         if not text:
             return ""
         cleaned = text.strip()
         if len(cleaned) > MAX_EXTRACTED_CHARS:
             cleaned = cleaned[:MAX_EXTRACTED_CHARS]
         return cleaned
+    except (PDFResourceLimitError, MemoryError) as err:
+        raise DecompressionLimitError("PDF resource limit exceeded") from err
     except Exception as err:
         logger.error("Failed to parse PDF file: %s", err)
         raise ValueError(f"Could not extract text from PDF: {err}") from err
@@ -268,6 +283,8 @@ def parse_resume_bytes(
     if not raw_text and (is_pdf_magic or ext == "pdf"):
         try:
             raw_text = extract_text_from_pdf(file_bytes)
+        except DecompressionLimitError:
+            raise
         except Exception as err:
             logger.warning("PDF parser failed: %s. Trying fallback text decoder.", err)
 
@@ -290,8 +307,17 @@ def parse_resume_bytes(
 # ── Process-Isolated Supervised Execution ───────────────────────────────────
 
 
-def _parser_worker_loop(child_conn: Connection) -> None:
+def _parser_worker_loop(child_conn: Connection, memory_mb: int) -> None:
     """Long-lived worker loop inside a spawned child process."""
+    from engine.normalize.memory_limit import limit_process_memory
+
+    try:
+        memory_handle = limit_process_memory(memory_mb)
+        child_conn.send(("ready", None))
+    except Exception:
+        child_conn.send(("startup_error", None))
+        child_conn.close()
+        return
     jobs_processed = 0
     while True:
         try:
@@ -315,7 +341,7 @@ def _parser_worker_loop(child_conn: Connection) -> None:
                     max_docx_decompressed_bytes=max_docx_bytes,
                 )
             child_conn.send(("ok", result))
-        except DecompressionLimitError as err:
+        except (DecompressionLimitError, MemoryError) as err:
             child_conn.send(("decomp_err", str(err)))
         except BaseException as err:
             child_conn.send(("err", f"{type(err).__name__}: {err}"))
@@ -326,6 +352,7 @@ def _parser_worker_loop(child_conn: Connection) -> None:
 
     with contextlib.suppress(Exception):
         child_conn.close()
+    del memory_handle  # Keep the OS handle alive for the entire worker lifetime.
 
 
 class _SupervisedParserWorker:
@@ -336,6 +363,7 @@ class _SupervisedParserWorker:
         self._proc: mp.Process | None = None
         self._parent_conn: Connection | None = None
         self._jobs_run = 0
+        self._memory_mb: int | None = None
 
     @property
     def pid(self) -> int | None:
@@ -345,18 +373,21 @@ class _SupervisedParserWorker:
         return self._proc is not None and self._proc.is_alive()
 
     def _ensure_started(self) -> None:
+        from api.config import settings
+
         if (
             self._proc is not None
             and self._proc.is_alive()
             and self._parent_conn is not None
             and self._jobs_run < MAX_JOBS_PER_WORKER_PROCESS
+            and self._memory_mb == settings.parser_memory_limit_mb
         ):
             return
         self.kill()
         parent_conn, child_conn = self._ctx.Pipe(duplex=True)
         proc = self._ctx.Process(
             target=_parser_worker_loop,
-            args=(child_conn,),
+            args=(child_conn, settings.parser_memory_limit_mb),
             daemon=True,
         )
         proc.start()
@@ -364,6 +395,17 @@ class _SupervisedParserWorker:
         self._proc = proc
         self._parent_conn = parent_conn
         self._jobs_run = 0
+        self._memory_mb = settings.parser_memory_limit_mb
+        if not parent_conn.poll(settings.parser_startup_timeout_seconds):
+            self.kill()
+            raise ParserTimeoutError("Parser worker startup timed out")
+        try:
+            status, _ = parent_conn.recv()
+        except (EOFError, OSError):
+            status = "startup_error"
+        if status != "ready":
+            self.kill()
+            raise DecompressionLimitError("Parser memory isolation is unavailable")
 
     def kill(self) -> int | None:
         """Forcefully terminate and reap the child process, returning its former PID."""
@@ -424,6 +466,7 @@ class _SupervisedParserWorker:
         if status == "ok":
             return str(value)
         if status == "decomp_err":
+            self.kill()
             raise DecompressionLimitError(str(value))
         raise ValueError(str(value))
 
@@ -494,10 +537,6 @@ def run_parser_in_process_with_timeout(
     eff_timeout = _get_parser_timeout_seconds(timeout_seconds)
     eff_docx_max = _get_max_docx_decompressed_bytes(max_docx_decompressed_bytes)
     eff_concurrency = _get_max_concurrent_parses(max_concurrency)
-
-    # Fast pre-check on DOCX zip headers/stream before dispatching to worker
-    if file_bytes.startswith(b"PK\x03\x04"):
-        validate_docx_zip_safety(file_bytes, max_total_bytes=eff_docx_max)
 
     worker = _supervisor.acquire_worker(eff_concurrency, acquire_timeout)
     try:

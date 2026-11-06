@@ -32,6 +32,8 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from parser_helpers import hanging_parser as _top_level_hanging_parser
+from parser_helpers import slow_parser as _top_level_slow_parser
 
 from api.config import settings
 from api.limiter import reset_rate_limits
@@ -54,24 +56,6 @@ client = TestClient(app)
 
 
 # ── Top-level picklable helpers for child-process tests ─────────────────────
-
-
-def _top_level_hanging_parser(file_bytes: bytes, filename: str) -> str:
-    """Top-level picklable function that busy-loops to test process termination."""
-    deadline = time.time() + 30.0
-    acc = 0
-    while time.time() < deadline:
-        # Mix CPU work and tiny sleeps to simulate a stuck parser
-        for i in range(10_000):
-            acc += i
-        time.sleep(0.01)
-    return str(acc)
-
-
-def _top_level_slow_parser(file_bytes: bytes, filename: str) -> str:
-    """Top-level picklable function that sleeps briefly for concurrency testing."""
-    time.sleep(0.35)
-    return "parsed slow resume text"
 
 
 def _is_pid_running(pid: int) -> bool:

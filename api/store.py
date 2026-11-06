@@ -32,13 +32,13 @@ from typing import Literal
 
 from api.db import (
     DatabasePersistenceError,
+    db_billing_rpc,
     db_claim_analysis_retry,
     db_commit_resume_slot,
     db_create_analysis,
     db_get_analysis,
     db_get_guest_ip_last_used,
     db_get_job,
-    db_get_job_by_hash,
     db_get_resume,
     db_list_analyses,
     db_record_guest_ip_usage,
@@ -314,9 +314,19 @@ class Store:
                 for rec in guest_analyses[:excess]:
                     self.analyses.pop(rec.id, None)
 
+            from api.config import settings
+
+            durable = get_supabase_client() is not None
+            referenced = {a.job_id for a in self.analyses.values()}
+            job_cutoff = eff_now - timedelta(hours=settings.job_unused_retention_hours)
+            if not durable:
+                for job_id, rec in list(self.jobs.items()):
+                    if job_id not in referenced and rec.created_at <= job_cutoff:
+                        self.jobs.pop(job_id, None)
+                        self.jobs_by_hash.pop(rec.content_hash, None)
             # 4. Bound in-memory jobs cache
             if len(self.jobs) > self.max_jobs_cache:
-                all_jobs = sorted(self.jobs.values(), key=lambda j: j.created_at)
+                all_jobs = sorted((j for j in self.jobs.values() if durable or j.id not in referenced), key=lambda j: j.created_at)
                 excess = len(self.jobs) - self.max_jobs_cache
                 for job_rec in all_jobs[:excess]:
                     self.jobs.pop(job_rec.id, None)
@@ -460,31 +470,48 @@ class Store:
     ) -> tuple[JobRecord, bool]:
         """Returns (record, cached)."""
         content_hash = _content_hash(raw)
+        from api.config import settings
+        from api.errors import ApiError
 
-        # 1. Check in-memory hash index
-        existing_id = self.jobs_by_hash.get(content_hash)
-        if existing_id is not None and existing_id in self.jobs:
-            return self.jobs[existing_id], True
+        if get_supabase_client() is not None:
+            result = db_billing_rpc("submit_bounded_job", {
+                "p_id": _new_id("job"), "p_hash": content_hash, "p_raw": raw,
+                "p_source": source, "p_max_unused": settings.job_unused_max_entries,
+                "p_retention_hours": settings.job_unused_retention_hours,
+            })
+            if not isinstance(result.get("allowed"), bool):
+                raise DatabasePersistenceError("Invalid job admission response")
+            if not result["allowed"]:
+                raise ApiError(429, "RATE_LIMITED", "Job storage is busy. Please try again later.")
+            try:
+                row = result["job"]
+                if (not isinstance(result["cached"], bool) or row["content_hash"] != content_hash
+                        or _content_hash(row["raw"]) != content_hash or row["source"] not in ("text", "url")):
+                    raise ValueError("Invalid job")
+                record = JobRecord(id=row["id"], content_hash=content_hash, source=row["source"], raw=row["raw"],
+                                   normalized=Job.model_validate(row["normalized"]) if row.get("normalized") else None)
+            except Exception:
+                raise DatabasePersistenceError("Invalid job persistence response") from None
+            with self._lock:
+                self.jobs[record.id] = record
+                self.jobs_by_hash[content_hash] = record.id
+                self.prune_expired()
+            return record, result["cached"]
 
-        # 2. Check Supabase by content_hash
-        if get_supabase_client():
-            row = db_get_job_by_hash(content_hash)
-            if row:
-                norm_obj = Job.model_validate(row["normalized"]) if row.get("normalized") else None
-                rec = JobRecord(
-                    id=row["id"],
-                    content_hash=row["content_hash"],
-                    source=row.get("source", source),
-                    raw=row.get("raw", raw),
-                    normalized=norm_obj,
-                )
-                self.jobs[rec.id] = rec
-                self.jobs_by_hash[content_hash] = rec.id
-                return rec, True
-
-        # 3. Create new Job
         with self._lock:
             self.prune_expired()
+            existing_id = self.jobs_by_hash.get(content_hash)
+            if existing_id is not None and existing_id in self.jobs:
+                return self.jobs[existing_id], True
+            referenced = {a.job_id for a in self.analyses.values()}
+            cap = min(self.max_jobs_cache, settings.job_unused_max_entries)
+            while len(self.jobs) >= cap:
+                unused = [j for j in self.jobs.values() if j.id not in referenced]
+                if not unused:
+                    raise ApiError(429, "RATE_LIMITED", "Job storage is busy. Please try again later.")
+                oldest = min(unused, key=lambda j: j.created_at)
+                self.jobs.pop(oldest.id)
+                self.jobs_by_hash.pop(oldest.content_hash, None)
             record = JobRecord(
                 id=_new_id("job"),
                 content_hash=content_hash,
@@ -496,28 +523,9 @@ class Store:
             self.jobs_by_hash[content_hash] = record.id
             self.prune_expired()
 
-        if get_supabase_client():
-            norm_json = normalized.model_dump(mode="json") if normalized else None
-            title = normalized.title if normalized else None
-            company = normalized.company if normalized else None
-            location = normalized.location if normalized else None
-            db_upsert_job(
-                job_id=record.id,
-                content_hash=content_hash,
-                source=source,
-                raw=raw,
-                title=title,
-                company=company,
-                location=location,
-                normalized=norm_json,
-            )
-
         return record, False
 
     def get_job(self, job_id: str) -> JobRecord | None:
-        if job_id in self.jobs:
-            return self.jobs[job_id]
-
         if get_supabase_client():
             row = db_get_job(job_id)
             if row:
@@ -531,8 +539,15 @@ class Store:
                 )
                 self.jobs[rec.id] = rec
                 self.jobs_by_hash[rec.content_hash] = rec.id
+                self.prune_expired()
                 return rec
-        return None
+            old = self.jobs.pop(job_id, None)
+            if old:
+                self.jobs_by_hash.pop(old.content_hash, None)
+            return None
+        with self._lock:
+            self.prune_expired()
+            return self.jobs.get(job_id)
 
     def save_normalized_resume(self, resume_id: str, normalized: Resume) -> ResumeRecord | None:
         with self._lock:

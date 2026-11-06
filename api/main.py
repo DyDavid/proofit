@@ -20,7 +20,7 @@ load_dotenv(env_file, override=True)
 
 
 from api.billing.router import router as billing_router
-from api.config import settings
+from api.config import settings, validate_billing_config
 from api.db import validate_persistence_config
 from api.errors import install_error_handlers
 from api.middleware import RequestSizeLimitMiddleware
@@ -31,6 +31,7 @@ from api.routes import analyses, auth, countries, health, jobs, resumes
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Validate configuration, but leave network recovery to individual requests.
     validate_persistence_config()
+    validate_billing_config(settings)
     yield
 
 

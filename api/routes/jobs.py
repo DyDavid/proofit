@@ -15,6 +15,8 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
+from api.admission import admit_request
+from api.auth import hash_guest_ip
 from api.config import settings
 from api.errors import ApiError
 from api.limiter import enforce_endpoint_rate_limit
@@ -62,6 +64,8 @@ def _fetch_and_cache_job_url_sync(url: str) -> str:
 
 @router.post("/jobs/fetch-url")
 async def fetch_job_url(payload: FetchUrlIn, request: Request) -> dict:
+    await asyncio.to_thread(admit_request, "jobs", hash_guest_ip(request),
+                            settings.job_requests_per_min, settings.job_global_requests_per_min)
     enforce_endpoint_rate_limit(
         request,
         "jobs_fetch",
@@ -115,6 +119,8 @@ async def fetch_job_url(payload: FetchUrlIn, request: Request) -> dict:
 
 @router.post("/jobs")
 async def submit_job(payload: JobIn, request: Request) -> dict:
+    await asyncio.to_thread(admit_request, "jobs", hash_guest_ip(request),
+                            settings.job_requests_per_min, settings.job_global_requests_per_min)
     enforce_endpoint_rate_limit(
         request,
         "jobs_submit",
@@ -148,7 +154,7 @@ async def submit_job(payload: JobIn, request: Request) -> dict:
                 code="JOB_EMPTY",
                 message=f"Job text exceeds maximum allowed length of {MAX_JOB_TEXT_CHARS} characters.",
             )
-        record, cached = store.add_job(text, source="text")
+        record, cached = await asyncio.to_thread(store.add_job, text, source="text")
     else:
         from engine.ingest.url_safety import validate_and_resolve_url
 
@@ -185,6 +191,6 @@ async def submit_job(payload: JobIn, request: Request) -> dict:
                 code="JOB_FETCH_FAILED",
                 message="We couldn't open that link. Paste the job description text instead.",
             ) from err
-        record, cached = store.add_job(url, source="url")
+        record, cached = await asyncio.to_thread(store.add_job, url, source="url")
 
     return {"job_id": record.id, "cached": cached}

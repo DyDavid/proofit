@@ -5,11 +5,7 @@ from __future__ import annotations
 import stripe
 from fastapi import HTTPException, Request
 
-from api.billing.service import (
-    handle_stripe_checkout_completed,
-    handle_stripe_checkout_expired,
-    record_stripe_event_once,
-)
+from api.billing.service import process_stripe_event
 from api.config import settings
 
 
@@ -50,26 +46,10 @@ async def process_stripe_webhook(request: Request) -> dict[str, str]:
             detail={"code": "invalid_webhook_event", "message": "Missing event ID."},
         )
 
-    if not record_stripe_event_once(event_id, event_type):
-        return {"status": "duplicate_ignored"}
-
     data_obj = (event.get("data") or {}).get("object") or {}
-
-    if event_type == "checkout.session.completed":
-        if data_obj.get("payment_status") == "paid":
-            provider_ref = str(data_obj.get("id") or "")
-            metadata = data_obj.get("metadata") or {}
-            amount_total = data_obj.get("amount_total")
-            if provider_ref:
-                handle_stripe_checkout_completed(
-                    provider_ref=provider_ref,
-                    metadata=metadata,
-                    amount_total=int(amount_total) if amount_total is not None else None,
-                )
-    elif event_type == "checkout.session.expired":
-        provider_ref = str(data_obj.get("id") or "")
-        if provider_ref:
-            handle_stripe_checkout_expired(provider_ref=provider_ref)
-
+    if not isinstance(data_obj, dict):
+        raise HTTPException(400, detail="Invalid payment event")
+    if not process_stripe_event(event_id, event_type, data_obj):
+        return {"status": "duplicate_ignored"}
     return {"status": "ok"}
 

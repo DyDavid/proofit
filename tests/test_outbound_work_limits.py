@@ -51,9 +51,11 @@ def test_timed_out_work_keeps_capacity_until_it_really_stops():
 
 def test_slow_drip_http_hits_overall_deadline_and_closes_socket(monkeypatch):
     completed = threading.Event()
+    entered = threading.Event()
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
+            entered.set()
             self.send_response(200)
             self.send_header("Content-Length", "192")
             self.end_headers()
@@ -71,9 +73,8 @@ def test_slow_drip_http_hits_overall_deadline_and_closes_socket(monkeypatch):
             pass
 
     server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
-    server.timeout = 0.5
+    server.timeout = 5
     worker = threading.Thread(target=server.handle_request, daemon=True)
-    worker.start()
     # Only the connection destination is replaced with our own synthetic server.
     # Exercise the production deadline stream around a real socket.
     def connect(self, host, port, **kwargs):
@@ -83,17 +84,23 @@ def test_slow_drip_http_hits_overall_deadline_and_closes_socket(monkeypatch):
 
     monkeypatch.setattr(url_safety._PinnedNetworkBackend, "connect_tcp", connect)
     transport, backend = url_safety.build_pinned_transport({})
+    # SSL/certificate/client startup is outside this test's response-read budget.
+    # Starting the server first allowed it to expire before a connection arrived.
+    warmed_client = httpx.Client(transport=transport, trust_env=False)
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: warmed_client)
     monkeypatch.setattr(url_safety, "build_pinned_transport", lambda pins: (transport, backend))
     monkeypatch.setattr(url_safety, "validate_and_resolve_url", lambda url: url_safety.ValidatedUrl(url, "http", "public.example", 80, ("93.184.216.34",)))
     pool = BoundedWorkPool("test-drip")
     monkeypatch.setattr(url_safety, "_fetch_pool", pool)
     monkeypatch.setattr(settings, "fetch_timeout_seconds", 0.15)
+    worker.start()
     try:
         start = time.monotonic()
         with pytest.raises((WorkTimeoutError, httpx.TimeoutException)):
             url_safety.safe_http_get("http://public.example/job", timeout=0.15)
         assert time.monotonic() - start < 0.4
         wait_until(lambda: pool.active == 0)
+        assert entered.is_set()
         assert completed.wait(timeout=1)
     finally:
         server.server_close()

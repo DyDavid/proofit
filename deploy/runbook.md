@@ -2,6 +2,8 @@
 
 > **Spean (Proofit)** — Defense & Presentation Runbook
 
+For the six-phase security deployment, follow [security-rollout.md](security-rollout.md).
+
 ---
 
 ## 1. Pre-Demo Warm-Up Procedure (15 Minutes Before Defense)

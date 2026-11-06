@@ -37,6 +37,8 @@ def _default_mock_mode(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(settings, "enforce_auth_on_rewrites", False)
     monkeypatch.setattr(settings, "enforce_quotas", False)
     monkeypatch.setattr(settings, "billing_provider", "mock")
+    monkeypatch.setattr(settings, "app_environment", "local")
+    monkeypatch.setattr(settings, "allow_mock_payments", True)
     monkeypatch.setattr(settings, "turnstile_secret_key", None)
     monkeypatch.delenv("TURNSTILE_SECRET_KEY", raising=False)
     monkeypatch.setattr(settings, "trusted_proxies", "")

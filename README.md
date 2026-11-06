@@ -114,6 +114,7 @@ the web typecheck + build, and fails if `web/lib/types.ts` is stale against the 
 
 ## Deployment
 
-Web on Vercel, API on Render (`deploy/render.yaml`, Docker, `ENGINE_MODE=mock` by
-default). `.github/workflows/keepalive.yml` pings `/api/health` to keep the free
-instance warm. Full guide: [`deploy/runbook.md`](deploy/runbook.md).
+Web on Vercel, API on Render (`deploy/render.yaml`, Docker, live engine and required
+persistence). `.github/workflows/keepalive.yml` pings `/api/health` to keep the free
+instance warm. Follow [`deploy/security-rollout.md`](deploy/security-rollout.md)
+before deploying the security changes; general guide: [`deploy/runbook.md`](deploy/runbook.md).

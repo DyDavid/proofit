@@ -9,31 +9,45 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import logging
+import math
 import os
+import threading
+import time
+from collections import OrderedDict
 from functools import lru_cache
 
 import anyio
+import httpx
 import jwt
 from fastapi import Header, Request
 from jwt import PyJWKClient
 from pydantic import BaseModel
 
+from api.admission import admit_request
 from api.config import is_admin_email, settings
-from api.db import get_supabase_client
+from api.db import validate_persistence_config
 from api.errors import ApiError
+from engine.execution import BoundedWorkPool, WorkCapacityError, WorkTimeoutError
 
 logger = logging.getLogger(__name__)
 
-_known_user_emails: dict[str, str] = {}
+_known_user_emails: OrderedDict[str, str] = OrderedDict()
+_email_lock = threading.Lock()
+_auth_pool = BoundedWorkPool("authentication")
 
 
 def register_user_email(user_id: str, email: str | None) -> None:
     if email:
-        _known_user_emails[user_id] = email.strip().lower()
+        with _email_lock:
+            _known_user_emails[user_id] = email.strip().lower()
+            _known_user_emails.move_to_end(user_id)
+            while len(_known_user_emails) > 5000:
+                _known_user_emails.popitem(last=False)
 
 
 def get_user_email(user_id: str) -> str | None:
-    return _known_user_emails.get(user_id)
+    with _email_lock:
+        return _known_user_emails.get(user_id)
 
 
 class CurrentUser(BaseModel):
@@ -45,9 +59,49 @@ class CurrentUser(BaseModel):
         return is_admin_email(self.email)
 
 
+class RefreshLimitedJWKClient(PyJWKClient):
+    """Cooldown applies to failed fetches too, including older supported PyJWT versions."""
+
+    def __init__(self, url):
+        super().__init__(url, cache_keys=False, lifespan=settings.auth_jwks_refresh_seconds,
+                         timeout=settings.auth_provider_timeout_seconds)
+        self._refresh_lock = threading.RLock()
+        self._attempt_at = None
+        self._last_data = None
+
+    def get_signing_key(self, kid):
+        # Own the refresh policy rather than stacking SDK-specific cooldowns.
+        with self._refresh_lock:
+            keys = self.get_signing_keys()
+            key = self.match_kid(keys, kid)
+            if key is None:
+                key = self.match_kid(self.get_signing_keys(refresh=True), kid)
+            if key is None:
+                raise jwt.PyJWKClientError("Unknown authentication signing key")
+            return key
+
+    def fetch_data(self):
+        with self._refresh_lock:
+            now = time.monotonic()
+            if self._attempt_at is not None and now - self._attempt_at < settings.auth_jwks_refresh_seconds:
+                if self._last_data is None:
+                    raise jwt.PyJWKClientConnectionError("Authentication keys temporarily unavailable")
+                return self._last_data
+            self._attempt_at = now
+            try:
+                data = super().fetch_data()
+                if not isinstance(data, dict) or not isinstance(data.get("keys"), list) or len(data["keys"]) > 32:
+                    raise jwt.PyJWKClientConnectionError("Invalid authentication key set")
+                self._last_data = data
+                return data
+            except Exception:
+                self._last_data = None
+                raise jwt.PyJWKClientConnectionError("Authentication keys unavailable") from None
+
+
 @lru_cache(maxsize=4)
 def _get_jwks_client(jwks_url: str) -> PyJWKClient:
-    return PyJWKClient(jwks_url, cache_keys=True)
+    return RefreshLimitedJWKClient(jwks_url)
 
 
 def _decode_with_jwks(token: str, supabase_url: str) -> dict:
@@ -59,6 +113,7 @@ def _decode_with_jwks(token: str, supabase_url: str) -> dict:
         signing_key.key,
         algorithms=["ES256", "RS256"],
         audience="authenticated",
+        options={"require": ["exp", "sub"]},
     )
 
 
@@ -68,12 +123,13 @@ def _decode_with_hs256(token: str, secret: str) -> dict:
         secret,
         algorithms=["HS256"],
         audience="authenticated",
+        options={"require": ["exp", "sub"]},
     )
 
 
-async def verify_bearer_token(token: str) -> CurrentUser:
+async def verify_bearer_token(token: str, subject: str = "direct") -> CurrentUser:
     """Verify a Supabase JWT and return `{id, email}` or raise 401 ApiError."""
-    if not token:
+    if not token or len(token) > 8192 or token.count(".") != 2 or not all(token.split(".")):
         raise ApiError(
             status_code=401,
             code="UNAUTHORIZED",
@@ -85,7 +141,12 @@ async def verify_bearer_token(token: str) -> CurrentUser:
 
     try:
         header = jwt.get_unverified_header(token)
-    except jwt.PyJWTError as err:
+        payload = jwt.decode(token, options={"verify_signature": False})
+        expiry = payload.get("exp")
+        if (not isinstance(payload.get("sub"), str) or not 0 < len(payload["sub"]) <= 255
+                or type(expiry) not in (int, float) or not math.isfinite(expiry) or expiry <= time.time()):
+            raise ValueError("Invalid token claims")
+    except (jwt.PyJWTError, ValueError, TypeError, OverflowError) as err:
         raise ApiError(
             status_code=401,
             code="UNAUTHORIZED",
@@ -93,6 +154,22 @@ async def verify_bearer_token(token: str) -> CurrentUser:
         ) from err
 
     alg = header.get("alg", "")
+    if alg not in ("HS256", "ES256", "RS256") or len(str(header.get("kid", ""))) > 128:
+        raise ApiError(401, "UNAUTHORIZED", "Invalid authentication token.")
+
+    try:
+        return await anyio.to_thread.run_sync(lambda: _auth_pool.run(
+            lambda: _verify_token_sync(token, alg, jwt_secret, supabase_url, subject),
+            timeout=settings.auth_timeout_seconds, limit=settings.max_concurrent_auth,
+        ))
+    except WorkCapacityError:
+        raise ApiError(429, "RATE_LIMITED", "Authentication is busy. Please try again shortly.") from None
+    except WorkTimeoutError:
+        raise ApiError(503, "SERVICE_UNAVAILABLE", "Authentication temporarily unavailable.") from None
+
+
+def _verify_token_sync(token, alg, jwt_secret, supabase_url, subject):
+    admit_request("auth", subject, settings.auth_requests_per_min, settings.auth_global_requests_per_min)
 
     # 1. Legacy HS256 secret verification
     if alg == "HS256" and jwt_secret:
@@ -114,13 +191,15 @@ async def verify_bearer_token(token: str) -> CurrentUser:
     # 2. Asymmetric JWKS verification (ES256 / RS256)
     if alg in ("ES256", "RS256") and supabase_url:
         try:
-            payload = await anyio.to_thread.run_sync(_decode_with_jwks, token, supabase_url)
+            payload = _decode_with_jwks(token, supabase_url)
             sub = payload.get("sub")
             if not sub:
                 raise ValueError("Token missing sub claim")
             user = CurrentUser(id=str(sub), email=payload.get("email"))
             register_user_email(user.id, user.email)
             return user
+        except jwt.PyJWKClientConnectionError:
+            raise ApiError(503, "SERVICE_UNAVAILABLE", "Authentication temporarily unavailable.") from None
         except Exception as err:
             raise ApiError(
                 status_code=401,
@@ -129,17 +208,23 @@ async def verify_bearer_token(token: str) -> CurrentUser:
             ) from err
 
     # 3. Fallback to Supabase Auth API `auth.get_user(token)` if client is available
-    client = get_supabase_client()
-    if client is not None:
+    config = validate_persistence_config()
+    if config is not None:
         try:
-            res = await anyio.to_thread.run_sync(client.auth.get_user, token)
-            user_data = getattr(res, "user", None)
-            if user_data and getattr(user_data, "id", None):
-                user = CurrentUser(id=str(user_data.id), email=getattr(user_data, "email", None))
+            url, key = config
+            with httpx.Client(timeout=settings.auth_provider_timeout_seconds, follow_redirects=False, trust_env=False) as client:
+                response = client.get(url.rstrip("/") + "/auth/v1/user", headers={"apikey": key, "Authorization": "Bearer " + token})
+            if response.status_code >= 500 or response.status_code == 429:
+                raise ApiError(503, "SERVICE_UNAVAILABLE", "Authentication temporarily unavailable.")
+            user_data = response.json() if response.status_code == 200 else {}
+            if user_data.get("id"):
+                user = CurrentUser(id=str(user_data["id"]), email=user_data.get("email"))
                 register_user_email(user.id, user.email)
                 return user
-        except Exception as err:
-            logger.debug("Supabase auth.get_user failed: %s", err)
+        except ApiError:
+            raise
+        except Exception:
+            raise ApiError(503, "SERVICE_UNAVAILABLE", "Authentication temporarily unavailable.") from None
 
     raise ApiError(
         status_code=401,
@@ -148,7 +233,7 @@ async def verify_bearer_token(token: str) -> CurrentUser:
     )
 
 
-async def get_current_user(authorization: str | None = Header(default=None)) -> CurrentUser:
+async def get_current_user(request: Request, authorization: str | None = Header(default=None)) -> CurrentUser:
     """FastAPI dependency that requires a valid Bearer token (raises 401 otherwise)."""
     if not authorization or not authorization.startswith("Bearer "):
         raise ApiError(
@@ -157,10 +242,11 @@ async def get_current_user(authorization: str | None = Header(default=None)) -> 
             message="Authentication required.",
         )
     token = authorization.removeprefix("Bearer ").strip()
-    return await verify_bearer_token(token)
+    return await verify_bearer_token(token, hash_guest_ip(request))
 
 
 async def get_optional_user(
+    request: Request,
     authorization: str | None = Header(default=None),
 ) -> CurrentUser | None:
     """FastAPI dependency that returns `CurrentUser` if a Bearer token is sent,
@@ -176,9 +262,7 @@ async def get_optional_user(
             message="Invalid Authorization header format.",
         )
     token = authorization.removeprefix("Bearer ").strip()
-    if not token:
-        return None
-    return await verify_bearer_token(token)
+    return await verify_bearer_token(token, hash_guest_ip(request))
 
 
 def _parse_ip(ip_str: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:

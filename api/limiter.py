@@ -109,6 +109,9 @@ def reset_rate_limits() -> None:
     analysis_attempt_limiter.reset()
     operation_attempt_limiter.reset()
     checkout_status_limiter.reset()
+    from api.admission import reset_admission
+
+    reset_admission()
 
 
 def enforce_checkout_status_limit(user_id: str) -> None:

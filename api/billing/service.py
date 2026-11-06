@@ -148,7 +148,7 @@ _usage_events: list[UsageEventRecord] = []
 _usage_reservations: dict[str, UsageReservationRecord] = {}
 _finalized_reservations: dict[str, Literal["committed", "released"]] = {}
 _reservations_lock = threading.RLock()
-_stripe_events: set[str] = set()
+_stripe_events: dict[str, datetime] = {}
 
 
 def reset_billing_memory() -> None:
@@ -966,20 +966,23 @@ def get_checkout_status_by_ref(provider_ref: str, user_id: str) -> CheckoutStatu
 
 def simulate_mock_payment(session_id: str, user_id: str) -> CheckoutStatusOut:
     """Mark a mock checkout session paid and grant the pass (mock provider only)."""
-    if settings.billing_provider != "mock":
+    if (settings.billing_provider != "mock" or not settings.allow_mock_payments
+            or settings.app_environment == "production"):
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": "Mock simulation is disabled."},
         )
 
     rec = _load_checkout_session_by_id(session_id)
-    if rec is None or rec.user_id != user_id:
+    if rec is None or rec.user_id != user_id or rec.provider != "mock":
         raise HTTPException(
             status_code=404,
             detail={"code": "checkout_not_found", "message": "Checkout session not found."},
         )
 
     now = datetime.now(UTC)
+    if rec.status in ("expired", "canceled"):
+        raise HTTPException(400, detail={"code": "session_expired", "message": "Checkout session is closed."})
     if rec.status == "pending" and now >= rec.expires_at:
         rec.status = "expired"
         _save_checkout_session(rec)
@@ -997,36 +1000,49 @@ def simulate_mock_payment(session_id: str, user_id: str) -> CheckoutStatusOut:
     return _refresh_and_serialize_session(rec)
 
 
-def record_stripe_event_once(event_id: str, event_type: str) -> bool:
-    """Return True if this Stripe event ID has not been processed yet."""
-    if event_id in _stripe_events:
-        return False
-
-    client = get_supabase_client()
-    if client is not None:
-        try:
-            existing = (
-                client.table("stripe_events")
-                .select("id")
-                .eq("id", event_id)
-                .limit(1)
-                .execute()
-            )
-            if existing.data:
-                _stripe_events.add(event_id)
-                return False
-            client.table("stripe_events").insert(
-                {
-                    "id": event_id,
-                    "type": event_type,
-                    "received_at": datetime.now(UTC).isoformat(),
-                }
-            ).execute()
-        except Exception:
-            pass
-
-    _stripe_events.add(event_id)
-    return True
+def process_stripe_event(event_id: str, event_type: str, data: dict) -> bool:
+    """Complete the durable ledger and grant atomically; failed work remains retryable."""
+    if not event_id or len(event_id) > 255 or len(event_type) > 255:
+        raise DatabasePersistenceError("Invalid payment event")
+    effective_type = event_type
+    if event_type == "checkout.session.completed" and data.get("payment_status") != "paid":
+        effective_type = "ignored.unpaid_checkout"
+    metadata = data.get("metadata") or {}
+    if not isinstance(metadata, dict):
+        raise DatabasePersistenceError("Invalid payment metadata")
+    owner = str(metadata.get("user_id") or "")
+    amount = data.get("amount_total")
+    if amount is not None and (type(amount) is not int or amount < 0):
+        raise DatabasePersistenceError("Invalid payment amount")
+    reference = str(data.get("id") or "")
+    currency = data.get("currency")
+    if get_supabase_client() is not None:
+        result = db_billing_rpc("process_stripe_checkout_event", {
+            "p_event_id": event_id, "p_type": effective_type, "p_provider_ref": reference,
+            "p_user_id": owner, "p_amount": amount, "p_currency": currency,
+        })
+        if not isinstance(result.get("processed"), bool):
+            raise DatabasePersistenceError("Invalid payment event response")
+        return result["processed"]
+    with _reservations_lock:
+        if event_id in _stripe_events:
+            return False
+        if effective_type in ("checkout.session.completed", "checkout.session.expired"):
+            rec = _load_checkout_session_by_ref(reference)
+            if rec is None or rec.provider != "stripe_sandbox":
+                raise DatabasePersistenceError("Payment checkout unavailable")
+            if effective_type == "checkout.session.completed":
+                if (owner != rec.user_id or amount != rec.amount_cents
+                        or (currency is not None and str(currency).upper() != rec.currency)):
+                    raise DatabasePersistenceError("Invalid payment details")
+                handle_stripe_checkout_completed(reference, metadata, amount)
+            else:
+                handle_stripe_checkout_expired(reference)
+        # No completion marker is written if any preceding operation failed.
+        while len(_stripe_events) >= settings.webhook_cache_max_entries:
+            _stripe_events.pop(next(iter(_stripe_events)))
+        _stripe_events[event_id] = datetime.now(UTC)
+        return True
 
 
 def handle_stripe_checkout_completed(
@@ -1046,8 +1062,7 @@ def handle_stripe_checkout_completed(
 
     now = datetime.now(UTC)
     if rec.status != "paid":
-        rec.status = "paid"
-        rec.paid_at = now
+        rec = replace(rec, status="paid", paid_at=now)
         _save_checkout_session(rec)
 
     grant_plan(rec)

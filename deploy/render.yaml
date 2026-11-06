@@ -53,12 +53,27 @@ services:
 
     envVars:
       # ── Engine ───────────────────────────────────────────────────────────
-      # Phase 1 ships mock mode: analyses return data/fixtures/*.json after an
-      # artificial delay. Flip to "live" in the Render dashboard at CP2
-      # (PERSON_B_PLAN_v2.md §5 Phase 2 task 7) — not by editing this file, so a
-      # rollback is a dashboard toggle rather than a redeploy.
+      # Production coordination must use the database across every worker.
+      # Local mock/offline demonstrations use the separate development config.
       - key: ENGINE_MODE
-        value: mock
+        value: live
+      - key: PERSISTENCE_MODE
+        value: required
+      - key: APP_ENVIRONMENT
+        value: production
+      - key: ALLOW_MOCK_PAYMENTS
+        value: "false"
+      - key: BILLING_PROVIDER
+        value: stripe_sandbox
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      # One 192 MiB parser plus the API must fit this 512 MiB instance.
+      - key: MAX_CONCURRENT_PARSES
+        value: "1"
+      - key: PARSER_MEMORY_LIMIT_MB
+        value: "192"
 
       # ── Secrets — prompted in the dashboard, never stored in git ──────────
       - key: GEMINI_API_KEY
