@@ -234,7 +234,8 @@ def record_usage_event(
 ) -> None:
     """Record a usage event after a successful analysis or rewrite."""
     now = datetime.now(UTC)
-    _usage_events.append(UsageEventRecord(user_id=user_id, kind=kind, created_at=now))
+    with _reservations_lock:
+        _usage_events.append(UsageEventRecord(user_id=user_id, kind=kind, created_at=now))
     client = get_supabase_client()
     if client is not None:
         with contextlib.suppress(Exception):
@@ -328,17 +329,18 @@ def commit_usage_reservation(
     user_id: str | None,
     kind: Literal["analysis", "rewrite"],
 ) -> None:
+    client = get_supabase_client()
     with _reservations_lock:
         if reservation_id:
-            _usage_reservations.pop(reservation_id, None)
+            popped = _usage_reservations.pop(reservation_id, None)
+            if popped is None and client is None:
+                return
+        if user_id:
+            record_usage_event(user_id, kind)
 
-    client = get_supabase_client()
     if reservation_id and client is not None:
         with contextlib.suppress(Exception):
             client.table("usage_reservations").update({"status": "committed"}).eq("id", reservation_id).execute()
-
-    if user_id:
-        record_usage_event(user_id, kind)
 
 
 def release_usage_reservation(

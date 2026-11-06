@@ -94,6 +94,7 @@ def reserve_quota(
     user_id: str,
     kind: QuotaKind,
     reservation_id: str | None = None,
+    user: CurrentUser | None = None,
 ) -> str | None:
     """Verify user quota and atomically reserve a slot under concurrency lock.
     Returns reservation_id on success, or raises HTTP 402 if quota is exceeded.
@@ -102,7 +103,7 @@ def reserve_quota(
     if not settings.enforce_quotas:
         return None
 
-    if is_admin_email(get_user_email(user_id)):
+    if (user is not None and user.is_admin) or is_admin_email(get_user_email(user_id)):
         return None
 
     from api.billing.service import (

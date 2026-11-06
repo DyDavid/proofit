@@ -32,7 +32,6 @@ from api.db import (
 from api.errors import ApiError, new_error_id
 from api.quota import (
     commit_quota,
-    record_usage,
     release_quota,
     require_quota,
     reserve_quota,
@@ -841,7 +840,6 @@ def _append_hidden_strength(match: Match, hidden_strength: HiddenStrength) -> Ma
 def create_rewrites(
     analysis_id: str,
     user: CurrentUser | None = Depends(get_optional_user),  # noqa: B008
-    _quota: None = Depends(require_quota("rewrite")),  # noqa: B008
 ) -> dict:
     """Runs the F5 pipeline for one completed analysis (PERSON_B_PLAN_v2.md §5
     Phase 3 task 6): detect candidates, generate a rewrite for each, validate
@@ -875,120 +873,165 @@ def create_rewrites(
             message="Analysis has not finished; there is no match to run rewrites against.",
         )
 
-    match = record.match
-    resume = match.resume
-    if resume is None or match.job is None:
+    with store._lock:
+        if record.rewrite_status == "done" and record.match is not None:
+            return {
+                "hidden_strengths": [h.model_dump(mode="json") for h in record.match.hidden_strengths],
+                "rejected_count": record.rewrite_rejected_count,
+            }
+        if record.rewrite_in_progress:
+            raise ApiError(
+                status_code=409,
+                code="ANALYSIS_IN_PROGRESS",
+                message="A rewrite for this analysis is already in progress.",
+            )
+        record.rewrite_in_progress = True
+
+    target_user_id = user.id if user else record.user_id
+    reservation_id: str | None = None
+    try:
+        match = record.match
+        resume = match.resume
+        if resume is None or match.job is None:
+            with store._lock:
+                record.rewrite_status = "done"
+                record.rewrite_rejected_count = 0
+            return {
+                "hidden_strengths": [h.model_dump(mode="json") for h in match.hidden_strengths],
+                "rejected_count": 0,
+            }
+
+        if target_user_id and not (user and user.is_admin):
+            reservation_id = reserve_quota(target_user_id, "rewrite", user=user)
+
+        requirements_by_id = {r.id: r for r in match.job.requirements}
+        evidence_by_id = {e.id: e for e in resume.evidence}
+
+        # F6 (task 4c): country-toned rewrites. `record.country` carries
+        # whichever of this codebase's three destination spellings the browser
+        # originally sent (`AnalysisRecord.country`, api/store.py) — `rules_for`
+        # is the one place that reconciles them. `None` for the UI's "other"
+        # destination is a normal outcome, not an error (engine/country/rules.py),
+        # so `tone_notes` is simply `None` and every rewrite generates exactly as
+        # it did before F6 existed.
+        country_rules = rules_for(record.country)
+        tone_notes = country_rules.tone_notes if country_rules else None
+
+        rejected_count = 0
+        try:
+            candidates = detect_hidden_strengths(match, resume)
+            for candidate in candidates:
+                requirement = requirements_by_id.get(candidate.requirement_id)
+                anchor = evidence_by_id.get(candidate.evidence_id)
+                if requirement is None or anchor is None:
+                    continue
+
+                accepted = None
+                first_failure = None
+                for attempt in range(2):
+                    rewrite = generate_rewrite(requirement, [anchor], tone_notes)
+                    result = validate_rewrite(rewrite, resume.evidence)
+                    if result.ok:
+                        accepted = rewrite
+                        break
+                    failure = store.log_rewrite_rejection(
+                        analysis_id=analysis_id,
+                        requirement_id=candidate.requirement_id,
+                        evidence_id=candidate.evidence_id,
+                        suggested_phrasing=rewrite.suggested_phrasing,
+                        violations=result.as_log_violations,
+                        retry_succeeded=False,
+                    )
+                    if attempt == 0:
+                        first_failure = failure
+
+                if accepted is None:
+                    rejected_count += 1
+                    continue
+
+                try:
+                    hidden_strength = HiddenStrength(
+                        requirement_id=candidate.requirement_id,
+                        evidence_id=candidate.evidence_id,
+                        current_phrasing=anchor.source_line,
+                        suggested_phrasing=accepted.suggested_phrasing,
+                        facts_used=accepted.facts_used,
+                        changed_words=accepted.changed_words,
+                    )
+                    match = _append_hidden_strength(match, hidden_strength)
+                except ValidationError as exc:
+                    # validate_rewrite's two layers judge the *phrasing*; neither
+                    # guarantees `facts_used` actually contains the anchor's own
+                    # evidence_id (precheck_rewrite can pass with zero checkable
+                    # tokens, and the LLM layer is never asked about facts_used at
+                    # all). HiddenStrength's own `_cites_its_own_evidence` validator
+                    # is the last line of defence against that — treat a failure
+                    # there exactly like any other validator rejection rather than
+                    # letting it crash the endpoint with a raw, unenveloped 500.
+                    rejected_count += 1
+                    store.log_rewrite_rejection(
+                        analysis_id=analysis_id,
+                        requirement_id=candidate.requirement_id,
+                        evidence_id=candidate.evidence_id,
+                        suggested_phrasing=accepted.suggested_phrasing,
+                        violations=[{"claim": "facts_used/evidence_id integrity", "reason": str(exc)}],
+                        retry_succeeded=False,
+                    )
+                    continue
+
+                # Only flip the first failure's `retry_succeeded` once the retry's
+                # HiddenStrength has actually made it into `match` — validation
+                # passing (above) is necessary but not sufficient: the `except
+                # ValidationError` branch above can still reject this same
+                # candidate on the integrity check, and `continue`s past this
+                # line before reaching it. `RewriteRejection` is "a report figure
+                # for the evaluation chapter" (api/store.py) — a `True` logged
+                # before the outcome is actually known would misreport it.
+                if first_failure is not None:
+                    first_failure.retry_succeeded = True
+        except RewriteRateLimitedError as exc:
+            if reservation_id or target_user_id:
+                release_quota(reservation_id, target_user_id, "rewrite")
+                reservation_id = None
+            logger.warning("Rewrite request rate-limited: %s", exc)
+            raise ApiError(
+                status_code=429,
+                code="RATE_LIMITED",
+                message="The rewrite service is busy. Try again in a minute.",
+            ) from exc
+        except Exception as exc:
+            if reservation_id or target_user_id:
+                release_quota(reservation_id, target_user_id, "rewrite")
+                reservation_id = None
+            # Generic on purpose: provider errors can echo keys or URLs, and this
+            # message is returned to the browser. The real error is in the log.
+            logger.exception("Rewrite generation failed")
+            raise ApiError(
+                status_code=500,
+                code="ENGINE_FAILED",
+                message="The analysis didn't finish. Try again.",
+            ) from exc
+
+        store.update_analysis(analysis_id, match=match)
+        with store._lock:
+            record.rewrite_status = "done"
+            record.rewrite_rejected_count = rejected_count
+
+        if candidates:
+            if target_user_id:
+                commit_quota(reservation_id, target_user_id, "rewrite")
+                reservation_id = None
+        else:
+            if reservation_id or target_user_id:
+                release_quota(reservation_id, target_user_id, "rewrite")
+                reservation_id = None
+
         return {
             "hidden_strengths": [h.model_dump(mode="json") for h in match.hidden_strengths],
-            "rejected_count": 0,
+            "rejected_count": rejected_count,
         }
-
-    requirements_by_id = {r.id: r for r in match.job.requirements}
-    evidence_by_id = {e.id: e for e in resume.evidence}
-
-    # F6 (task 4c): country-toned rewrites. `record.country` carries
-    # whichever of this codebase's three destination spellings the browser
-    # originally sent (`AnalysisRecord.country`, api/store.py) — `rules_for`
-    # is the one place that reconciles them. `None` for the UI's "other"
-    # destination is a normal outcome, not an error (engine/country/rules.py),
-    # so `tone_notes` is simply `None` and every rewrite generates exactly as
-    # it did before F6 existed.
-    country_rules = rules_for(record.country)
-    tone_notes = country_rules.tone_notes if country_rules else None
-
-    rejected_count = 0
-    try:
-        candidates = detect_hidden_strengths(match, resume)
-        for candidate in candidates:
-            requirement = requirements_by_id.get(candidate.requirement_id)
-            anchor = evidence_by_id.get(candidate.evidence_id)
-            if requirement is None or anchor is None:
-                continue
-
-            accepted = None
-            first_failure = None
-            for attempt in range(2):
-                rewrite = generate_rewrite(requirement, [anchor], tone_notes)
-                result = validate_rewrite(rewrite, resume.evidence)
-                if result.ok:
-                    accepted = rewrite
-                    break
-                failure = store.log_rewrite_rejection(
-                    analysis_id=analysis_id,
-                    requirement_id=candidate.requirement_id,
-                    evidence_id=candidate.evidence_id,
-                    suggested_phrasing=rewrite.suggested_phrasing,
-                    violations=result.as_log_violations,
-                    retry_succeeded=False,
-                )
-                if attempt == 0:
-                    first_failure = failure
-
-            if accepted is None:
-                rejected_count += 1
-                continue
-
-            try:
-                hidden_strength = HiddenStrength(
-                    requirement_id=candidate.requirement_id,
-                    evidence_id=candidate.evidence_id,
-                    current_phrasing=anchor.source_line,
-                    suggested_phrasing=accepted.suggested_phrasing,
-                    facts_used=accepted.facts_used,
-                    changed_words=accepted.changed_words,
-                )
-                match = _append_hidden_strength(match, hidden_strength)
-            except ValidationError as exc:
-                # validate_rewrite's two layers judge the *phrasing*; neither
-                # guarantees `facts_used` actually contains the anchor's own
-                # evidence_id (precheck_rewrite can pass with zero checkable
-                # tokens, and the LLM layer is never asked about facts_used at
-                # all). HiddenStrength's own `_cites_its_own_evidence` validator
-                # is the last line of defence against that — treat a failure
-                # there exactly like any other validator rejection rather than
-                # letting it crash the endpoint with a raw, unenveloped 500.
-                rejected_count += 1
-                store.log_rewrite_rejection(
-                    analysis_id=analysis_id,
-                    requirement_id=candidate.requirement_id,
-                    evidence_id=candidate.evidence_id,
-                    suggested_phrasing=accepted.suggested_phrasing,
-                    violations=[{"claim": "facts_used/evidence_id integrity", "reason": str(exc)}],
-                    retry_succeeded=False,
-                )
-                continue
-
-            # Only flip the first failure's `retry_succeeded` once the retry's
-            # HiddenStrength has actually made it into `match` — validation
-            # passing (above) is necessary but not sufficient: the `except
-            # ValidationError` branch above can still reject this same
-            # candidate on the integrity check, and `continue`s past this
-            # line before reaching it. `RewriteRejection` is "a report figure
-            # for the evaluation chapter" (api/store.py) — a `True` logged
-            # before the outcome is actually known would misreport it.
-            if first_failure is not None:
-                first_failure.retry_succeeded = True
-    except RewriteRateLimitedError as exc:
-        logger.warning("Rewrite request rate-limited: %s", exc)
-        raise ApiError(
-            status_code=429,
-            code="RATE_LIMITED",
-            message="The rewrite service is busy. Try again in a minute.",
-        ) from exc
-    except Exception as exc:
-        # Generic on purpose: provider errors can echo keys or URLs, and this
-        # message is returned to the browser. The real error is in the log.
-        logger.exception("Rewrite generation failed")
-        raise ApiError(
-            status_code=500,
-            code="ENGINE_FAILED",
-            message="The analysis didn't finish. Try again.",
-        ) from exc
-
-    store.update_analysis(analysis_id, match=match)
-    if candidates:
-        record_usage(user.id if user else record.user_id, "rewrite")
-    return {
-        "hidden_strengths": [h.model_dump(mode="json") for h in match.hidden_strengths],
-        "rejected_count": rejected_count,
-    }
+    finally:
+        if reservation_id:
+            release_quota(reservation_id, target_user_id, "rewrite")
+        with store._lock:
+            record.rewrite_in_progress = False

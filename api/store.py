@@ -126,6 +126,9 @@ class AnalysisRecord:
     retried_by: str | None = None
     reservation_id: str | None = None
     guest_ip_hash: str | None = None
+    rewrite_in_progress: bool = False
+    rewrite_status: str | None = None
+    rewrite_rejected_count: int = 0
 
 
 @dataclass
@@ -635,6 +638,8 @@ class Store:
         baseline: BaselineMatch | None = None,
         error_message: str | None = None,
         error: dict | None = None,
+        rewrite_status: str | None = None,
+        rewrite_rejected_count: int | None = None,
     ) -> AnalysisRecord | None:
         """Live-mode (F1 task 5) analysis mutation, with a best-effort Supabase
         mirror. Mock mode does not call this — `_run_mock_analysis` mutates
@@ -659,6 +664,10 @@ class Store:
                     record.error_message = error_message
                 if error is not None:
                     record.error = dict(error)
+                if rewrite_status is not None:
+                    record.rewrite_status = rewrite_status
+                if rewrite_rejected_count is not None:
+                    record.rewrite_rejected_count = rewrite_rejected_count
 
         if get_supabase_client() and (record is None or not record.is_guest):
             match_json = (
