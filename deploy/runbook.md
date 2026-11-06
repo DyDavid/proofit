@@ -224,6 +224,64 @@ be reloaded after eviction; offline mode preserves pending sessions and rejects
 new checkouts if they fill the cache. Expired and completed offline sessions may
 be evicted to make room for new checkouts.
 
+Before deploying the payment-status polling fix, review and apply
+`data/migrations/008_checkout_status_polling.sql` after 007. This additive migration
+adds server-only admission and refresh RPCs, a request bucket table with RLS, and
+cache/lease columns on existing checkouts. Leave previously applied migrations
+unchanged. Apply 008 first, then roll out the API to every worker with the same
+settings; older workers do not enforce the new polling protection. No frontend
+change or credential rotation is needed. For a code rollback, leave the additive
+schema in place and remember that older code does not protect status polling.
+
+Both authenticated GET routes, `/api/billing/checkout/{session_id}` and
+`/api/billing/checkout/by-ref/{provider_ref}`, consume the same rolling 60-second
+account budget: `CHECKOUT_STATUS_REQUESTS_PER_MIN=30` (0 blocks polling; maximum
+10000). Cached responses, paid sessions, missing sessions, and ownership failures
+count too, including for admins. Changing route, reference, checkout, or worker
+cannot reset the account budget. Excess requests return 429 `RATE_LIMITED`.
+Checkout creation and webhooks use their existing paths and budgets.
+
+`CHECKOUT_STATUS_CACHE_SECONDS=5` (1..300) is the shared provider refresh cooldown,
+measured from completion. Pending provider results and provider failures are cached.
+A single worker claims the refresh; concurrent readers return the current stored
+status without contacting Stripe. Cached provider failures return safe 503
+`SERVICE_UNAVAILABLE` responses until the cooldown ends. Webhooks update the
+checkout immediately, even during a cooldown or an in-flight refresh. A refresh
+cannot overwrite a webhook's terminal status. Paid status reads retry the
+idempotent pass grant, so transient activation failures can recover without another
+Stripe call or another subscription. Pending sessions still expire locally; a
+refresh that discovers payment at expiry grants it, and paid webhooks can activate
+an expired checkout as before.
+
+`CHECKOUT_STATUS_PROVIDER_TIMEOUT_SECONDS=10` (1..30) sets the Stripe status HTTP
+timeout, with SDK network retries disabled. The refresh lease lasts twice this
+timeout plus 30 seconds (50 seconds by default) to cover connect/read timeouts and
+scheduling margin. A crashed worker's lease recovers automatically. Lease tokens
+fence stale refresh completions after another worker takes over. If admission,
+claim, completion, checkout lookup, or grant persistence fails (including a missing
+RPC), return safe 503 responses; never fall back to process memory. An uncertain
+completion keeps its claim until the lease expires, avoiding an immediate retry
+storm. HTTP timeouts and leases cannot cancel work already accepted by Stripe.
+
+Storage stays bounded: the provider cache uses a fixed set of columns per checkout;
+the database limiter keeps at most one bucket per account, with at most the
+configured number of accepted timestamps, and prunes expired buckets in batches
+of up to 1000 per admission. Rejected polls add no rows or timestamps. There is no
+per-poll status-cache history. The local checkout cache retains its existing
+`CHECKOUT_CACHE_MAX_ENTRIES` bound. Explicit offline mode uses a bounded local
+limiter (5000 account buckets, active buckets are not evicted) and local refresh
+claims stored in those checkout records; it requires one worker and resets on
+restart. Offline mode never contacts Supabase.
+
+Before release, run the mocked polling/billing tests and full regression suite:
+`python -m pytest tests/test_checkout_status_polling.py tests/test_phase4_billing.py
+tests/test_billing_security.py tests/test_multiworker_concurrency.py`, then
+`python -m pytest`, `ruff check .`, and the frontend checks listed in the README.
+Tests block Stripe HTTP requests and simulate two independent worker caches/locks
+against a shared database double. They do not apply the SQL migration or call paid
+services. After an operator applies 008 in a test environment, verify RPC grants
+and exercise both routes with mocked payment responses before production rollout.
+
 New analyses and retries share `ANALYSIS_ATTEMPTS_PER_HOUR` (default 10 per account)
 or `GUEST_ANALYSIS_ATTEMPTS_PER_HOUR` (default 3 per salted guest IP). These safety
 limits also apply to admins and are separate from plan quotas. Failures can refund

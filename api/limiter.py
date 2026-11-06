@@ -15,7 +15,12 @@ from fastapi import Request
 
 from api.auth import CurrentUser, hash_guest_ip
 from api.config import settings
-from api.db import DatabasePersistenceError, db_reserve_analysis_attempt, get_supabase_client
+from api.db import (
+    DatabasePersistenceError,
+    db_billing_rpc,
+    db_reserve_analysis_attempt,
+    get_supabase_client,
+)
 from api.errors import ApiError
 
 MAX_TRACKED_CLIENT_BUCKETS = 5_000
@@ -95,6 +100,7 @@ class SlidingWindowRateLimiter:
 rate_limiter = SlidingWindowRateLimiter()
 analysis_attempt_limiter = SlidingWindowRateLimiter(evict_active=False)
 operation_attempt_limiter = SlidingWindowRateLimiter(evict_active=False)
+checkout_status_limiter = SlidingWindowRateLimiter(evict_active=False)
 
 
 def reset_rate_limits() -> None:
@@ -102,6 +108,20 @@ def reset_rate_limits() -> None:
     rate_limiter.reset()
     analysis_attempt_limiter.reset()
     operation_attempt_limiter.reset()
+    checkout_status_limiter.reset()
+
+
+def enforce_checkout_status_limit(user_id: str) -> None:
+    """Both lookup routes spend the same rolling account budget, even on misses."""
+    limit = settings.checkout_status_requests_per_min
+    if get_supabase_client() is None:
+        checkout_status_limiter.check(user_id, limit=limit)
+        return
+    result = db_billing_rpc("admit_checkout_status", {"p_user_id": user_id, "p_limit": limit})
+    if not isinstance(result.get("allowed"), bool):
+        raise DatabasePersistenceError("Invalid checkout admission response.")
+    if not result["allowed"]:
+        raise ApiError(429, "RATE_LIMITED", "Too many payment status requests. Please try again shortly.")
 
 
 def enforce_operation_attempt_limit(operation: str, subject: str, limit: int) -> None:

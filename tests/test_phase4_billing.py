@@ -236,12 +236,12 @@ def test_stripe_late_webhook_fallback_grants_on_status_poll(
         ),
     )
     monkeypatch.setattr(
-        stripe.checkout.Session,
-        "retrieve",
-        lambda ref, api_key=None: SimpleNamespace(
-            id=ref,
-            payment_status="paid",
-            status="complete",
+        stripe,
+        "StripeClient",
+        lambda *args, **kwargs: SimpleNamespace(
+            checkout=SimpleNamespace(sessions=SimpleNamespace(
+                retrieve=lambda ref: SimpleNamespace(id=ref, payment_status="paid", status="complete"),
+            )),
         ),
     )
 

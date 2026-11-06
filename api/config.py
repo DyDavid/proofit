@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -70,6 +71,9 @@ class Settings(BaseSettings):
     rewrite_attempts_per_hour: int = 10
     checkout_attempts_per_hour: int = 10
     checkout_cache_max_entries: int = 500
+    checkout_status_requests_per_min: int = Field(default=30, ge=0, le=10000)
+    checkout_status_cache_seconds: int = Field(default=5, ge=1, le=300)
+    checkout_status_provider_timeout_seconds: int = Field(default=10, ge=1, le=30)
 
     # Phase 4 multi-worker coordination & abandoned work recovery bounds
     analysis_abandoned_timeout_seconds: float = 600.0

@@ -72,7 +72,13 @@ class StripeSandboxProvider:
 
     def get_status(self, provider_ref: str) -> CheckoutStatus:
         api_key = self._api_key()
-        session = stripe.checkout.Session.retrieve(provider_ref, api_key=api_key)
+        # Bound network work inside the distributed refresh lease; no SDK retries.
+        client = stripe.StripeClient(
+            api_key,
+            http_client=stripe.RequestsClient(timeout=settings.checkout_status_provider_timeout_seconds),
+            max_network_retries=0,
+        )
+        session = client.checkout.sessions.retrieve(provider_ref)
         payment_status = getattr(session, "payment_status", None)
         status = getattr(session, "status", None)
         if payment_status == "paid":

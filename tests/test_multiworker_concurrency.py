@@ -255,7 +255,7 @@ class SharedDatabaseBackend:
                     elif q._table == "guest_ip_usage":
                         self.guest_ip_usage[str(row["ip_hash"])] = row
                     elif q._table == "checkout_sessions":
-                        self.checkout_sessions[str(row["id"])] = row
+                        self.checkout_sessions.setdefault(str(row["id"]), {}).update(row)
                 return _MockExecuteResult(data=items)
 
             if q._op == "update":

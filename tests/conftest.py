@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import stripe
 
 from api.auth import _parse_trusted_proxy_networks
 from api.billing.service import reset_billing_memory
@@ -22,6 +23,10 @@ from engine.ingest import cache as ingest_cache
 
 @pytest.fixture(autouse=True)
 def _default_mock_mode(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def block_stripe_network(*args, **kwargs):
+        raise AssertionError("Tests must mock Stripe payment services; network calls are forbidden")
+
+    monkeypatch.setattr(stripe.RequestsClient, "request", block_stripe_network)
     monkeypatch.setenv("ENGINE_MODE", "mock")
     monkeypatch.delenv("SUPABASE_URL", raising=False)
     monkeypatch.setattr(settings, "engine_mode", "mock")

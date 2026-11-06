@@ -105,6 +105,10 @@ class CheckoutSessionRecord:
     )
     paid_at: datetime | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    status_refresh_after: datetime | None = None
+    status_refresh_until: datetime | None = None
+    status_refresh_token: str | None = None
+    status_refresh_error: bool = False
 
 
 @dataclass
@@ -591,13 +595,15 @@ def _cache_checkout_session(rec: CheckoutSessionRecord, *, persisted: bool) -> N
     now = datetime.now(UTC)
     with _reservations_lock:
         stale = [sid for sid, old in _checkout_sessions.items()
-                 if old.expires_at < now - timedelta(days=1)]
+                 if old.expires_at < now - timedelta(days=1)
+                 and (persisted or old.status_refresh_until is None or old.status_refresh_until <= now)]
         for sid in stale:
             _checkout_sessions.pop(sid, None)
         cap = max(1, settings.checkout_cache_max_entries)
         while rec.id not in _checkout_sessions and len(_checkout_sessions) >= cap:
             evictable = [old for old in _checkout_sessions.values()
-                         if persisted or old.status != "pending" or old.expires_at <= now]
+                         if persisted or ((old.status != "pending" or old.expires_at <= now)
+                                          and (old.status_refresh_until is None or old.status_refresh_until <= now))]
             if not evictable:
                 from api.errors import ApiError
 
@@ -689,6 +695,10 @@ def _row_to_checkout_session(row: dict, *, cache: bool = True) -> CheckoutSessio
         expires_at=datetime.fromisoformat(row["expires_at"]),
         paid_at=datetime.fromisoformat(row["paid_at"]) if row.get("paid_at") else None,
         created_at=datetime.fromisoformat(row["created_at"]),
+        status_refresh_after=datetime.fromisoformat(row["status_refresh_after"]) if row.get("status_refresh_after") else None,
+        status_refresh_until=datetime.fromisoformat(row["status_refresh_until"]) if row.get("status_refresh_until") else None,
+        status_refresh_token=row.get("status_refresh_token"),
+        status_refresh_error=row.get("status_refresh_error", False),
     )
     if cache:
         _cache_checkout_session(rec, persisted=True)
@@ -815,26 +825,98 @@ def create_checkout(
     )
 
 
-def _refresh_and_serialize_session(rec: CheckoutSessionRecord) -> CheckoutStatusOut:
-    now = datetime.now(UTC)
-    if rec.status == "pending":
-        if rec.provider == "stripe_sandbox" and rec.provider_ref:
-            try:
-                provider = StripeSandboxProvider()
-                remote_status = provider.get_status(rec.provider_ref)
-                if remote_status == "paid":
-                    rec.status = "paid"
-                    rec.paid_at = rec.paid_at or now
-                    _save_checkout_session(rec)
-                elif remote_status == "expired":
-                    rec.status = "expired"
-                    _save_checkout_session(rec)
-            except Exception:
-                pass
+def _status_rpc_result(result: dict, expected: CheckoutSessionRecord) -> tuple[CheckoutSessionRecord, bool, bool]:
+    """Reject malformed coordination responses rather than bypassing protection."""
+    try:
+        if not isinstance(result["refresh"], bool) or not isinstance(result["provider_error"], bool):
+            raise ValueError("Invalid refresh result")
+        rec = _row_to_checkout_session(result["session"], cache=False)
+        if (rec.id != expected.id or rec.user_id != expected.user_id
+                or rec.provider != expected.provider or rec.provider_ref != expected.provider_ref
+                or rec.status not in ("pending", "paid", "expired", "canceled")
+                or (result["refresh"] and (rec.status != "pending" or rec.provider != "stripe_sandbox" or not rec.provider_ref))):
+            raise ValueError("Wrong checkout")
+    except Exception:
+        raise DatabasePersistenceError("Invalid checkout status response.") from None
+    _cache_checkout_session(rec, persisted=True)
+    return rec, result["refresh"], result["provider_error"]
 
-        if rec.status == "pending" and now >= rec.expires_at:
-            rec.status = "expired"
-            _save_checkout_session(rec)
+
+def _claim_status_refresh(rec: CheckoutSessionRecord, token: str) -> tuple[CheckoutSessionRecord, bool, bool]:
+    # Allow connect + read timeouts and scheduling margin before abandoned-claim recovery.
+    lease_seconds = 2 * settings.checkout_status_provider_timeout_seconds + 30
+    if get_supabase_client() is not None:
+        current, refresh, provider_error = _status_rpc_result(db_billing_rpc("claim_checkout_status_refresh", {
+            "p_session_id": rec.id, "p_user_id": rec.user_id,
+            "p_token": token, "p_lease_seconds": lease_seconds,
+        }), rec)
+        if refresh and current.status_refresh_token != token:
+            raise DatabasePersistenceError("Invalid checkout refresh claim.")
+        return current, refresh, provider_error
+    with _reservations_lock:
+        current = _checkout_sessions.get(rec.id)
+        if current is None or current.user_id != rec.user_id:
+            raise DatabasePersistenceError("Checkout state unavailable.")
+        now = datetime.now(UTC)
+        leased = current.status_refresh_until is not None and current.status_refresh_until > now
+        fresh = current.status_refresh_after is not None and current.status_refresh_after > now
+        refresh = False
+        if current.status == "pending":
+            if current.provider == "stripe_sandbox" and current.provider_ref and not fresh and not leased:
+                current.status_refresh_token = token
+                current.status_refresh_until = now + timedelta(seconds=lease_seconds)
+                current.status_refresh_error = False
+                refresh = True
+            elif current.expires_at <= now and not leased:
+                current.status = "expired"
+                current.status_refresh_error = False
+        return replace(current), refresh, current.status == "pending" and current.status_refresh_error
+
+
+def _finish_status_refresh(rec: CheckoutSessionRecord, token: str, status: str) -> tuple[CheckoutSessionRecord, bool, bool]:
+    if get_supabase_client() is not None:
+        current, refresh, provider_error = _status_rpc_result(db_billing_rpc("finish_checkout_status_refresh", {
+            "p_session_id": rec.id, "p_user_id": rec.user_id, "p_token": token,
+            "p_status": status, "p_cache_seconds": settings.checkout_status_cache_seconds,
+        }), rec)
+        if refresh:
+            raise DatabasePersistenceError("Invalid checkout refresh completion.")
+        return current, refresh, provider_error
+    with _reservations_lock:
+        current = _checkout_sessions.get(rec.id)
+        if current is None or current.user_id != rec.user_id:
+            raise DatabasePersistenceError("Checkout state unavailable.")
+        now = datetime.now(UTC)
+        if current.status_refresh_token == token:
+            if current.status == "pending":
+                if status == "paid":
+                    current.status = "paid"
+                    current.paid_at = current.paid_at or now
+                elif status == "expired" or current.expires_at <= now:
+                    current.status = "expired"
+            current.status_refresh_after = now + timedelta(seconds=settings.checkout_status_cache_seconds)
+            current.status_refresh_until = None
+            current.status_refresh_token = None
+            current.status_refresh_error = current.status == "pending" and status == "error"
+        return replace(current), False, current.status == "pending" and current.status_refresh_error
+
+
+def _refresh_and_serialize_session(rec: CheckoutSessionRecord) -> CheckoutStatusOut:
+    from api.errors import ApiError
+
+    token = str(uuid.uuid4())
+    rec, refresh, provider_error = _claim_status_refresh(rec, token)
+    if refresh:
+        try:
+            remote_status = StripeSandboxProvider().get_status(rec.provider_ref)
+            if remote_status not in ("pending", "paid", "expired"):
+                remote_status = "error"
+        except Exception:
+            remote_status = "error"
+        # Persistence errors must propagate, including after a successful provider call.
+        rec, _, provider_error = _finish_status_refresh(rec, token, remote_status)
+    if provider_error:
+        raise ApiError(503, "SERVICE_UNAVAILABLE", "Payment service unavailable. Please try again shortly.")
 
     # A paid status can have been saved before a transient grant failure.
     # The grant RPC is idempotent, so status polling can safely finish activation.
@@ -857,6 +939,9 @@ def _refresh_and_serialize_session(rec: CheckoutSessionRecord) -> CheckoutStatus
 
 
 def get_checkout_status(session_id: str, user_id: str) -> CheckoutStatusOut:
+    from api.limiter import enforce_checkout_status_limit
+
+    enforce_checkout_status_limit(user_id)
     rec = _load_checkout_session_by_id(session_id)
     if rec is None or rec.user_id != user_id:
         raise HTTPException(
@@ -867,6 +952,9 @@ def get_checkout_status(session_id: str, user_id: str) -> CheckoutStatusOut:
 
 
 def get_checkout_status_by_ref(provider_ref: str, user_id: str) -> CheckoutStatusOut:
+    from api.limiter import enforce_checkout_status_limit
+
+    enforce_checkout_status_limit(user_id)
     rec = _load_checkout_session_by_ref(provider_ref)
     if rec is None or rec.user_id != user_id:
         raise HTTPException(
