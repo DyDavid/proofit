@@ -29,7 +29,8 @@ COPY engine ./engine
 
 # `api` extra: fastapi, uvicorn, pydantic-settings, anthropic, supabase, httpx.
 # `parse` extra: pdfminer.six, python-docx — resume/JD text extraction.
-RUN pip install --no-cache-dir ".[api,parse]"
+RUN python -m pip install --no-cache-dir --upgrade "pip>=26.3" \
+ && pip install --no-cache-dir ".[api,parse]"
 
 # The FastAPI application itself. Not pip-installed — see header comment.
 COPY api ./api
