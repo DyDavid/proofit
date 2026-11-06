@@ -41,6 +41,19 @@ def _unwrap_rpc_result(res: Any, op_name: str) -> dict[str, Any]:
     raise DatabasePersistenceError(f"Unexpected RPC payload from {op_name}")
 
 
+def db_billing_rpc(name: str, params: dict[str, Any]) -> dict[str, Any]:
+    """Required, server-only checkout coordination; never fall back to local state."""
+    client = get_supabase_client()
+    if client is None:
+        raise DatabasePersistenceError("Billing persistence is unavailable.")
+    try:
+        return _unwrap_rpc_result(client.rpc(name, params).execute(), name)
+    except DatabasePersistenceError:
+        raise
+    except Exception:
+        raise DatabasePersistenceError("Billing persistence operation failed.") from None
+
+
 def persistence_is_offline() -> bool:
     """Only explicit mock/offline operation may use process-local enforcement."""
     return settings.engine_mode == "mock" or settings.persistence_mode == "offline"

@@ -35,6 +35,7 @@ class StripeSandboxProvider:
 
         create_kwargs: dict[str, object] = {
             "api_key": api_key,
+            "idempotency_key": f"checkout:{checkout_session_id}",
             "mode": "payment",
             "line_items": [
                 {

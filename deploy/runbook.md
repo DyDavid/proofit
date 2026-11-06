@@ -200,6 +200,30 @@ the same database transaction; failed uploads release it. Abandoned reservations
 expire after `RESERVATION_TTL_SECONDS` (default 600). Expired uploads cannot save
 late and must be uploaded again. A missing or unavailable RPC returns 503.
 
+Before deploying the renewal and checkout protections, apply
+`data/migrations/007_billing_safety.sql` after migration 006. It coordinates
+pending checkout creation and paid pass grants across workers. An early renewal
+queues a new period after existing purchases; usage continues counting against
+the current period until the next one starts. Repeated payment notifications
+grant the same checkout only once.
+
+`REWRITE_ATTEMPTS_PER_HOUR=10` and `CHECKOUT_ATTEMPTS_PER_HOUR=10` are independent,
+non-refundable account safety budgets, including for admins. They apply in mock
+engine mode too, because rewrites can still call the real AI service. Cached
+rewrite results do not spend another attempt. Failed rewrites refund the normal
+plan quota but keep their attempt. The budgets use migration 005's existing
+server-only admission ledger with separate namespaces; a database failure
+returns 503. Offline operation uses local counters and requires one worker.
+
+Checkout requests reuse an unexpired pending session. Simultaneous requests
+while it is being created return 409 and can retry shortly; requests beyond the
+hourly budget return 429. A failed provider creation cancels its pending record
+but keeps its attempt. Abandoned creation claims expire after 30 minutes.
+`CHECKOUT_CACHE_MAX_ENTRIES=500` bounds the process cache. Persisted sessions can
+be reloaded after eviction; offline mode preserves pending sessions and rejects
+new checkouts if they fill the cache. Expired and completed offline sessions may
+be evicted to make room for new checkouts.
+
 New analyses and retries share `ANALYSIS_ATTEMPTS_PER_HOUR` (default 10 per account)
 or `GUEST_ANALYSIS_ATTEMPTS_PER_HOUR` (default 3 per salted guest IP). These safety
 limits also apply to admins and are separate from plan quotas. Failures can refund

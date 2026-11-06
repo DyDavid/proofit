@@ -30,7 +30,7 @@ from api.db import (
     get_supabase_client,
 )
 from api.errors import ApiError, new_error_id
-from api.limiter import enforce_analysis_attempt_limit
+from api.limiter import enforce_analysis_attempt_limit, enforce_operation_attempt_limit
 from api.quota import (
     commit_quota,
     release_quota,
@@ -1102,6 +1102,10 @@ def _create_rewrites_sync(analysis_id: str, user: CurrentUser | None) -> dict:
 
         if target_user_id and not (user and user.is_admin):
             reservation_id = reserve_quota(target_user_id, "rewrite", user=user)
+
+        # Failed AI calls may cost money even when the user's success quota is refunded.
+        subject = f"user:{target_user_id}" if target_user_id else f"guest-analysis:{analysis_id}"
+        enforce_operation_attempt_limit("rewrite", subject, settings.rewrite_attempts_per_hour)
 
         requirements_by_id = {r.id: r for r in match.job.requirements}
         evidence_by_id = {e.id: e for e in resume.evidence}

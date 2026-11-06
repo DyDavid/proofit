@@ -67,6 +67,9 @@ class Settings(BaseSettings):
     # Admission attempts are separate from refundable success quotas.
     analysis_attempts_per_hour: int = 10
     guest_analysis_attempts_per_hour: int = 3
+    rewrite_attempts_per_hour: int = 10
+    checkout_attempts_per_hour: int = 10
+    checkout_cache_max_entries: int = 500
 
     # Phase 4 multi-worker coordination & abandoned work recovery bounds
     analysis_abandoned_timeout_seconds: float = 600.0

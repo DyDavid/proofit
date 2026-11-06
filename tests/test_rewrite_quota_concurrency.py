@@ -234,10 +234,13 @@ def test_four_simultaneous_rewrite_requests_enforce_single_rewrite_quota(monkeyp
 # ============================================================================
 
 
-def test_duplicate_concurrent_requests_for_same_analysis_rejected() -> None:
+def test_duplicate_concurrent_requests_for_same_analysis_rejected(monkeypatch) -> None:
     """Simultaneous requests targeting the same analysis_id must not run duplicate
     in-flight AI generation; 1 succeeds (200) and concurrent duplicates get 409.
     """
+    # Give all four callers capacity to reach the per-analysis conflict check.
+    # Global overload (429) is covered separately by test_outbound_work_limits.
+    monkeypatch.setattr(settings, "max_concurrent_rewrites", 4)
     user_id = "user-dup-inflight"
     headers = _auth_header(user_id, "dup@example.com")
     analysis_id = _seed_done_analysis("an_dup_inflight", user_id=user_id)

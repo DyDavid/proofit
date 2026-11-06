@@ -92,7 +92,7 @@ def test_affected_requests_fail_safely_without_scheduling_work(required_db, monk
     else:
         # All chained table operations and RPCs raise on execute.
         query = MagicMock()
-        for method in ("select", "eq", "gt", "gte", "order", "limit", "maybe_single"):
+        for method in ("select", "eq", "gt", "gte", "lte", "order", "limit", "maybe_single"):
             getattr(query, method).return_value = query
         query.execute.side_effect = RuntimeError(secret)
         required_db.return_value.table.return_value = query
@@ -125,7 +125,7 @@ def test_affected_requests_fail_safely_without_scheduling_work(required_db, monk
 def test_initializer_recovers_without_creating_local_usage(required_db, monkeypatch):
     monkeypatch.setattr(settings, "enforce_quotas", True)
     client = MagicMock()
-    client.table.return_value.select.return_value.eq.return_value.gt.return_value.order.return_value.limit.return_value.execute.return_value.data = []
+    client.table.return_value.select.return_value.eq.return_value.gt.return_value.lte.return_value.order.return_value.limit.return_value.execute.return_value.data = []
     client.rpc.return_value.execute.return_value.data = {"allowed": True}
     required_db.side_effect = [RuntimeError("synthetic failure"), client]
     with pytest.raises(ApiError) as unavailable:

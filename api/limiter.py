@@ -94,12 +94,35 @@ class SlidingWindowRateLimiter:
 
 rate_limiter = SlidingWindowRateLimiter()
 analysis_attempt_limiter = SlidingWindowRateLimiter(evict_active=False)
+operation_attempt_limiter = SlidingWindowRateLimiter(evict_active=False)
 
 
 def reset_rate_limits() -> None:
     """Clear all in-memory rate limit state."""
     rate_limiter.reset()
     analysis_attempt_limiter.reset()
+    operation_attempt_limiter.reset()
+
+
+def enforce_operation_attempt_limit(operation: str, subject: str, limit: int) -> None:
+    """Non-refundable hourly budget, including mock-mode rewrites and checkout.
+
+    Use the existing server-only admission ledger with a separate namespace, so
+    operation budgets cannot consume or reset each other's counters.
+    """
+    key = f"{operation}:{subject}"
+    try:
+        if get_supabase_client() is not None:
+            allowed = limit > 0 and db_reserve_analysis_attempt(key, limit)
+        else:
+            operation_attempt_limiter.check(key, limit=limit, window_seconds=3600)
+            return
+    except DatabasePersistenceError:
+        raise ApiError(503, "SERVICE_UNAVAILABLE", "Request limits could not be verified. Please try again later.") from None
+    except ApiError as exc:
+        raise ApiError(exc.status_code, exc.code, "Too many attempts in the past hour. Please try again later.") from None
+    if not allowed:
+        raise ApiError(429, "RATE_LIMITED", "Too many attempts in the past hour. Please try again later.")
 
 
 def enforce_analysis_attempt_limit(request: Request, user: CurrentUser | None) -> None:

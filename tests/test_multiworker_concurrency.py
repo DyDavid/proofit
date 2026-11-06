@@ -11,7 +11,7 @@ from __future__ import annotations
 import concurrent.futures
 import copy
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import patch
@@ -19,6 +19,7 @@ from unittest.mock import patch
 import pytest
 from fastapi import HTTPException
 
+from api.billing import service as billing_service
 from api.billing.service import (
     commit_usage_reservation,
     get_subscription_summary,
@@ -27,6 +28,7 @@ from api.billing.service import (
 )
 from api.config import settings
 from api.errors import ApiError
+from api.limiter import enforce_operation_attempt_limit, reset_rate_limits
 from api.quota import check_quota, release_quota, reserve_quota
 from api.store import Store
 
@@ -92,6 +94,10 @@ class _SharedTableQuery:
         self._filters.append(("gte", col, val))
         return self
 
+    def lte(self, col: str, val: Any) -> _SharedTableQuery:
+        self._filters.append(("lte", col, val))
+        return self
+
     def in_(self, col: str, vals: list[Any]) -> _SharedTableQuery:
         self._filters.append(("in", col, list(vals)))
         return self
@@ -144,6 +150,8 @@ class SharedDatabaseBackend:
     usage_events: list[dict[str, Any]] = field(default_factory=list)
     usage_reservations: dict[str, dict[str, Any]] = field(default_factory=dict)
     guest_ip_usage: dict[str, dict[str, Any]] = field(default_factory=dict)
+    checkout_sessions: dict[str, dict[str, Any]] = field(default_factory=dict)
+    operation_attempts: dict[str, list[datetime]] = field(default_factory=dict)
     fail_all: bool = False
     fail_rpc_names: set[str] = field(default_factory=set)
     now_override: datetime | None = None
@@ -170,6 +178,9 @@ class SharedDatabaseBackend:
             elif op == "gte":
                 if rv is None or _parse_iso(rv) < _parse_iso(val):
                     return False
+            elif op == "lte":
+                if rv is None or _parse_iso(rv) > _parse_iso(val):
+                    return False
             elif op == "in" and rv not in val:
                 return False
         return True
@@ -189,6 +200,8 @@ class SharedDatabaseBackend:
             return list(self.usage_reservations.values())
         if table == "guest_ip_usage":
             return list(self.guest_ip_usage.values())
+        if table == "checkout_sessions":
+            return list(self.checkout_sessions.values())
         return []
 
     def _execute_table(self, q: _SharedTableQuery) -> _MockExecuteResult:
@@ -241,6 +254,8 @@ class SharedDatabaseBackend:
                         self.usage_reservations[str(row["id"])] = row
                     elif q._table == "guest_ip_usage":
                         self.guest_ip_usage[str(row["ip_hash"])] = row
+                    elif q._table == "checkout_sessions":
+                        self.checkout_sessions[str(row["id"])] = row
                 return _MockExecuteResult(data=items)
 
             if q._op == "update":
@@ -271,6 +286,49 @@ class SharedDatabaseBackend:
         with self._db_lock:
             now = self._now()
             now_iso = now.isoformat()
+
+            if fn_name == "reserve_analysis_attempt":
+                subject = params["p_subject"]
+                attempts = [ts for ts in self.operation_attempts.get(subject, [])
+                            if ts > now - timedelta(hours=1)]
+                allowed = len(attempts) < params["p_limit"]
+                if allowed:
+                    attempts.append(now)
+                self.operation_attempts[subject] = attempts
+                return _MockExecuteResult(data={"allowed": allowed})
+
+            if fn_name == "reserve_checkout_session":
+                for row in self.checkout_sessions.values():
+                    if (row["user_id"] == params["p_user_id"] and row["provider"] == params["p_provider"]
+                            and row["status"] == "pending" and _parse_iso(row["expires_at"]) > now):
+                        return _MockExecuteResult(data={"created": False, "session": copy.deepcopy(row)})
+                row = {
+                    "id": params["p_session_id"], "user_id": params["p_user_id"], "plan_id": "pass",
+                    "amount_cents": params["p_amount_cents"], "currency": params["p_currency"],
+                    "status": "pending", "provider": params["p_provider"], "provider_ref": None,
+                    "checkout_url": None, "expires_at": (now + timedelta(minutes=30)).isoformat(),
+                    "created_at": now_iso, "paid_at": None,
+                }
+                self.checkout_sessions[row["id"]] = row
+                return _MockExecuteResult(data={"created": True, "session": copy.deepcopy(row)})
+
+            if fn_name == "grant_checkout_pass":
+                session = self.checkout_sessions[params["p_session_id"]]
+                if session["status"] != "paid":
+                    raise RuntimeError("Checkout is not paid")
+                for sub in self.subscriptions:
+                    if sub.get("checkout_session_id") == session["id"]:
+                        return _MockExecuteResult(data={"subscription": copy.deepcopy(sub)})
+                start = max([now] + [_parse_iso(s["current_period_end"]) for s in self.subscriptions
+                                     if s["user_id"] == session["user_id"]])
+                sub = {
+                    "id": f"sub-{len(self.subscriptions)}", "user_id": session["user_id"],
+                    "plan_id": "pass", "current_period_start": start.isoformat(),
+                    "current_period_end": (start + timedelta(days=params["p_period_days"])).isoformat(),
+                    "provider": session["provider"], "checkout_session_id": session["id"],
+                }
+                self.subscriptions.append(sub)
+                return _MockExecuteResult(data={"subscription": copy.deepcopy(sub)})
 
             if fn_name == "reserve_user_quota":
                 user_id = str(params["p_user_id"])
@@ -964,4 +1022,81 @@ def test_documented_single_process_in_memory_fallback_and_abandoned_recovery() -
             assert orig.retried_by == child_2.id
             # child_1's reservation was released during recovery
             assert get_subscription_summary(user_id).usage.analysis.used == 0
+
+
+def test_current_quota_ignores_future_renewals_in_shared_database():
+    backend = SharedDatabaseBackend()
+    now = datetime.now(UTC)
+    current = {
+        "id": "current", "user_id": "renewing-user", "plan_id": "pass",
+        "current_period_start": (now - timedelta(days=1)).isoformat(),
+        "current_period_end": (now + timedelta(days=29)).isoformat(),
+    }
+    future = {
+        **current, "id": "future", "current_period_start": current["current_period_end"],
+        "current_period_end": (now + timedelta(days=59)).isoformat(),
+    }
+    backend.subscriptions.extend([current, future])
+    backend.usage_events.extend({"user_id": "renewing-user", "kind": "analysis", "created_at": now.isoformat()}
+                                for _ in range(50))
+    with patch("api.billing.service.get_supabase_client", return_value=backend), patch("api.db.get_supabase_client", return_value=backend):
+        assert billing_service._get_active_subscription_for_user("renewing-user").id == "current"
+        assert billing_service._get_latest_subscription_for_user("renewing-user").id == "future"
+        assert get_subscription_summary("renewing-user").usage.analysis.used == 50
+        assert billing_service.atomic_reserve_quota("renewing-user", "analysis")[0] is False
+
+
+@pytest.mark.parametrize("operation", ["rewrite", "checkout"])
+def test_attempt_budget_is_shared_even_when_worker_memory_resets(operation):
+    backend = SharedDatabaseBackend()
+
+    def attempt(_):
+        try:
+            enforce_operation_attempt_limit(operation, "user:same-user", 2)
+            return True
+        except ApiError as exc:
+            assert exc.status_code == 429
+            return False
+
+    with patch("api.limiter.get_supabase_client", return_value=backend), patch("api.db.get_supabase_client", return_value=backend):
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            assert sum(pool.map(attempt, range(12))) == 2
+        reset_rate_limits()
+        assert attempt(None) is False
+        backend.now_override = datetime.now(UTC) + timedelta(hours=1, seconds=1)
+        assert attempt(None) is True
+
+
+def test_checkout_claim_reuses_pending_session_across_workers():
+    backend = SharedDatabaseBackend()
+    with patch("api.billing.service.get_supabase_client", return_value=backend), patch("api.db.get_supabase_client", return_value=backend):
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            reservations = list(pool.map(lambda _: billing_service._reserve_checkout_session("same-user", "mock"), range(12)))
+        assert sum(claimed for _, claimed in reservations) == 1
+        assert len({rec.id for rec, _ in reservations}) == 1
+        first = reservations[0][0]
+        ready = replace(first, provider_ref="mock-reference")
+        billing_service._save_checkout_session(ready)
+        reset_billing_memory()
+        loaded, claimed = billing_service._reserve_checkout_session("same-user", "mock")
+        assert not claimed
+        assert loaded.id == ready.id and loaded.provider_ref == "mock-reference"
+
+
+def test_paid_grants_are_idempotent_and_queue_periods_across_workers():
+    backend = SharedDatabaseBackend()
+    with patch("api.billing.service.get_supabase_client", return_value=backend), patch("api.db.get_supabase_client", return_value=backend):
+        first, _ = billing_service._reserve_checkout_session("same-user", "mock")
+        first = replace(first, status="paid")
+        billing_service._save_checkout_session(first)
+        second, _ = billing_service._reserve_checkout_session("same-user", "mock")
+        second = replace(second, status="paid")
+        billing_service._save_checkout_session(second)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            granted = list(pool.map(billing_service.grant_plan, [first, second] * 4))
+        assert len({sub.id for sub in granted}) == len(backend.subscriptions) == 2
+        periods = sorted(backend.subscriptions, key=lambda row: row["current_period_start"])
+        assert periods[0]["current_period_end"] == periods[1]["current_period_start"]
+        assert billing_service._get_active_subscription_for_user("same-user").id == periods[0]["id"]
+        assert not billing_service._subscriptions  # Durable mode has no local grant fallback.
 
