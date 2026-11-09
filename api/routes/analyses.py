@@ -1091,7 +1091,7 @@ def _create_rewrites_sync(analysis_id: str, user: CurrentUser | None) -> dict:
     try:
         match = record.match
         resume = match.resume
-        if resume is None or match.job is None:
+        if resume is None or match.job is None or not match.job.requirements:
             with store._lock:
                 record.rewrite_status = "done"
                 record.rewrite_rejected_count = 0

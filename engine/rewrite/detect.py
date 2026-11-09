@@ -9,15 +9,45 @@ swallow every candidate.
 
 from __future__ import annotations
 
+import concurrent.futures
+
 from pydantic import ValidationError
 
-from engine.normalize.schema import Match, Resume
+from engine.normalize.schema import Match, Requirement, Resume
 from engine.rewrite import llm, prompts
 from engine.rewrite.models import HiddenStrengthCandidate
 
 __all__ = ["detect_hidden_strengths"]
 
 _CANDIDATE_VERDICTS = ("partial", "missing")
+
+
+def _detect_candidate_for_requirement(
+    requirement: Requirement,
+    evidence_lines: list[str],
+    known_evidence_ids: set[str],
+) -> HiddenStrengthCandidate | None:
+    try:
+        response = llm.call_structured(
+            system=prompts.DETECT_SYSTEM_PROMPT,
+            user=prompts.build_detect_user_prompt(requirement.text, evidence_lines),
+            tool_name=prompts.DETECT_TOOL_NAME,
+            tool_description="Report whether any evidence record satisfies the requirement.",
+            tool_schema=prompts.DETECT_TOOL_SCHEMA,
+        )
+        if not response.get("found"):
+            return None
+        evidence_id = response.get("evidence_id")
+        if evidence_id not in known_evidence_ids:
+            return None
+
+        return HiddenStrengthCandidate(
+            requirement_id=requirement.id,
+            evidence_id=evidence_id,
+            rationale=response.get("rationale") or "",
+        )
+    except (ValidationError, Exception):
+        return None
 
 
 def detect_hidden_strengths(match: Match, resume: Resume) -> list[HiddenStrengthCandidate]:
@@ -38,41 +68,40 @@ def detect_hidden_strengths(match: Match, resume: Resume) -> list[HiddenStrength
         trusted — the model inventing an id is a real failure mode, not a
         hypothetical one.
     """
-    if match.job is None:
+    if match.job is None or not match.job.requirements:
         return []
 
     known_evidence_ids = {e.id for e in resume.evidence}
     evidence_lines = [prompts.format_evidence_line(e) for e in resume.evidence]
 
-    candidates: list[HiddenStrengthCandidate] = []
+    target_requirements: list[Requirement] = []
     for result in match.results:
         if result.verdict not in _CANDIDATE_VERDICTS:
             continue
         requirement = next((r for r in match.job.requirements if r.id == result.requirement_id), None)
-        if requirement is None:
-            continue
+        if requirement is not None:
+            target_requirements.append(requirement)
 
-        response = llm.call_structured(
-            system=prompts.DETECT_SYSTEM_PROMPT,
-            user=prompts.build_detect_user_prompt(requirement.text, evidence_lines),
-            tool_name=prompts.DETECT_TOOL_NAME,
-            tool_description="Report whether any evidence record satisfies the requirement.",
-            tool_schema=prompts.DETECT_TOOL_SCHEMA,
-        )
-        if not response.get("found"):
-            continue
-        evidence_id = response.get("evidence_id")
-        if evidence_id not in known_evidence_ids:
-            continue
+    if not target_requirements:
+        return []
 
-        try:
-            candidates.append(
-                HiddenStrengthCandidate(
-                    requirement_id=requirement.id,
-                    evidence_id=evidence_id,
-                    rationale=response.get("rationale") or "",
-                )
-            )
-        except ValidationError:
-            continue
+    if len(target_requirements) == 1:
+        cand = _detect_candidate_for_requirement(target_requirements[0], evidence_lines, known_evidence_ids)
+        return [cand] if cand is not None else []
+
+    max_workers = min(4, len(target_requirements))
+    candidates: list[HiddenStrengthCandidate] = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [
+            executor.submit(_detect_candidate_for_requirement, req, evidence_lines, known_evidence_ids)
+            for req in target_requirements
+        ]
+        for fut in futures:
+            try:
+                candidate = fut.result()
+                if candidate is not None:
+                    candidates.append(candidate)
+            except Exception:
+                continue
+
     return candidates

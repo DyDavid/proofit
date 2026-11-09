@@ -30,6 +30,8 @@ const KNOWN_ERROR_CODES = [
   "ANALYSIS_NOT_READY",
   "RATE_LIMITED",
   "ENGINE_FAILED",
+  "UNAUTHORIZED",
+  "SERVICE_UNAVAILABLE",
   "INTERNAL",
 ] as const;
 
@@ -269,7 +271,11 @@ export function HiddenStrengths({ match, analysisId }: HiddenStrengthsProps) {
       <h2 className="mb-2 font-serif text-2xl text-ink">{t("title")}</h2>
       <p className="mb-5 max-w-2xl text-[15px] leading-[1.6] text-ink-2">{t("intro")}</p>
 
-      {analysisId ? (
+      {!match.job?.requirements || match.job.requirements.length === 0 ? (
+        <p className="mb-6 text-sm leading-[1.6] text-ink-3">
+          No job requirements were found in this job post to generate rewrites against.
+        </p>
+      ) : analysisId ? (
         <div className="mb-6">
           <Button
             type="button"
