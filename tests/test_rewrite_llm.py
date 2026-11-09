@@ -85,6 +85,7 @@ def test_missing_key_raises_before_any_call(monkeypatch) -> None:
         )
 
 
-def test_rewrite_model_can_be_overridden(monkeypatch) -> None:
-    monkeypatch.setenv("GEMINI_REWRITE_MODEL", "gemini-test-model")
+def test_rewrite_model_follows_shared_environment_setting(monkeypatch) -> None:
+    monkeypatch.setenv("GEMINI_MODEL", "gemini-test-model")
+    monkeypatch.setenv("GEMINI_REWRITE_MODEL", "obsolete-override")
     assert llm.get_model() == "gemini-test-model"

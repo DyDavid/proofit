@@ -76,6 +76,8 @@ Open `http://localhost:3000/results` or click **"Try a Sample Analysis"** on the
 ENGINE_MODE=live
 APP_VERSION=0.1.0
 GEMINI_API_KEY=...        # matching, embeddings AND rewrites
+GEMINI_MODEL=...          # generation model for extraction, matching AND rewrites
+GEMINI_EMBEDDING_MODEL=... # embedding model supporting 768 output dimensions
 SUPABASE_URL=https://<project-id>.supabase.co
 SUPABASE_KEY=eyJ...
 GUEST_IP_SALT=...         # random secret salt for SHA-256 guest IP hashing

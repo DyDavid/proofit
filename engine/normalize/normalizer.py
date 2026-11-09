@@ -15,7 +15,6 @@ from pydantic import BaseModel, Field
 
 from engine.gemini_client import (
     generate_structured_json,
-    get_extract_model,
     get_gemini_api_key,
 )
 from engine.normalize.parser import run_parser_in_process_with_timeout
@@ -158,7 +157,6 @@ def normalize_jd_text(text: str, timeout: float | None = None) -> Job:
         dto = generate_structured_json(
             prompt=prompt,
             response_schema=_JobLLM,
-            model_name=get_extract_model(),
             temperature=0.0,
             system_instruction="You are an expert recruitment parser. Extract at most 10 of the most essential job requirements, balancing key criteria from both the sidebar details and main requirements sections.",
             thinking_budget=0,
@@ -263,7 +261,6 @@ def normalize_resume_text(raw_text: str, timeout: float | None = None) -> Resume
         dto = generate_structured_json(
             prompt=prompt,
             response_schema=_ResumeLLM,
-            model_name=get_extract_model(),
             temperature=0.0,
             system_instruction="You are an expert resume parsing engine. Parse candidate evidence, skills, languages, and achievements comprehensively into structured JSON.",
             thinking_budget=0,

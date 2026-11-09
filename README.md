@@ -18,7 +18,7 @@ AUPP Final Year Project, 2026.
 | Frontend | Next.js 15 (App Router) · React 19 · TypeScript (strict) · Tailwind CSS 4 — **English only** |
 | API | FastAPI · pydantic-settings · `BackgroundTasks` for async analyses |
 | Engine | Importable Python package (`engine/`) · Pydantic v2 schema |
-| LLM | Google Gemini via `google-genai` (default model `gemini-3.1-flash-lite`; embeddings `gemini-embedding-001`, 768-d) |
+| LLM | Google Gemini via `google-genai` (`GEMINI_MODEL` for generation; `GEMINI_EMBEDDING_MODEL` for 768-d embeddings) |
 | Baseline | Hand-rolled TF-IDF cosine keyword matcher (`engine/match/baseline.py`) |
 | Parsing | `pdfminer.six` (PDF) · `python-docx` (DOCX) · `httpx` (URL fetch) |
 | Storage | Supabase (PostgreSQL + pgvector) when configured, in-memory fallback otherwise |
@@ -74,11 +74,19 @@ docker compose -f deploy/docker-compose.yml up --build
 
 All variables are documented in [`.env.example`](.env.example).
 
+To switch the generation model, change only `GEMINI_MODEL` in the root `.env`
+and restart the backend. Extraction, matching, and rewrites all use that value.
+There are no per-stage overrides or automatic switches to another model.
+On hosted deployments, set the same variable in the service environment and
+restart/redeploy; the local `.env` is not uploaded. Embeddings are configured
+separately with `GEMINI_EMBEDDING_MODEL` because they require an embedding model.
+
 | Variable | Purpose |
 |---|---|
 | `ENGINE_MODE` | `mock` (default) returns golden fixtures after `MOCK_DELAY_SECONDS`; `live` calls Gemini |
 | `GEMINI_API_KEY` | Required for `live`, and for F5 rewrites in **either** mode |
-| `GEMINI_MODEL` | Default `gemini-3.1-flash-lite` (`GEMINI_EXTRACT_MODEL` / `GEMINI_ANALYSIS_MODEL` override per stage) |
+| `GEMINI_MODEL` | Required for live generation and rewrites; selects the model for extraction, matching, and rewrites without remapping or model fallback |
+| `GEMINI_EMBEDDING_MODEL` | Required for live embeddings; choose an embedding model supporting 768 output dimensions |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` | Optional persistence; ignored in mock mode |
 | `MAX_UPLOAD_BYTES` | Resume upload ceiling (default 5 MB) |
 | `NEXT_PUBLIC_API_URL` | Where the Next.js rewrite sends `/api/*` |

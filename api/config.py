@@ -19,7 +19,6 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     mock_delay_seconds: float = 1.5
     max_upload_bytes: int = 5 * 1024 * 1024
-    gemini_model: str = "gemini-3.1-flash-lite"
     gemini_api_key: str | None = None
 
     supabase_url: str | None = None

@@ -28,6 +28,8 @@ def _default_mock_mode(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
     monkeypatch.setattr(stripe.RequestsClient, "request", block_stripe_network)
     monkeypatch.setenv("ENGINE_MODE", "mock")
+    monkeypatch.setenv("GEMINI_MODEL", "test-generation-model")
+    monkeypatch.setenv("GEMINI_EMBEDDING_MODEL", "test-embedding-model")
     monkeypatch.delenv("SUPABASE_URL", raising=False)
     monkeypatch.setattr(settings, "engine_mode", "mock")
     monkeypatch.setattr(settings, "persistence_mode", "offline")

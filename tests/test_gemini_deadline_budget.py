@@ -59,12 +59,12 @@ def test_sdk_fallback_respects_remaining_budget(monkeypatch, kind, spent):
     assert client_factory.call_args.kwargs["http_options"].retry_options.attempts == 1
 
 
-def test_next_model_does_not_restart_expired_budget(monkeypatch):
+@pytest.mark.parametrize("kind", ["structured", "text"])
+def test_sdk_error_does_not_restart_expired_budget(monkeypatch, kind):
     monkeypatch.setenv("ENGINE_MODE", "live")
     monkeypatch.setattr(gc, "get_gemini_api_key", lambda: "synthetic-key")
     monkeypatch.setattr(gc, "_GENAI_NEW", True)
     monkeypatch.setattr(gc, "_GENAI_LEGACY", False)
-    monkeypatch.setattr(gc, "FALLBACK_MODELS", ["fallback-model"])
     clock = [0.0]
     monkeypatch.setattr(gc, "time", SimpleNamespace(monotonic=lambda: clock[0]))
     client = MagicMock()
@@ -76,5 +76,8 @@ def test_next_model_does_not_restart_expired_budget(monkeypatch):
     client.models.generate_content.side_effect = fail
     monkeypatch.setattr("google.genai.Client", MagicMock(return_value=client))
     with pytest.raises(TimeoutError):
-        gc.generate_gemini_text("synthetic", model_name="preferred-model", timeout=1)
+        if kind == "structured":
+            gc.generate_structured_json("synthetic", Result, timeout=1)
+        else:
+            gc.generate_gemini_text("synthetic", timeout=1)
     assert client.models.generate_content.call_count == 1

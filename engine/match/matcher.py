@@ -17,7 +17,6 @@ from pydantic import BaseModel, Field
 
 from engine.gemini_client import (
     generate_structured_json,
-    get_analysis_model,
     get_gemini_api_key,
 )
 from engine.match.rules import (
@@ -129,7 +128,6 @@ def run_match_engine(
         dto = generate_structured_json(
             prompt=prompt,
             response_schema=_AllVerdictsLLM,
-            model_name=get_analysis_model(),
             temperature=0.0,
             system_instruction="You are a strict, ultra-concise recruitment matcher. Output concise single-sentence rationales under 15 words.",
             thinking_budget=0,

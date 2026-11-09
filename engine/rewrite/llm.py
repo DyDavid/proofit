@@ -42,8 +42,8 @@ class RateLimitedError(RuntimeError):
 
 
 def get_model() -> str:
-    """`GEMINI_REWRITE_MODEL` if set, otherwise the engine's default Gemini model."""
-    return os.getenv("GEMINI_REWRITE_MODEL") or get_default_gemini_model()
+    """Use the same GEMINI_MODEL setting as extraction and matching."""
+    return get_default_gemini_model()
 
 
 def _get_client() -> Any:
