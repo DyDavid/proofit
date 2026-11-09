@@ -36,70 +36,64 @@ export function PricingGrid({ onStartCheckout }: PricingGridProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [plans, setPlans] = useState<PlanDefinition[]>(DEFAULT_PLANS);
-  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
-  const [authChecked, setAuthChecked] = useState<boolean>(false);
+  // undefined means the browser session is still being restored.
+  const [userId, setUserId] = useState<string | null | undefined>(undefined);
+  const authChecked = userId !== undefined;
+  const isLoggedIn = Boolean(userId);
   const [subscription, setSubscription] = useState<SubscriptionSummary | null>(
     null,
   );
   const [checkoutPlan, setCheckoutPlan] = useState<PlanDefinition | null>(null);
   const [campusModalOpen, setCampusModalOpen] = useState<boolean>(false);
   const [autoTriggered, setAutoTriggered] = useState<boolean>(false);
-
-  const reloadSubscription = useCallback(async () => {
-    const sub = await fetchSubscription();
-    if (sub) {
-      setSubscription(sub);
-    }
-  }, []);
+  const [subscriptionVersion, setSubscriptionVersion] = useState(0);
 
   useEffect(() => {
     let mounted = true;
 
-    async function load() {
-      const [loadedPlans, supabase] = await Promise.all([
-        fetchPlans(),
-        Promise.resolve(createClient()),
-      ]);
-      if (!mounted) return;
-      setPlans(loadedPlans);
-
-      if (!supabase) {
-        setIsLoggedIn(false);
-        setAuthChecked(true);
-        return;
-      }
-
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!mounted) return;
-
-      if (user) {
-        setIsLoggedIn(true);
-        const sub = await fetchSubscription();
-        if (!mounted) return;
-        setSubscription(
-          sub ?? {
-            plan_id: "free",
-            active_until: null,
-            usage: {
-              analysis: { used: 0, limit: 3 },
-              rewrite: { used: 0, limit: 1 },
-            },
-          },
-        );
-      } else {
-        setIsLoggedIn(false);
-        setSubscription(null);
-      }
-      setAuthChecked(true);
-    }
-
-    void load();
+    void fetchPlans().then((loadedPlans) => {
+      if (mounted) setPlans(loadedPlans);
+    });
     return () => {
       mounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    const supabase = createClient();
+    if (!supabase) {
+      setUserId(null);
+      return;
+    }
+
+    // INITIAL_SESSION arrives after session restoration; later events keep
+    // pricing in sync with sign-in, sign-out, and token refresh across tabs.
+    const {
+      data: { subscription: authSubscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUserId(session?.user.id ?? null);
+      if (!session) {
+        setCheckoutPlan(null);
+        setAutoTriggered(false);
+      }
+    });
+
+    return () => authSubscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    setSubscription(null);
+    if (userId) {
+      // Keep network/auth calls outside the auth event callback.
+      void fetchSubscription().then((sub) => {
+        if (mounted) setSubscription(sub);
+      });
+    }
+    return () => {
+      mounted = false;
+    };
+  }, [userId, subscriptionVersion]);
 
   const startPassCheckout = useCallback(
     (passPlan: PlanDefinition) => {
@@ -151,6 +145,16 @@ export function PricingGrid({ onStartCheckout }: PricingGridProps) {
         onAction: () => {
           setCampusModalOpen(true);
         },
+      };
+    }
+
+    if (!authChecked) {
+      return {
+        ctaLabel: "Checking account…",
+        disabled: true,
+        showArrow: false,
+        activeUntilText: null,
+        onAction: () => {},
       };
     }
 
@@ -248,7 +252,7 @@ export function PricingGrid({ onStartCheckout }: PricingGridProps) {
           isExtending={isPassActive}
           onClose={() => setCheckoutPlan(null)}
           onCompleted={() => {
-            void reloadSubscription();
+            setSubscriptionVersion((version) => version + 1);
           }}
         />
       )}
