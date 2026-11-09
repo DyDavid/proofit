@@ -10,6 +10,7 @@ swallow every candidate.
 from __future__ import annotations
 
 import concurrent.futures
+import contextvars
 
 from pydantic import ValidationError
 
@@ -27,26 +28,26 @@ def _detect_candidate_for_requirement(
     evidence_lines: list[str],
     known_evidence_ids: set[str],
 ) -> HiddenStrengthCandidate | None:
-    try:
-        response = llm.call_structured(
-            system=prompts.DETECT_SYSTEM_PROMPT,
-            user=prompts.build_detect_user_prompt(requirement.text, evidence_lines),
-            tool_name=prompts.DETECT_TOOL_NAME,
-            tool_description="Report whether any evidence record satisfies the requirement.",
-            tool_schema=prompts.DETECT_TOOL_SCHEMA,
-        )
-        if not response.get("found"):
-            return None
-        evidence_id = response.get("evidence_id")
-        if evidence_id not in known_evidence_ids:
-            return None
+    response = llm.call_structured(
+        system=prompts.DETECT_SYSTEM_PROMPT,
+        user=prompts.build_detect_user_prompt(requirement.text, evidence_lines),
+        tool_name=prompts.DETECT_TOOL_NAME,
+        tool_description="Report whether any evidence record satisfies the requirement.",
+        tool_schema=prompts.DETECT_TOOL_SCHEMA,
+    )
+    if not response.get("found"):
+        return None
+    evidence_id = response.get("evidence_id")
+    if evidence_id not in known_evidence_ids:
+        return None
 
+    try:
         return HiddenStrengthCandidate(
             requirement_id=requirement.id,
             evidence_id=evidence_id,
             rationale=response.get("rationale") or "",
         )
-    except (ValidationError, Exception):
+    except ValidationError:
         return None
 
 
@@ -89,19 +90,22 @@ def detect_hidden_strengths(match: Match, resume: Resume) -> list[HiddenStrength
         cand = _detect_candidate_for_requirement(target_requirements[0], evidence_lines, known_evidence_ids)
         return [cand] if cand is not None else []
 
-    max_workers = min(4, len(target_requirements))
+    max_workers = min(3, len(target_requirements))
     candidates: list[HiddenStrengthCandidate] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [
-            executor.submit(_detect_candidate_for_requirement, req, evidence_lines, known_evidence_ids)
+            executor.submit(
+                contextvars.copy_context().run,
+                _detect_candidate_for_requirement,
+                req,
+                evidence_lines,
+                known_evidence_ids,
+            )
             for req in target_requirements
         ]
         for fut in futures:
-            try:
-                candidate = fut.result()
-                if candidate is not None:
-                    candidates.append(candidate)
-            except Exception:
-                continue
+            candidate = fut.result()
+            if candidate is not None:
+                candidates.append(candidate)
 
     return candidates

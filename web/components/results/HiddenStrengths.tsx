@@ -227,6 +227,7 @@ export function HiddenStrengths({ match, analysisId }: HiddenStrengthsProps) {
   );
   const [rejectedCount, setRejectedCount] = React.useState(0);
   const [loading, setLoading] = React.useState(false);
+  const [hasRun, setHasRun] = React.useState((match.hidden_strengths?.length ?? 0) > 0);
   const [errorCode, setErrorCode] = React.useState<string | null>(null);
   const [dismissed, setDismissed] = React.useState<Set<string>>(new Set());
   const [liveMessage, setLiveMessage] = React.useState("");
@@ -247,6 +248,7 @@ export function HiddenStrengths({ match, analysisId }: HiddenStrengthsProps) {
       const res = await createRewrites(analysisId);
       setStrengths(res.hidden_strengths);
       setRejectedCount(res.rejected_count);
+      setHasRun(true);
     } catch (err) {
       setErrorCode(err instanceof ApiError && err.code ? err.code : "INTERNAL");
     } finally {
@@ -316,7 +318,11 @@ export function HiddenStrengths({ match, analysisId }: HiddenStrengthsProps) {
       </div>
 
       {visible.length === 0 ? (
-        <p className="text-sm leading-[1.6] text-ink-3">{t("empty")}</p>
+        <p className="text-sm leading-[1.6] text-ink-3">
+          {hasRun
+            ? "Checked your resume against all partial and missing requirements — no additional hidden strengths were found in your current resume lines for this role."
+            : t("empty")}
+        </p>
       ) : (
         <div className="grid gap-4">
           {visible.map((item) => (
