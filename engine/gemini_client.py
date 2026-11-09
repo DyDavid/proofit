@@ -59,7 +59,7 @@ def _get_eff_timeout(timeout: float | None = None) -> float:
         from api.config import settings
         return max(0.05, float(settings.external_call_timeout_seconds))
     except Exception:
-        return float(os.getenv("EXTERNAL_CALL_TIMEOUT_SECONDS", "25.0"))
+        return float(os.getenv("EXTERNAL_CALL_TIMEOUT_SECONDS", "45.0"))
 
 
 def _remaining_timeout(deadline: float) -> float:

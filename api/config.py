@@ -68,8 +68,8 @@ class Settings(BaseSettings):
     # Phase 2 live analysis concurrency and execution bounds
     max_concurrent_analyses: int = 3
     max_queued_analyses: int = 10
-    analysis_timeout_seconds: float = 60.0
-    external_call_timeout_seconds: float = 25.0
+    analysis_timeout_seconds: float = 90.0
+    external_call_timeout_seconds: float = 45.0
     # Admission attempts are separate from refundable success quotas.
     analysis_attempts_per_hour: int = 10
     guest_analysis_attempts_per_hour: int = 3

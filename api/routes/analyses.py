@@ -618,6 +618,9 @@ def _execute_live_analysis_sync(
                         f"Resume normalization timed out after {res_timeout:.2f}s."
                     ) from err
 
+                if not fut_job.done():
+                    store.update_analysis(analysis_id, stage="reading_job")
+
                 job_timeout = min(
                     ext_call_cap, _remaining_deadline(deadline, "reading_jd")
                 )
