@@ -5,6 +5,7 @@ import * as React from "react";
 
 import { UpgradePrompt } from "@/components/billing/UpgradePrompt";
 import { Button } from "@/components/ui/Button";
+import { consumeDemoRewrite, getDemoEntitlement } from "@/lib/billing/entitlement";
 import { ApiError, createRewrites } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type { Evidence, HiddenStrength, Match } from "@/lib/types";
@@ -242,10 +243,18 @@ export function HiddenStrengths({ match, analysisId }: HiddenStrengthsProps) {
 
   async function run() {
     if (!analysisId) return;
+
+    const demo = getDemoEntitlement();
+    if (demo && demo.rewritesRemaining <= 0) {
+      setErrorCode("quota_exceeded");
+      return;
+    }
+
     setLoading(true);
     setErrorCode(null);
     try {
       const res = await createRewrites(analysisId);
+      consumeDemoRewrite();
       setStrengths(res.hidden_strengths);
       setRejectedCount(res.rejected_count);
       setHasRun(true);

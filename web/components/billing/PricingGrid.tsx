@@ -204,14 +204,21 @@ export function PricingGrid({ onStartCheckout }: PricingGridProps) {
     }
 
     if (isPassActive) {
+      const daysLeft = subscription?.active_until
+        ? Math.max(
+            0,
+            Math.ceil(
+              (new Date(subscription.active_until).getTime() - Date.now()) /
+                (1000 * 60 * 60 * 24),
+            ),
+          )
+        : 30;
       return {
-        ctaLabel: "Extend pass",
-        disabled: false,
-        showArrow: true,
+        ctaLabel: `Active · ${daysLeft} ${daysLeft === 1 ? "day" : "days"} left`,
+        disabled: true,
+        showArrow: false,
         activeUntilText: formatActiveUntil(subscription?.active_until),
-        onAction: () => {
-          startPassCheckout(plan);
-        },
+        onAction: () => {},
       };
     }
 

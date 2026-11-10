@@ -8,6 +8,7 @@ import { ResumeDropzone } from "@/components/analyze/ResumeDropzone";
 import { TurnstileWidget } from "@/components/auth/TurnstileWidget";
 import { UpgradePrompt } from "@/components/billing/UpgradePrompt";
 import { UsageMeter } from "@/components/billing/UsageMeter";
+import { consumeDemoAnalysis, getDemoEntitlement } from "@/lib/billing/entitlement";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import Link from "next/link";
@@ -119,6 +120,16 @@ export function AnalyzeForm() {
     setFormError(null);
     setGuestLimitHit(false);
     setQuotaError(null);
+
+    const demo = getDemoEntitlement();
+    if (demo && demo.analysesRemaining <= 0) {
+      setQuotaError(
+        "You have used all analysis credits included in your Job Hunt Pass. Upgrade on Pricing to continue.",
+      );
+      setSubmitting(false);
+      return;
+    }
+
     try {
       let resumeId: string;
       if (file) {
@@ -140,6 +151,7 @@ export function AnalyzeForm() {
         country,
         turnstile_token: turnstileToken ?? undefined,
       });
+      consumeDemoAnalysis();
       setTurnstileReset((n) => n + 1);
       router.push(`/progress?id=${analysis_id}${cached ? "&cached=1" : ""}`);
     } catch (err) {
