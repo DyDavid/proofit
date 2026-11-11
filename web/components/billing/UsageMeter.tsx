@@ -6,6 +6,7 @@ import {
   fetchSubscription,
   type SubscriptionSummary,
 } from "@/lib/billing/api";
+import { createClient } from "@/lib/supabase/client";
 
 function formatEndDate(iso: string | null, planId?: string): string {
   if (planId === "campus") return "Unlimited lifetime access";
@@ -19,30 +20,40 @@ function formatEndDate(iso: string | null, planId?: string): string {
   })}`;
 }
 
-const SUB_CACHE_KEY = "proofit:subscription-cache";
-
 export function UsageMeter() {
   const [sub, setSub] = useState<SubscriptionSummary | null>(null);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     let mounted = true;
-    try {
-      const cached = sessionStorage.getItem(SUB_CACHE_KEY);
-      if (cached) {
-        setSub(JSON.parse(cached) as SubscriptionSummary);
-        setLoaded(true);
-      }
-    } catch {
-      // Ignore storage read error
-    }
 
     async function load() {
+      const supabase = createClient();
+      const user = (await supabase?.auth.getUser())?.data.user;
+      if (!user) {
+        if (mounted) {
+          setSub(null);
+          setLoaded(true);
+        }
+        return;
+      }
+
+      const cacheKey = `proofit:subscription-cache:${user.id}`;
+      try {
+        const cached = sessionStorage.getItem(cacheKey);
+        if (cached && mounted) {
+          setSub(JSON.parse(cached) as SubscriptionSummary);
+          setLoaded(true);
+        }
+      } catch {
+        // Ignore storage read error
+      }
+
       const data = await fetchSubscription();
       if (!mounted) return;
       if (data) {
         try {
-          sessionStorage.setItem(SUB_CACHE_KEY, JSON.stringify(data));
+          sessionStorage.setItem(cacheKey, JSON.stringify(data));
         } catch {
           // Ignore storage write error
         }

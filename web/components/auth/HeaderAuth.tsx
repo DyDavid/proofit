@@ -104,6 +104,12 @@ export function HeaderAuth({ planLabel }: HeaderAuthProps) {
     } catch {
       // Ignore network error if browser signOut already succeeded
     }
+    try {
+      sessionStorage.clear();
+    } catch {
+      // Ignore storage error
+    }
+    window.dispatchEvent(new CustomEvent("proofit:subscription-updated"));
     setEmail(null);
     setDynamicPlanLabel("Free");
     router.push("/");
