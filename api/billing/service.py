@@ -170,6 +170,11 @@ def _get_active_subscription_for_user(user_id: str) -> SubscriptionRecord | None
                     provider=row.get("provider", "mock"),
                     checkout_session_id=row.get("checkout_session_id"),
                 )
+            # Database query succeeded and returned 0 rows: purge any stale in-memory
+            # entries for this user (e.g. if a row was deleted manually in SQL)
+            # and return None immediately instead of falling through to _subscriptions.
+            _subscriptions[:] = [s for s in _subscriptions if s.user_id != user_id]
+            return None
         except Exception:
             pass
 
