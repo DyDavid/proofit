@@ -99,6 +99,7 @@ Thumbs.db
 *~
 
 # ─── Local tooling scratch ─────────────────────────────────────────────────
+data/.cache/
 .claude/settings.local.json
 scratch/
 tmp/
