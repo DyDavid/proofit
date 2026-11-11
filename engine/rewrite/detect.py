@@ -9,6 +9,9 @@ swallow every candidate.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any
+
 from pydantic import ValidationError
 
 from engine.normalize.schema import Match, Resume
@@ -52,32 +55,42 @@ def detect_hidden_strengths(match: Match, resume: Resume) -> list[HiddenStrength
     candidate_results.sort(key=lambda r: 0 if r.verdict == "partial" else 1)
     candidate_results = candidate_results[:MAX_DETECT_CHECKS]
 
-    for result in candidate_results:
-        requirement = next((r for r in match.job.requirements if r.id == result.requirement_id), None)
-        if requirement is None:
-            continue
+    def _check_requirement(result: Any) -> HiddenStrengthCandidate | None:
+        req = next((r for r in match.job.requirements if r.id == result.requirement_id), None)
+        if req is None:
+            return None
 
         response = llm.call_structured(
             system=prompts.DETECT_SYSTEM_PROMPT,
-            user=prompts.build_detect_user_prompt(requirement.text, evidence_lines),
+            user=prompts.build_detect_user_prompt(req.text, evidence_lines),
             tool_name=prompts.DETECT_TOOL_NAME,
             tool_description="Report whether any evidence record satisfies the requirement.",
             tool_schema=prompts.DETECT_TOOL_SCHEMA,
         )
         if not response.get("found"):
-            continue
-        evidence_id = response.get("evidence_id")
-        if evidence_id not in known_evidence_ids:
-            continue
+            return None
+        ev_id = response.get("evidence_id")
+        if ev_id not in known_evidence_ids:
+            return None
 
         try:
-            candidates.append(
-                HiddenStrengthCandidate(
-                    requirement_id=requirement.id,
-                    evidence_id=evidence_id,
-                    rationale=response.get("rationale") or "",
-                )
+            return HiddenStrengthCandidate(
+                requirement_id=req.id,
+                evidence_id=ev_id,
+                rationale=response.get("rationale") or "",
             )
         except ValidationError:
-            continue
+            return None
+
+    if len(candidate_results) <= 1:
+        for result in candidate_results:
+            cand = _check_requirement(result)
+            if cand is not None:
+                candidates.append(cand)
+    else:
+        with ThreadPoolExecutor(max_workers=min(len(candidate_results), MAX_DETECT_CHECKS)) as executor:
+            for cand in executor.map(_check_requirement, candidate_results):
+                if cand is not None:
+                    candidates.append(cand)
+
     return candidates

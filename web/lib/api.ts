@@ -147,8 +147,8 @@ export interface CreateRewritesResponse {
  * so this is only ever invoked from a direct button press, never on mount.
  * `POST /api/analyses/{id}/rewrites` takes no body — `analysis_id` in the
  * path is the whole request, same shape as `retryAnalysis` above.
- * Uses an AbortController with an 18-second timeout to avoid exhausting
- * browser connection pools or locking up page navigation if the backend is slow.
+ * Uses an AbortController with a 60-second timeout to allow LLM generation
+ * and multi-candidate validation to finish cleanly.
  */
 export async function createRewrites(
   id: string,
@@ -157,7 +157,7 @@ export async function createRewrites(
   const headers = await authHeaders();
   const controller = new AbortController();
 
-  const timeoutId = setTimeout(() => controller.abort(), 18000);
+  const timeoutId = setTimeout(() => controller.abort(), 60000);
   if (signal) {
     signal.addEventListener("abort", () => controller.abort(), { once: true });
   }
