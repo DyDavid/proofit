@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Literal
 
 from api.db import (
+    db_cleanup_expired_records,
     db_create_analysis,
     db_get_analysis,
     db_get_guest_ip_last_used,
@@ -85,6 +86,21 @@ def _content_hash(text: str) -> str:
     return hashlib.sha256(text.strip().lower().encode("utf-8")).hexdigest()[:16]
 
 
+def _parse_created_at(raw: object) -> datetime:
+    if isinstance(raw, datetime):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            return datetime.fromisoformat(raw.strip().replace("Z", "+00:00"))
+        except ValueError:
+            pass
+    return utcnow()
+
+
+RETENTION_DAYS = 30
+CLEANUP_INTERVAL_SECONDS = 3600
+
+
 @dataclass
 class ResumeRecord:
     id: str
@@ -95,6 +111,7 @@ class ResumeRecord:
     raw_text: str | None = None
     normalized: Resume | None = None
     user_id: str | None = None
+    created_at: datetime = field(default_factory=utcnow)
 
 
 @dataclass
@@ -104,6 +121,7 @@ class JobRecord:
     source: Literal["text", "url"]
     raw: str
     normalized: Job | None = None
+    created_at: datetime = field(default_factory=utcnow)
 
 
 @dataclass
@@ -157,6 +175,54 @@ class Store:
     #: back two *different* names — silently pairing a match with a baseline
     #: from an unrelated fixture. Caching makes the pick idempotent per job_id.
     _picked_fixture_names: dict[str, str] = field(default_factory=dict)
+    _last_cleanup_at: datetime | None = None
+
+    def cleanup_expired_records(
+        self,
+        retention_days: int = RETENTION_DAYS,
+        *,
+        force: bool = False,
+    ) -> dict[str, int]:
+        """Purge analyses, saved resumes, jobs, and guest IP logs older than `retention_days`.
+
+        Throttled by `CLEANUP_INTERVAL_SECONDS` (1 hour) unless `force=True` so
+        calling it on hot paths adds zero latency to user requests.
+        """
+        now = utcnow()
+        if (
+            not force
+            and self._last_cleanup_at is not None
+            and (now - self._last_cleanup_at).total_seconds() < CLEANUP_INTERVAL_SECONDS
+        ):
+            return {}
+
+        self._last_cleanup_at = now
+        cutoff = now - timedelta(days=retention_days)
+
+        expired_analyses = [aid for aid, a in self.analyses.items() if a.created_at < cutoff]
+        for aid in expired_analyses:
+            self.analyses.pop(aid, None)
+
+        expired_resumes = [rid for rid, r in self.resumes.items() if r.created_at < cutoff]
+        for rid in expired_resumes:
+            self.resumes.pop(rid, None)
+
+        expired_jobs = [jid for jid, j in self.jobs.items() if j.created_at < cutoff]
+        for jid in expired_jobs:
+            job = self.jobs.pop(jid, None)
+            if job and self.jobs_by_hash.get(job.content_hash) == jid:
+                self.jobs_by_hash.pop(job.content_hash, None)
+
+        expired_ips = [ip for ip, ts in self.guest_ip_usage.items() if ts < cutoff]
+        for ip in expired_ips:
+            self.guest_ip_usage.pop(ip, None)
+
+        db_counts = db_cleanup_expired_records(retention_days=retention_days)
+        return {
+            "analyses": max(len(expired_analyses), db_counts.get("analyses", 0)),
+            "resumes": max(len(expired_resumes), db_counts.get("resumes", 0)),
+            "jobs": max(len(expired_jobs), db_counts.get("jobs", 0)),
+        }
 
     def add_resume(
         self,
@@ -202,17 +268,26 @@ class Store:
         filename: str | None = None,
     ) -> ResumeRecord | None:
         """Find an existing resume for `user_id` (optionally matching `filename`)."""
+        self.cleanup_expired_records()
+        cutoff = utcnow() - timedelta(days=RETENTION_DAYS)
         target_name = filename.strip().lower() if filename else None
         for r in reversed(list(self.resumes.values())):
-            if r.user_id == user_id and (
-                target_name is None or r.filename.strip().lower() == target_name
+            if (
+                r.user_id == user_id
+                and r.created_at >= cutoff
+                and (target_name is None or r.filename.strip().lower() == target_name)
             ):
                 return r
 
         client = get_supabase_client()
         if client is not None:
             with contextlib.suppress(Exception):
-                query = client.table("resumes").select("*").eq("user_id", user_id)
+                query = (
+                    client.table("resumes")
+                    .select("*")
+                    .eq("user_id", user_id)
+                    .gte("created_at", cutoff.isoformat())
+                )
                 if filename:
                     query = query.eq("filename", filename)
                 res = query.limit(1).execute()
@@ -231,12 +306,15 @@ class Store:
                         raw_text=row.get("raw_text"),
                         normalized=norm_obj,
                         user_id=row.get("user_id"),
+                        created_at=_parse_created_at(row.get("created_at")),
                     )
                     self.resumes[rec.id] = rec
                     return rec
         return None
 
     def count_user_resumes(self, user_id: str) -> int:
+        self.cleanup_expired_records()
+        cutoff = utcnow() - timedelta(days=RETENTION_DAYS)
         client = get_supabase_client()
         if client is not None:
             try:
@@ -244,13 +322,14 @@ class Store:
                     client.table("resumes")
                     .select("id", count="exact")
                     .eq("user_id", user_id)
+                    .gte("created_at", cutoff.isoformat())
                     .execute()
                 )
                 if res.count is not None:
                     return int(res.count)
             except Exception:
                 pass
-        return sum(1 for r in self.resumes.values() if r.user_id == user_id)
+        return sum(1 for r in self.resumes.values() if r.user_id == user_id and r.created_at >= cutoff)
 
     def get_resume(self, resume_id: str) -> ResumeRecord | None:
         if resume_id in self.resumes:
@@ -268,6 +347,7 @@ class Store:
                     raw_text=row.get("raw_text"),
                     normalized=norm_obj,
                     user_id=row.get("user_id"),
+                    created_at=_parse_created_at(row.get("created_at")),
                 )
                 self.resumes[rec.id] = rec
                 return rec
@@ -421,6 +501,7 @@ class Store:
         user_id: str | None = None,
         is_guest: bool = False,
     ) -> AnalysisRecord:
+        self.cleanup_expired_records()
         record = AnalysisRecord(
             id=_new_id("an"),
             resume_id=resume_id,
@@ -472,9 +553,15 @@ class Store:
           `not is_guest`) analyses matching `resume_id`. Never leaks another
           user's rows.
         """
+        self.cleanup_expired_records()
+        cutoff = utcnow() - timedelta(days=RETENTION_DAYS)
+
         if get_supabase_client() and user_id is not None:
             for row in db_list_analyses(user_id=user_id):
                 aid = row.get("id")
+                row_created = _parse_created_at(row.get("created_at"))
+                if row_created < cutoff:
+                    continue
                 if aid and aid not in self.analyses:
                     match_obj = Match.model_validate(row["match"]) if row.get("match") else None
                     self.analyses[aid] = AnalysisRecord(
@@ -488,11 +575,12 @@ class Store:
                         error_message=row.get("error_message"),
                         user_id=row.get("user_id"),
                         is_guest=False,
+                        created_at=row_created,
                     )
 
         done: list[AnalysisRecord] = []
         for a in self.analyses.values():
-            if a.status != "done" or a.match is None or a.is_guest:
+            if a.status != "done" or a.match is None or a.is_guest or a.created_at < cutoff:
                 continue
             if user_id is not None:
                 if a.user_id == user_id or (resume_id and a.resume_id == resume_id and a.user_id is None):
@@ -584,6 +672,7 @@ class Store:
                         error_message=row.get("error_message"),
                         user_id=row.get("user_id"),
                         is_guest=False,
+                        created_at=_parse_created_at(row.get("created_at")),
                     )
                     self.analyses[rec.id] = rec
                     return rec
@@ -603,6 +692,7 @@ class Store:
                         stage=row.get("stage"),
                         user_id=row.get("user_id"),
                         is_guest=False,
+                        created_at=_parse_created_at(row.get("created_at")),
                     )
                     self.analyses[rec.id] = rec
                     return rec

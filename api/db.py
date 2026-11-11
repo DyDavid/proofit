@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from api.config import settings
@@ -342,3 +343,41 @@ def db_save_resume_evidence(resume_id: str, evidence: list[dict[str, Any]], embe
     except Exception as err:
         logger.error("Error saving resume evidence for %s: %s", resume_id, err)
         return False
+
+
+# ============================================================================
+# 30-Day Storage Retention Cleanup
+# ============================================================================
+
+def db_cleanup_expired_records(retention_days: int = 30) -> dict[str, int]:
+    """Delete analyses, saved resumes, jobs, embeddings, and guest IP logs older than `retention_days`."""
+    client = get_supabase_client()
+    counts = {
+        "analyses": 0,
+        "resumes": 0,
+        "jobs": 0,
+        "resume_evidence": 0,
+        "jd_requirements": 0,
+        "guest_ip_usage": 0,
+    }
+    if not client:
+        return counts
+
+    cutoff = (datetime.now(UTC) - timedelta(days=retention_days)).isoformat()
+
+    # Delete child tables first in case foreign keys do not cascade
+    for table, col in (
+        ("analyses", "created_at"),
+        ("resume_evidence", "created_at"),
+        ("jd_requirements", "created_at"),
+        ("resumes", "created_at"),
+        ("jobs", "created_at"),
+        ("guest_ip_usage", "last_analysis_at"),
+    ):
+        try:
+            res = client.table(table).delete().lt(col, cutoff).execute()
+            counts[table] = len(res.data) if res and res.data else 0
+        except Exception as err:
+            logger.debug("Error cleaning up expired rows from %s: %s", table, err)
+
+    return counts
