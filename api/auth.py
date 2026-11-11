@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import time
 from functools import lru_cache
 
 import anyio
@@ -24,6 +25,8 @@ from api.errors import ApiError
 logger = logging.getLogger(__name__)
 
 _known_user_emails: dict[str, str] = {}
+_verified_token_cache: dict[tuple[str, str, str], tuple[float, CurrentUser]] = {}
+_TOKEN_CACHE_TTL_SECONDS = 60.0
 
 
 def register_user_email(user_id: str, email: str | None) -> None:
@@ -82,6 +85,14 @@ async def verify_bearer_token(token: str) -> CurrentUser:
     jwt_secret = settings.supabase_jwt_secret or os.getenv("SUPABASE_JWT_SECRET")
     supabase_url = settings.supabase_url or os.getenv("SUPABASE_URL")
 
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    cache_key = (token_hash, jwt_secret or "", supabase_url or "")
+    now_mono = time.monotonic()
+    cached = _verified_token_cache.get(cache_key)
+    if cached is not None and (now_mono - cached[0]) < _TOKEN_CACHE_TTL_SECONDS:
+        register_user_email(cached[1].id, cached[1].email)
+        return cached[1]
+
     try:
         header = jwt.get_unverified_header(token)
     except jwt.PyJWTError as err:
@@ -103,6 +114,7 @@ async def verify_bearer_token(token: str) -> CurrentUser:
             email = payload.get("email") or (payload.get("user_metadata") or {}).get("email")
             user = CurrentUser(id=str(sub), email=email)
             register_user_email(user.id, user.email)
+            _verified_token_cache[cache_key] = (now_mono, user)
             return user
         except Exception as err:
             raise ApiError(
@@ -121,6 +133,7 @@ async def verify_bearer_token(token: str) -> CurrentUser:
             email = payload.get("email") or (payload.get("user_metadata") or {}).get("email")
             user = CurrentUser(id=str(sub), email=email)
             register_user_email(user.id, user.email)
+            _verified_token_cache[cache_key] = (now_mono, user)
             return user
         except Exception as err:
             raise ApiError(
@@ -138,6 +151,7 @@ async def verify_bearer_token(token: str) -> CurrentUser:
             if user_data and getattr(user_data, "id", None):
                 user = CurrentUser(id=str(user_data.id), email=getattr(user_data, "email", None))
                 register_user_email(user.id, user.email)
+                _verified_token_cache[cache_key] = (now_mono, user)
                 return user
         except Exception as err:
             logger.debug("Supabase auth.get_user failed: %s", err)

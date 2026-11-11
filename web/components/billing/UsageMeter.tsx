@@ -19,15 +19,34 @@ function formatEndDate(iso: string | null, planId?: string): string {
   })}`;
 }
 
+const SUB_CACHE_KEY = "proofit:subscription-cache";
+
 export function UsageMeter() {
   const [sub, setSub] = useState<SubscriptionSummary | null>(null);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     let mounted = true;
+    try {
+      const cached = sessionStorage.getItem(SUB_CACHE_KEY);
+      if (cached) {
+        setSub(JSON.parse(cached) as SubscriptionSummary);
+        setLoaded(true);
+      }
+    } catch {
+      // Ignore storage read error
+    }
+
     async function load() {
       const data = await fetchSubscription();
       if (!mounted) return;
+      if (data) {
+        try {
+          sessionStorage.setItem(SUB_CACHE_KEY, JSON.stringify(data));
+        } catch {
+          // Ignore storage write error
+        }
+      }
       setSub(data);
       setLoaded(true);
     }

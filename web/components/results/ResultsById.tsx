@@ -48,12 +48,31 @@ export function ResultsById({ id }: ResultsByIdProps) {
 
   React.useEffect(() => {
     let cancelled = false;
+    const cacheKey = `proofit:analysis:${id}`;
+
+    try {
+      const cached = sessionStorage.getItem(cacheKey);
+      if (cached) {
+        const parsed = JSON.parse(cached) as {
+          match: Match;
+          baseline: BaselineMatch | null;
+          isGuest: boolean;
+        };
+        if (parsed?.match) {
+          setMatch(parsed.match);
+          setBaseline(parsed.baseline);
+          setIsGuestResult(Boolean(parsed.isGuest));
+        }
+      }
+    } catch {
+      // Ignore storage read error
+    }
 
     async function load() {
       try {
         const supabase = createClient();
-        const userRes = supabase ? await supabase.auth.getUser() : null;
-        const isLoggedOut = !userRes?.data?.user;
+        const sessionRes = supabase ? await supabase.auth.getSession() : null;
+        const isLoggedOut = !sessionRes?.data?.session?.user;
 
         let res = await getAnalysis(id);
         let retries = 0;
@@ -65,9 +84,22 @@ export function ResultsById({ id }: ResultsByIdProps) {
         }
         if (cancelled) return;
         if (res.status === "done" && res.match) {
+          const isGuest = Boolean(res.is_guest || isLoggedOut);
           setMatch(res.match);
           setBaseline(res.baseline);
-          setIsGuestResult(Boolean(res.is_guest || isLoggedOut));
+          setIsGuestResult(isGuest);
+          try {
+            sessionStorage.setItem(
+              cacheKey,
+              JSON.stringify({
+                match: res.match,
+                baseline: res.baseline,
+                isGuest,
+              }),
+            );
+          } catch {
+            // Ignore storage write error
+          }
         } else if (res.status === "failed") {
           const code = res.error?.code;
           if (!code) {

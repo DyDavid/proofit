@@ -89,8 +89,8 @@ export function AnalyzeForm() {
     setRememberedResume(loadRememberedResume());
     const supabase = createClient();
     if (supabase) {
-      supabase.auth.getUser().then(({ data }) => {
-        setIsGuest(!data.user);
+      supabase.auth.getSession().then(({ data }) => {
+        setIsGuest(!data.session?.user);
       });
     }
   }, []);

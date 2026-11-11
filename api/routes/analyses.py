@@ -313,7 +313,7 @@ async def get_analysis(
 ) -> dict:
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     response.headers["Pragma"] = "no-cache"
-    record = store.get_analysis(analysis_id)
+    record = await asyncio.to_thread(store.get_analysis, analysis_id)
     if record is None:
         raise ApiError(
             status_code=404,
@@ -344,11 +344,13 @@ async def list_analyses(
             code="UNAUTHORIZED",
             message="Authentication or resume_id required.",
         )
+    records = await asyncio.to_thread(
+        store.analyses_for_resume,
+        resume_id.strip() if resume_id else None,
+        user.id if user else None,
+    )
     summaries: list[AnalysisSummary] = []
-    for record in store.analyses_for_resume(
-        resume_id=resume_id.strip() if resume_id else None,
-        user_id=user.id if user else None,
-    ):
+    for record in records:
         assert record.match is not None  # guaranteed by analyses_for_resume's own filter
         job = record.match.job
         summaries.append(

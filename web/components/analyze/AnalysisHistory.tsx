@@ -16,6 +16,8 @@ export interface AnalysisHistoryProps {
   showEmpty?: boolean;
 }
 
+const HISTORY_CACHE_KEY = "proofit:history-cache";
+
 /**
  * Past analyses for the signed-in user or the resume remembered in this browser.
  */
@@ -29,11 +31,20 @@ export function AnalysisHistory({
 
   React.useEffect(() => {
     let active = true;
+    try {
+      const cached = sessionStorage.getItem(HISTORY_CACHE_KEY);
+      if (cached) {
+        setRows(JSON.parse(cached) as AnalysisSummary[]);
+      }
+    } catch {
+      // Ignore storage read error
+    }
+
     async function load() {
       const remembered = loadRememberedResume();
       const supabase = createClient();
-      const userRes = supabase ? await supabase.auth.getUser() : null;
-      const isSignedIn = Boolean(userRes?.data?.user);
+      const sessionRes = supabase ? await supabase.auth.getSession() : null;
+      const isSignedIn = Boolean(sessionRes?.data?.session?.user);
 
       if (!remembered && !isSignedIn) {
         if (active) setRows([]);
@@ -42,9 +53,15 @@ export function AnalysisHistory({
 
       try {
         const data = await getAnalysisHistory(remembered?.id);
-        if (active) setRows(data);
+        if (!active) return;
+        setRows(data);
+        try {
+          sessionStorage.setItem(HISTORY_CACHE_KEY, JSON.stringify(data));
+        } catch {
+          // Ignore storage write error
+        }
       } catch {
-        if (active) setRows([]);
+        if (active) setRows((prev) => prev ?? []);
       }
     }
     void load();

@@ -233,6 +233,8 @@ def record_usage_event(
 
 def get_subscription_summary(user_id: str) -> SubscriptionOut:
     """Return the user's active plan, expiry, and usage in the current window."""
+    from concurrent.futures import ThreadPoolExecutor
+
     now = datetime.now(UTC)
 
     from api.auth import get_user_email
@@ -240,8 +242,12 @@ def get_subscription_summary(user_id: str) -> SubscriptionOut:
 
     user_email = get_user_email(user_id)
     if is_admin_email(user_email):
-        analysis_used = _count_usage(user_id, "analysis", now - timedelta(days=365))
-        rewrite_used = _count_usage(user_id, "rewrite", now - timedelta(days=365))
+        admin_since = now - timedelta(days=365)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            f_an = pool.submit(_count_usage, user_id, "analysis", admin_since)
+            f_rw = pool.submit(_count_usage, user_id, "rewrite", admin_since)
+            analysis_used = f_an.result()
+            rewrite_used = f_rw.result()
         return SubscriptionOut(
             plan_id="campus",
             active_until=None,
@@ -263,8 +269,11 @@ def get_subscription_summary(user_id: str) -> SubscriptionOut:
         window_start = now - timedelta(days=30)
 
     plan_def = PLANS[plan_id]
-    analysis_used = _count_usage(user_id, "analysis", window_start)
-    rewrite_used = _count_usage(user_id, "rewrite", window_start)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        f_an = pool.submit(_count_usage, user_id, "analysis", window_start)
+        f_rw = pool.submit(_count_usage, user_id, "rewrite", window_start)
+        analysis_used = f_an.result()
+        rewrite_used = f_rw.result()
 
     return SubscriptionOut(
         plan_id=plan_id,
