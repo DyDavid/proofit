@@ -5,7 +5,6 @@ import * as React from "react";
 
 import { UpgradePrompt } from "@/components/billing/UpgradePrompt";
 import { Button } from "@/components/ui/Button";
-import { consumeDemoRewrite, getDemoEntitlement } from "@/lib/billing/entitlement";
 import { ApiError, createRewrites } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type { Evidence, HiddenStrength, Match } from "@/lib/types";
@@ -31,8 +30,6 @@ const KNOWN_ERROR_CODES = [
   "ANALYSIS_NOT_READY",
   "RATE_LIMITED",
   "ENGINE_FAILED",
-  "UNAUTHORIZED",
-  "SERVICE_UNAVAILABLE",
   "INTERNAL",
 ] as const;
 
@@ -228,7 +225,6 @@ export function HiddenStrengths({ match, analysisId }: HiddenStrengthsProps) {
   );
   const [rejectedCount, setRejectedCount] = React.useState(0);
   const [loading, setLoading] = React.useState(false);
-  const [hasRun, setHasRun] = React.useState((match.hidden_strengths?.length ?? 0) > 0);
   const [errorCode, setErrorCode] = React.useState<string | null>(null);
   const [dismissed, setDismissed] = React.useState<Set<string>>(new Set());
   const [liveMessage, setLiveMessage] = React.useState("");
@@ -243,21 +239,12 @@ export function HiddenStrengths({ match, analysisId }: HiddenStrengthsProps) {
 
   async function run() {
     if (!analysisId) return;
-
-    const demo = getDemoEntitlement();
-    if (demo && demo.rewritesRemaining <= 0) {
-      setErrorCode("quota_exceeded");
-      return;
-    }
-
     setLoading(true);
     setErrorCode(null);
     try {
       const res = await createRewrites(analysisId);
-      consumeDemoRewrite();
       setStrengths(res.hidden_strengths);
       setRejectedCount(res.rejected_count);
-      setHasRun(true);
     } catch (err) {
       setErrorCode(err instanceof ApiError && err.code ? err.code : "INTERNAL");
     } finally {
@@ -282,11 +269,7 @@ export function HiddenStrengths({ match, analysisId }: HiddenStrengthsProps) {
       <h2 className="mb-2 font-serif text-2xl text-ink">{t("title")}</h2>
       <p className="mb-5 max-w-2xl text-[15px] leading-[1.6] text-ink-2">{t("intro")}</p>
 
-      {!match.job?.requirements || match.job.requirements.length === 0 ? (
-        <p className="mb-6 text-sm leading-[1.6] text-ink-3">
-          No job requirements were found in this job post to generate rewrites against.
-        </p>
-      ) : analysisId ? (
+      {analysisId ? (
         <div className="mb-6">
           <Button
             type="button"
@@ -327,11 +310,7 @@ export function HiddenStrengths({ match, analysisId }: HiddenStrengthsProps) {
       </div>
 
       {visible.length === 0 ? (
-        <p className="text-sm leading-[1.6] text-ink-3">
-          {hasRun
-            ? "Checked your resume against all partial and missing requirements — no additional hidden strengths were found in your current resume lines for this role."
-            : t("empty")}
-        </p>
+        <p className="text-sm leading-[1.6] text-ink-3">{t("empty")}</p>
       ) : (
         <div className="grid gap-4">
           {visible.map((item) => (

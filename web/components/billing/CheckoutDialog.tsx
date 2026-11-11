@@ -2,18 +2,16 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { type PlanDefinition } from "@/lib/billing/api";
 import {
-  formatCardNumber,
-  formatExpiry,
-  isValidCvc,
-  isValidFutureExpiry,
-  mockCheckout,
-  sanitizeDigits,
-} from "@/lib/billing/mockCheckout";
-import { saveDemoEntitlement } from "@/lib/billing/entitlement";
+  createCheckoutSession,
+  getCheckoutSession,
+  notifySubscriptionUpdated,
+  simulateCheckoutPayment,
+  type CheckoutCreatedResponse,
+  type PlanDefinition,
+} from "@/lib/billing/api";
 
-type DialogStep = "review" | "payment" | "success" | "error";
+type DialogStep = "review" | "waiting" | "success" | "expired" | "error";
 
 export interface CheckoutDialogProps {
   open: boolean;
@@ -34,6 +32,16 @@ function formatDate(iso: string | null | undefined): string {
   });
 }
 
+function formatRemaining(expiresAtIso: string | null | undefined): string {
+  if (!expiresAtIso) return "30:00";
+  const diffMs = new Date(expiresAtIso).getTime() - Date.now();
+  if (diffMs <= 0) return "00:00";
+  const totalSec = Math.floor(diffMs / 1000);
+  const mins = Math.floor(totalSec / 60);
+  const secs = totalSec % 60;
+  return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+}
+
 export function CheckoutDialog({
   open,
   plan,
@@ -42,40 +50,20 @@ export function CheckoutDialog({
   onCompleted,
 }: CheckoutDialogProps) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
-  const cardNumberInputRef = useRef<HTMLInputElement | null>(null);
-
   const [step, setStep] = useState<DialogStep>("review");
   const [inFlight, setInFlight] = useState<boolean>(false);
+  const [session, setSession] = useState<CheckoutCreatedResponse | null>(null);
   const [activeUntil, setActiveUntil] = useState<string | null>(null);
-  const [receiptLast4, setReceiptLast4] = useState<string>("4242");
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [countdown, setCountdown] = useState<string>("30:00");
 
-  // Payment form state
-  const [cardholderName, setCardholderName] = useState("");
-  const [cardNumber, setCardNumber] = useState("");
-  const [expiry, setExpiry] = useState("");
-  const [cvc, setCvc] = useState("");
-
-  // Field validation and touched states
-  const [touched, setTouched] = useState({
-    cardNumber: false,
-    expiry: false,
-    cvc: false,
-  });
-  const [paymentError, setPaymentError] = useState<string | null>(null);
-
-  // Reset state whenever the dialog opens
   useEffect(() => {
     if (open) {
       setStep("review");
       setInFlight(false);
+      setSession(null);
       setActiveUntil(null);
-      setReceiptLast4("4242");
-      setCardholderName("");
-      setCardNumber("");
-      setExpiry("");
-      setCvc("");
-      setTouched({ cardNumber: false, expiry: false, cvc: false });
-      setPaymentError(null);
+      setErrorMsg(null);
     }
   }, [open]);
 
@@ -83,17 +71,10 @@ export function CheckoutDialog({
   useEffect(() => {
     if (!open) return;
     const container = dialogRef.current;
-    if (!container) return;
-
-    // Focus the first appropriate element
-    if (step === "payment") {
-      cardNumberInputRef.current?.focus();
-    } else {
-      const focusables = container.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), a[href], input:not([disabled]), [tabindex]:not([tabindex="-1"])',
-      );
-      focusables?.[0]?.focus();
-    }
+    const focusables = container?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+    );
+    focusables?.[0]?.focus();
 
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
@@ -106,7 +87,7 @@ export function CheckoutDialog({
       if (e.key === "Tab" && container) {
         const nodes = Array.from(
           container.querySelectorAll<HTMLElement>(
-            'button:not([disabled]), a[href], input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+            'button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
           ),
         );
         if (nodes.length === 0) return;
@@ -126,66 +107,89 @@ export function CheckoutDialog({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open, inFlight, step, onClose]);
 
+  // Poll mock checkout status & update countdown while waiting
+  useEffect(() => {
+    if (!open || step !== "waiting" || !session) return;
+    const activeSessionId = session.session_id;
+    const activeExpiresAt = session.expires_at;
+
+    setCountdown(formatRemaining(activeExpiresAt));
+    const timer = window.setInterval(() => {
+      const rem = formatRemaining(activeExpiresAt);
+      setCountdown(rem);
+      if (rem === "00:00") {
+        setStep("expired");
+      }
+    }, 1000);
+
+    const poller = window.setInterval(async () => {
+      try {
+        const st = await getCheckoutSession(activeSessionId);
+        if (st.status === "paid") {
+          setActiveUntil(st.active_until);
+          setStep("success");
+          notifySubscriptionUpdated();
+          onCompleted();
+        } else if (st.status === "expired") {
+          setStep("expired");
+        }
+      } catch {
+        // Ignore transient network errors during poll
+      }
+    }, 2000);
+
+    return () => {
+      window.clearInterval(timer);
+      window.clearInterval(poller);
+    };
+  }, [open, step, session, onCompleted]);
+
   if (!open) return null;
 
-  // Validation calculations
-  const rawDigits = sanitizeDigits(cardNumber);
-  const isCardNumberValid = rawDigits.length === 16;
-  const isExpiryValid = isValidFutureExpiry(expiry);
-  const isCvcValid = isValidCvc(cvc);
-  const isFormValid = isCardNumberValid && isExpiryValid && isCvcValid;
-
-  // Input change handlers with automatic formatting
-  function handleCardNumberChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const formatted = formatCardNumber(e.target.value);
-    setCardNumber(formatted);
-    setPaymentError(null);
-  }
-
-  function handleExpiryChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const formatted = formatExpiry(e.target.value);
-    setExpiry(formatted);
-    setPaymentError(null);
-  }
-
-  function handleCvcChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const val = sanitizeDigits(e.target.value).slice(0, 4);
-    setCvc(val);
-    setPaymentError(null);
-  }
-
-  async function handlePaymentSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setTouched({ cardNumber: true, expiry: true, cvc: true });
-
-    if (!isFormValid || inFlight) return;
-
+  async function handleStartCheckout() {
     setInFlight(true);
-    setPaymentError(null);
-
+    setErrorMsg(null);
     try {
-      const result = await mockCheckout({
-        cardNumber,
-        expiry,
-        cvc,
-        cardholderName: cardholderName.trim() || undefined,
-      });
-
-      if (result.success) {
-        const entitlement = saveDemoEntitlement({
-          last4: result.last4,
-          amountCents: result.amountCents,
-          currency: result.currency,
-        });
-        setActiveUntil(entitlement.expiresAt);
-        setReceiptLast4(result.last4);
-        setStep("success");
-        onCompleted();
-      } else {
-        setPaymentError(result.error);
+      const created = await createCheckoutSession("pass");
+      if (created.provider === "stripe_sandbox" && created.checkout_url) {
+        window.location.assign(created.checkout_url);
+        return;
       }
-    } catch {
-      setPaymentError("An unexpected error occurred. Please try again.");
+      setSession(created);
+      setStep("waiting");
+    } catch (err) {
+      setErrorMsg(
+        err instanceof Error
+          ? err.message
+          : "Could not start checkout. Please try again.",
+      );
+      setStep("error");
+    } finally {
+      setInFlight(false);
+    }
+  }
+
+  async function handleSimulatePayment() {
+    if (!session) return;
+    setInFlight(true);
+    setErrorMsg(null);
+    try {
+      const updated = await simulateCheckoutPayment(session.session_id);
+      if (updated.status === "paid") {
+        setActiveUntil(updated.active_until);
+        setStep("success");
+        notifySubscriptionUpdated();
+        onCompleted();
+      } else if (updated.status === "expired") {
+        setStep("expired");
+      }
+    } catch (err) {
+      setErrorMsg(
+        err instanceof Error
+          ? err.message
+          : "Could not simulate payment. Please try again.",
+      );
+      setStep("error");
     } finally {
       setInFlight(false);
     }
@@ -207,7 +211,7 @@ export function CheckoutDialog({
         aria-labelledby="checkout-dialog-title"
         className="w-full max-w-md rounded-2xl border border-rule bg-surface-raised p-6 shadow-xl"
       >
-        {/* Demo mode safety banner — kept across all active interaction steps */}
+        {/* Demo mode safety banner */}
         <div className="mb-4 rounded-lg border border-accent/30 bg-accent-tint/60 px-3.5 py-2.5 text-xs font-medium text-ink">
           <p className="font-semibold text-accent">
             Demo mode: no real money is charged
@@ -221,7 +225,6 @@ export function CheckoutDialog({
           </p>
         </div>
 
-        {/* STEP 1: Order Summary Review */}
         {step === "review" && (
           <div>
             <h2
@@ -271,249 +274,75 @@ export function CheckoutDialog({
               <button
                 type="button"
                 disabled={inFlight}
-                onClick={() => setStep("payment")}
+                onClick={() => void handleStartCheckout()}
                 data-testid="checkout-continue-btn"
                 className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-surface-raised hover:bg-accent-2 disabled:opacity-50"
               >
-                Continue to payment
+                {inFlight ? "Starting checkout…" : "Continue to payment ↗"}
               </button>
             </div>
           </div>
         )}
 
-        {/* STEP 2: Mock Payment Form */}
-        {step === "payment" && (
-          <form onSubmit={handlePaymentSubmit}>
-            <div className="flex items-baseline justify-between">
+        {step === "waiting" && session && (
+          <div>
+            <div className="flex items-center justify-between gap-2">
               <h2
                 id="checkout-dialog-title"
                 className="font-serif text-xl font-bold text-ink"
               >
-                Payment details
+                Complete demo payment
               </h2>
-              <span className="font-mono text-xs font-semibold text-accent">
-                $5.00 USD
+              <span className="rounded-md bg-paper-2 px-2.5 py-1 font-mono text-xs font-medium text-ink-2">
+                Expires in {countdown}
               </span>
             </div>
             <p className="mt-1 text-sm text-ink-2">
-              Enter test card credentials to activate your 30-day pass.
+              Order total:{" "}
+              <span className="font-semibold text-ink">
+                ${(session.amount_cents / 100).toFixed(2)} {session.currency}
+              </span>{" "}
+              for 30-day Job Hunt Pass.
             </p>
 
-            {/* Error banner if payment declined / failed */}
-            {paymentError && (
-              <div
-                role="alert"
-                className="mt-3 rounded-lg border border-missing/40 bg-missing/10 p-3 text-xs font-medium text-missing"
-              >
-                {paymentError}
+            {/* QR placeholder box where KHQR / payment QR can plug in later */}
+            <div className="mt-4 flex flex-col items-center justify-center rounded-xl border border-dashed border-rule-2 bg-paper/70 px-4 py-8 text-center">
+              <div className="flex h-28 w-28 items-center justify-center rounded-lg border border-rule bg-surface-raised font-mono text-xs text-ink-3">
+                Payment QR
+                <br />
+                Placeholder
               </div>
-            )}
-
-            <div className="mt-4 space-y-3.5">
-              {/* Cardholder name (optional) */}
-              <div>
-                <label
-                  htmlFor="cc-name"
-                  className="block text-xs font-medium text-ink-2"
-                >
-                  Cardholder name <span className="text-ink-3">(optional)</span>
-                </label>
-                <input
-                  id="cc-name"
-                  type="text"
-                  autoComplete="cc-name"
-                  value={cardholderName}
-                  onChange={(e) => setCardholderName(e.target.value)}
-                  placeholder="e.g. Alex Morgan"
-                  disabled={inFlight}
-                  className="mt-1 block w-full rounded-lg border border-rule bg-paper/60 px-3.5 py-2 text-sm text-ink placeholder:text-ink-3 focus:border-accent focus:bg-surface-raised focus:outline-hidden focus:ring-1 focus:ring-accent disabled:opacity-50"
-                />
-              </div>
-
-              {/* Card number */}
-              <div>
-                <label
-                  htmlFor="cc-number"
-                  className="block text-xs font-medium text-ink-2"
-                >
-                  Card number
-                </label>
-                <div className="relative mt-1">
-                  <input
-                    ref={cardNumberInputRef}
-                    id="cc-number"
-                    type="text"
-                    inputMode="numeric"
-                    autoComplete="cc-number"
-                    value={cardNumber}
-                    onChange={handleCardNumberChange}
-                    onBlur={() => setTouched((t) => ({ ...t, cardNumber: true }))}
-                    placeholder="4242 4242 4242 4242"
-                    maxLength={19}
-                    disabled={inFlight}
-                    aria-invalid={touched.cardNumber && !isCardNumberValid}
-                    aria-describedby={
-                      touched.cardNumber && !isCardNumberValid
-                        ? "cc-number-error"
-                        : undefined
-                    }
-                    className={`block w-full rounded-lg border bg-paper/60 px-3.5 py-2 font-mono text-sm tracking-wider text-ink placeholder:font-sans placeholder:tracking-normal placeholder:text-ink-3 focus:bg-surface-raised focus:outline-hidden focus:ring-1 disabled:opacity-50 ${
-                      touched.cardNumber && !isCardNumberValid
-                        ? "border-missing focus:border-missing focus:ring-missing"
-                        : "border-rule focus:border-accent focus:ring-accent"
-                    }`}
-                  />
-                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
-                    <span className="font-mono text-xs text-ink-3">TEST</span>
-                  </div>
-                </div>
-                {touched.cardNumber && !isCardNumberValid && (
-                  <p
-                    id="cc-number-error"
-                    role="alert"
-                    className="mt-1 text-xs text-missing"
-                  >
-                    Enter a 16-digit card number (4242 4242 4242 4242).
-                  </p>
-                )}
-              </div>
-
-              {/* Expiry and CVC grid */}
-              <div className="grid grid-cols-2 gap-3">
-                {/* Expiry */}
-                <div>
-                  <label
-                    htmlFor="cc-exp"
-                    className="block text-xs font-medium text-ink-2"
-                  >
-                    Expires (MM/YY)
-                  </label>
-                  <input
-                    id="cc-exp"
-                    type="text"
-                    inputMode="numeric"
-                    autoComplete="cc-exp"
-                    value={expiry}
-                    onChange={handleExpiryChange}
-                    onBlur={() => setTouched((t) => ({ ...t, expiry: true }))}
-                    placeholder="MM/YY"
-                    maxLength={5}
-                    disabled={inFlight}
-                    aria-invalid={touched.expiry && !isExpiryValid}
-                    aria-describedby={
-                      touched.expiry && !isExpiryValid ? "cc-exp-error" : undefined
-                    }
-                    className={`mt-1 block w-full rounded-lg border bg-paper/60 px-3.5 py-2 font-mono text-sm text-ink placeholder:font-sans placeholder:text-ink-3 focus:bg-surface-raised focus:outline-hidden focus:ring-1 disabled:opacity-50 ${
-                      touched.expiry && !isExpiryValid
-                        ? "border-missing focus:border-missing focus:ring-missing"
-                        : "border-rule focus:border-accent focus:ring-accent"
-                    }`}
-                  />
-                  {touched.expiry && !isExpiryValid && (
-                    <p
-                      id="cc-exp-error"
-                      role="alert"
-                      className="mt-1 text-xs text-missing"
-                    >
-                      Enter a future MM/YY date.
-                    </p>
-                  )}
-                </div>
-
-                {/* CVC */}
-                <div>
-                  <label
-                    htmlFor="cc-csc"
-                    className="block text-xs font-medium text-ink-2"
-                  >
-                    CVC
-                  </label>
-                  <input
-                    id="cc-csc"
-                    type="text"
-                    inputMode="numeric"
-                    autoComplete="cc-csc"
-                    value={cvc}
-                    onChange={handleCvcChange}
-                    onBlur={() => setTouched((t) => ({ ...t, cvc: true }))}
-                    placeholder="123"
-                    maxLength={4}
-                    disabled={inFlight}
-                    aria-invalid={touched.cvc && !isCvcValid}
-                    aria-describedby={
-                      touched.cvc && !isCvcValid ? "cc-csc-error" : undefined
-                    }
-                    className={`mt-1 block w-full rounded-lg border bg-paper/60 px-3.5 py-2 font-mono text-sm text-ink placeholder:font-sans placeholder:text-ink-3 focus:bg-surface-raised focus:outline-hidden focus:ring-1 disabled:opacity-50 ${
-                      touched.cvc && !isCvcValid
-                        ? "border-missing focus:border-missing focus:ring-missing"
-                        : "border-rule focus:border-accent focus:ring-accent"
-                    }`}
-                  />
-                  {touched.cvc && !isCvcValid && (
-                    <p
-                      id="cc-csc-error"
-                      role="alert"
-                      className="mt-1 text-xs text-missing"
-                    >
-                      3 or 4 digits.
-                    </p>
-                  )}
-                </div>
-              </div>
+              <p className="mt-3 text-xs text-ink-3">
+                Offline mock provider active. Click below to simulate a
+                completed payment.
+              </p>
             </div>
 
             <div className="mt-6 flex items-center justify-between gap-3">
               <button
                 type="button"
                 disabled={inFlight}
-                onClick={() => setStep("review")}
+                onClick={onClose}
                 className="rounded-lg border border-rule px-4 py-2.5 text-sm font-medium text-ink-2 hover:bg-paper-2 disabled:opacity-50"
               >
-                Back
+                Cancel
               </button>
               <button
-                type="submit"
-                disabled={!isFormValid || inFlight}
-                data-testid="checkout-pay-btn"
-                className="inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-surface-raised hover:bg-accent-2 disabled:cursor-not-allowed disabled:opacity-50"
+                type="button"
+                disabled={inFlight}
+                onClick={() => void handleSimulatePayment()}
+                data-testid="checkout-simulate-btn"
+                className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-surface-raised hover:bg-accent-2 disabled:opacity-50"
               >
-                {inFlight ? (
-                  <>
-                    <svg
-                      className="h-4 w-4 animate-spin text-surface-raised"
-                      xmlns="http://www.w3.org/2000/svg"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      aria-hidden="true"
-                    >
-                      <circle
-                        className="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        strokeWidth="4"
-                      />
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
-                      />
-                    </svg>
-                    <span>Processing…</span>
-                  </>
-                ) : (
-                  <span>Pay $5.00</span>
-                )}
+                {inFlight ? "Confirming…" : "Simulate payment"}
               </button>
             </div>
-          </form>
+          </div>
         )}
 
-        {/* STEP 4: Success State & Receipt */}
         {step === "success" && (
           <div data-testid="checkout-success-view">
-            <div className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-accent-tint text-base font-bold text-accent">
+            <div className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-accent-tint text-accent">
               ✓
             </div>
             <h2
@@ -523,36 +352,12 @@ export function CheckoutDialog({
               Job Hunt Pass activated
             </h2>
             <p className="mt-1 text-sm text-ink-2">
-              Your 30-day Job Hunt Pass is now active. All 50 analyses and 30 AI bullet rewrites have been unlocked.
+              Pass active until{" "}
+              <span className="font-semibold text-ink">
+                {formatDate(activeUntil)}
+              </span>
+              . Your 50 analyses and 30 AI rewrites are ready to use.
             </p>
-
-            {/* Receipt Summary Card */}
-            <div className="mt-4 divide-y divide-rule rounded-xl border border-rule bg-paper/60 px-4 text-xs">
-              <div className="flex items-center justify-between py-2.5">
-                <span className="text-ink-3">Plan</span>
-                <span className="font-medium text-ink">Job Hunt Pass</span>
-              </div>
-              <div className="flex items-center justify-between py-2.5">
-                <span className="text-ink-3">Amount</span>
-                <span className="font-semibold text-ink">$5.00 USD</span>
-              </div>
-              <div className="flex items-center justify-between py-2.5">
-                <span className="text-ink-3">Payment method</span>
-                <span className="font-mono text-ink">Demo Card (•••• {receiptLast4})</span>
-              </div>
-              <div className="flex items-center justify-between py-2.5">
-                <span className="text-ink-3">Activated on</span>
-                <span className="text-ink">{formatDate(new Date().toISOString())}</span>
-              </div>
-              <div className="flex items-center justify-between py-2.5">
-                <span className="text-ink-3">Valid until</span>
-                <span className="font-semibold text-accent">{formatDate(activeUntil)}</span>
-              </div>
-              <div className="flex items-center justify-between py-2.5">
-                <span className="text-ink-3">Included credits</span>
-                <span className="font-medium text-ink">50 analyses · 30 rewrites</span>
-              </div>
-            </div>
 
             <div className="mt-6 flex flex-wrap items-center justify-end gap-3">
               <button
@@ -563,27 +368,27 @@ export function CheckoutDialog({
                 Close
               </button>
               <Link
-                href="/analyze"
-                onClick={onClose}
-                className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-surface-raised hover:bg-accent-2"
+                href="/dashboard"
+                className="rounded-lg bg-ink px-5 py-2.5 text-sm font-semibold text-surface-raised hover:bg-ink-2"
               >
-                Start using your pass
+                Back to dashboard ↗
               </Link>
             </div>
           </div>
         )}
 
-        {/* STEP: Unexpected Error State (Fallback) */}
-        {step === "error" && (
+        {(step === "expired" || step === "error") && (
           <div>
             <h2
               id="checkout-dialog-title"
               className="font-serif text-xl font-bold text-ink"
             >
-              Checkout issue
+              {step === "expired" ? "Checkout session expired" : "Checkout issue"}
             </h2>
             <p className="mt-2 text-sm text-ink-2">
-              Something went wrong starting checkout. Please try again.
+              {step === "expired"
+                ? "This checkout session timed out before payment was completed. You were not charged."
+                : (errorMsg ?? "Something went wrong starting checkout.")}
             </p>
 
             <div className="mt-6 flex items-center justify-end gap-3">
@@ -596,7 +401,10 @@ export function CheckoutDialog({
               </button>
               <button
                 type="button"
-                onClick={() => setStep("payment")}
+                onClick={() => {
+                  setErrorMsg(null);
+                  setStep("review");
+                }}
                 className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-surface-raised hover:bg-accent-2"
               >
                 Try again
@@ -608,3 +416,4 @@ export function CheckoutDialog({
     </div>
   );
 }
+

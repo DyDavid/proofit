@@ -1,6 +1,5 @@
 import { useTranslations } from "@/lib/copy";
 import Link from "next/link";
-import { ResetDemoButton } from "@/components/billing/ResetDemoButton";
 
 const WORDMARK = "PROOFIT".split("");
 
@@ -44,12 +43,9 @@ export default function Footer() {
               {t("nav.about")}
             </Link>
           </p>
-          <div className="flex flex-wrap items-center gap-4">
-            <ResetDemoButton />
-            <p className="font-mono text-xs uppercase tracking-wide text-ink-3">
-              {t("footerMeta")}
-            </p>
-          </div>
+          <p className="font-mono text-xs uppercase tracking-wide text-ink-3">
+            {t("footerMeta")}
+          </p>
         </div>
       </div>
     </footer>

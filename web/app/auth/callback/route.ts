@@ -1,7 +1,15 @@
 import { NextResponse } from "next/server";
 import { type EmailOtpType } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
-import { sanitizeNextPath } from "@/lib/authRedirect";
+
+function sanitizeNextPath(raw: string | null): string {
+  if (!raw) return "/analyze";
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("/") && !trimmed.startsWith("//")) {
+    return trimmed;
+  }
+  return "/analyze";
+}
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);

@@ -22,8 +22,6 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import HTTPException
 from fastapi.responses import JSONResponse
 
-from api.db import DatabasePersistenceError
-
 logger = logging.getLogger("proofit.errors")
 
 
@@ -58,16 +56,3 @@ async def _api_error_handler(request: Request, exc: ApiError) -> JSONResponse:
 
 def install_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(ApiError, _api_error_handler)
-    app.add_exception_handler(DatabasePersistenceError, _persistence_error_handler)
-
-
-async def _persistence_error_handler(request: Request, exc: DatabasePersistenceError) -> JSONResponse:
-    # Do not render or log exception text/chains from a provider or SDK.
-    return await _api_error_handler(
-        request,
-        ApiError(
-            status_code=503,
-            code="SERVICE_UNAVAILABLE",
-            message="Persistence service unavailable. Please try again later.",
-        ),
-    )

@@ -28,14 +28,12 @@ async function authHeaders(extra?: Record<string, string>): Promise<Record<strin
 export class ApiError extends Error {
   code?: string;
   errorId?: string;
-  status?: number;
 
-  constructor(message: string, code?: string, errorId?: string, status?: number) {
+  constructor(message: string, code?: string, errorId?: string) {
     super(message);
     this.name = "ApiError";
     this.code = code;
     this.errorId = errorId;
-    this.status = status;
   }
 }
 
@@ -69,19 +67,14 @@ async function toApiError(res: Response): Promise<ApiError> {
     error?.message ?? `Request failed (${res.status})`,
     error?.code,
     error?.error_id,
-    res.status,
   );
 }
 
-export async function uploadResume(
-  file: File,
-  replace: boolean = true,
-): Promise<{ resume_id: string }> {
+export async function uploadResume(file: File): Promise<{ resume_id: string }> {
   const form = new FormData();
   form.append("file", file);
   const headers = await authHeaders();
-  const url = replace ? "/api/resumes?replace=true" : "/api/resumes";
-  const res = await fetch(url, { method: "POST", headers, body: form });
+  const res = await fetch("/api/resumes", { method: "POST", headers, body: form });
   if (!res.ok) throw await toApiError(res);
   return res.json();
 }
@@ -136,17 +129,9 @@ export async function createAnalysis(
 
 export async function retryAnalysis(
   id: string,
-  options?: { turnstile_token?: string },
 ): Promise<{ analysis_id: string; status: string }> {
-  const headers = await authHeaders({ "Content-Type": "application/json" });
-  const body = options?.turnstile_token
-    ? JSON.stringify({ turnstile_token: options.turnstile_token })
-    : undefined;
-  const res = await fetch(`/api/analyses/${id}/retry`, {
-    method: "POST",
-    headers,
-    body,
-  });
+  const headers = await authHeaders();
+  const res = await fetch(`/api/analyses/${id}/retry`, { method: "POST", headers });
   if (!res.ok) throw await toApiError(res);
   return res.json();
 }

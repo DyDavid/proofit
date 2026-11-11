@@ -15,9 +15,10 @@ from pydantic import BaseModel, Field
 
 from engine.gemini_client import (
     generate_structured_json,
+    get_extract_model,
     get_gemini_api_key,
 )
-from engine.normalize.parser import run_parser_in_process_with_timeout
+from engine.normalize.parser import parse_resume_bytes
 from engine.normalize.schema import (
     Education,
     Evidence,
@@ -111,7 +112,7 @@ def clear_normalizer_cache() -> None:
 # ── Normalizer Callables ──────────────────────────────────────────────────────
 
 
-def normalize_jd_text(text: str, timeout: float | None = None) -> Job:
+def normalize_jd_text(text: str) -> Job:
     """Normalize raw job description text into a schema Job."""
     if not text or not text.strip():
         raise ValueError("Job description text is empty")
@@ -157,10 +158,10 @@ def normalize_jd_text(text: str, timeout: float | None = None) -> Job:
         dto = generate_structured_json(
             prompt=prompt,
             response_schema=_JobLLM,
+            model_name=get_extract_model(),
             temperature=0.0,
             system_instruction="You are an expert recruitment parser. Extract at most 10 of the most essential job requirements, balancing key criteria from both the sidebar details and main requirements sections.",
             thinking_budget=0,
-            timeout=timeout,
         )
 
 
@@ -219,8 +220,9 @@ def normalize_jd_text(text: str, timeout: float | None = None) -> Job:
 
 
 
-def normalize_resume_text(raw_text: str, timeout: float | None = None) -> Resume:
-    """Normalize extracted resume text into a schema Resume."""
+def normalize_resume_file(file_bytes: bytes, filename: str) -> Resume:
+    """Normalize raw uploaded resume file into a schema Resume."""
+    raw_text = parse_resume_bytes(file_bytes, filename)
     if not raw_text or not raw_text.strip():
         raise ValueError("Resume file yielded no extractable text")
 
@@ -254,17 +256,17 @@ def normalize_resume_text(raw_text: str, timeout: float | None = None) -> Resume
     Keep source_line verbatim or as close as possible to the resume text.
 
     Resume text:
-    {clean_text}
+    {raw_text}
     """
 
     try:
         dto = generate_structured_json(
             prompt=prompt,
             response_schema=_ResumeLLM,
+            model_name=get_extract_model(),
             temperature=0.0,
             system_instruction="You are an expert resume parsing engine. Parse candidate evidence, skills, languages, and achievements comprehensively into structured JSON.",
             thinking_budget=0,
-            timeout=timeout,
         )
 
 
@@ -326,10 +328,4 @@ def normalize_resume_text(raw_text: str, timeout: float | None = None) -> Resume
         logger.warning("Gemini Resume normalizer failed: %s. Using fallback fixture.", err)
         fixture_data = _load_golden_fixture()
         return Resume.model_validate(fixture_data["resume"])
-
-
-def normalize_resume_file(file_bytes: bytes, filename: str, timeout: float | None = None) -> Resume:
-    """Normalize raw uploaded resume file into a schema Resume via the supervised parser."""
-    raw_text = run_parser_in_process_with_timeout(file_bytes, filename, timeout_seconds=timeout)
-    return normalize_resume_text(raw_text, timeout=timeout)
 

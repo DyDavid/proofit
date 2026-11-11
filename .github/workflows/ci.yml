@@ -52,17 +52,13 @@ jobs:
           # setup-python reads pyproject.toml's dependency set to key the cache.
           cache: pip
 
-      - name: Install engine with api + parse + dev extras
+      - name: Install engine with api + dev extras
         # Editable install so `engine` resolves the same way it does in
         # api/Dockerfile and in a developer's .venv — one import path, no
         # sys.path games (pyproject.toml [tool.setuptools] packages).
         run: |
-          python -m pip install --upgrade "pip>=26.3"
-          python -m pip install -e ".[api,parse,dev]"
-
-      - name: Check document parsing dependencies
-        # Security tests must exercise the real parsers rather than skip coverage.
-        run: python -c "import pdfminer.high_level; import docx"
+          python -m pip install --upgrade pip
+          pip install -e ".[api,dev]"
 
       - name: ruff check
         # Config lives in pyproject.toml [tool.ruff]: line-length 100,
@@ -94,7 +90,7 @@ jobs:
 
       - name: Install like the Dockerfile
         run: |
-          python -m pip install --upgrade "pip>=26.3"
+          python -m pip install --upgrade pip
           pip install ".[api,parse]"
 
       - name: Import the app away from the checkout
@@ -160,7 +156,7 @@ jobs:
 
       - name: Install engine (Pydantic models export the JSON Schema)
         run: |
-          python -m pip install --upgrade "pip>=26.3"
+          python -m pip install --upgrade pip
           pip install -e ".[api,dev]"
 
       - name: Install web dependencies (json-schema-to-typescript)

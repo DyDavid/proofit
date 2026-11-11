@@ -121,7 +121,6 @@ def test_guest_gets_one_analysis_per_day_per_salted_ip_hash(
 ) -> None:
     monkeypatch.setattr(settings, "enforce_guest_limit", True)
     monkeypatch.setattr(settings, "guest_ip_salt", "unit-test-salt")
-    monkeypatch.setattr(settings, "trusted_proxies", "127.0.0.1,10.0.0.1")
 
     res_id = client.post(
         "/api/resumes",

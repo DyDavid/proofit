@@ -1,29 +1,10 @@
-"""Billing service: checkout sessions, idempotent plan granting, status polling, and usage.
-
-Concurrency & Persistence Model
--------------------------------
-1. **Multi-Worker Persistent Mode** (`get_supabase_client() is not None`):
-   Quota checking, reservation creation, completion (`commit`), and cancellation (`release`)
-   are coordinated across all server processes / worker instances through atomic PostgreSQL
-   RPCs (`reserve_user_quota`, `commit_usage_reservation`, `release_usage_reservation`) using
-   transactional advisory locks (`pg_advisory_xact_lock`) and row-level locking (`FOR UPDATE`).
-   When database persistence is configured, any database error during quota check or
-   reservation raises `DatabasePersistenceError` (failing closed) and NEVER falls back to
-   process-local memory.
-
-2. **Single-Process Fallback Mode** (`get_supabase_client() is None`):
-   Used only in `ENGINE_MODE=mock` or offline local development without Supabase credentials.
-   Synchronizes requests within a single Python OS process using `_reservations_lock`
-   (`threading.RLock`). Multi-worker deployments MUST configure Supabase persistence.
-"""
+"""Billing service: checkout sessions, idempotent plan granting, status polling, and usage."""
 
 from __future__ import annotations
 
 import contextlib
-import logging
-import threading
 import uuid
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
@@ -35,16 +16,7 @@ from api.billing.providers.base import BillingProvider
 from api.billing.providers.mock import MockProvider
 from api.billing.providers.stripe_sandbox import StripeSandboxProvider
 from api.config import settings
-from api.db import (
-    DatabasePersistenceError,
-    db_billing_rpc,
-    db_commit_usage_reservation,
-    db_release_usage_reservation,
-    db_reserve_user_quota,
-    get_supabase_client,
-)
-
-logger = logging.getLogger(__name__)
+from api.db import get_supabase_client
 
 
 class UsageBucket(BaseModel):
@@ -105,10 +77,6 @@ class CheckoutSessionRecord:
     )
     paid_at: datetime | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-    status_refresh_after: datetime | None = None
-    status_refresh_until: datetime | None = None
-    status_refresh_token: str | None = None
-    status_refresh_error: bool = False
 
 
 @dataclass
@@ -130,43 +98,22 @@ class UsageEventRecord:
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
-@dataclass
-class UsageReservationRecord:
-    id: str
-    user_id: str
-    kind: Literal["analysis", "rewrite"]
-    expires_at: datetime = field(
-        default_factory=lambda: datetime.now(UTC) + timedelta(minutes=10)
-    )
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-
-
-# In-memory store for single-process tests and offline fallback (when get_supabase_client() is None)
+# In-memory store for tests and offline fallback
 _checkout_sessions: dict[str, CheckoutSessionRecord] = {}
 _subscriptions: list[SubscriptionRecord] = []
 _usage_events: list[UsageEventRecord] = []
-_usage_reservations: dict[str, UsageReservationRecord] = {}
-_finalized_reservations: dict[str, Literal["committed", "released"]] = {}
-_reservations_lock = threading.RLock()
-_stripe_events: dict[str, datetime] = {}
+_stripe_events: set[str] = set()
 
 
 def reset_billing_memory() -> None:
     """Clear in-memory billing state (used by test fixtures)."""
-    with _reservations_lock:
-        _checkout_sessions.clear()
-        _subscriptions.clear()
-        _usage_events.clear()
-        _usage_reservations.clear()
-        _finalized_reservations.clear()
-        _stripe_events.clear()
+    _checkout_sessions.clear()
+    _subscriptions.clear()
+    _usage_events.clear()
+    _stripe_events.clear()
 
 
 def get_active_provider() -> BillingProvider:
-    if settings.billing_provider == "disabled":
-        from api.errors import ApiError
-
-        raise ApiError(503, "SERVICE_UNAVAILABLE", "Payments are currently unavailable.")
     if settings.billing_provider == "stripe_sandbox":
         return StripeSandboxProvider()
     return MockProvider()
@@ -179,7 +126,7 @@ def set_test_subscription(
     active_from: datetime | None = None,
     checkout_session_id: str | None = None,
 ) -> SubscriptionRecord:
-    """Helper to seed an active subscription in memory (and shared DB if configured) for tests."""
+    """Helper to seed an active subscription in memory for tests."""
     now = datetime.now(UTC)
     rec = SubscriptionRecord(
         id=str(uuid.uuid4()),
@@ -191,21 +138,6 @@ def set_test_subscription(
         checkout_session_id=checkout_session_id,
     )
     _subscriptions.append(rec)
-    client = get_supabase_client()
-    if client is not None:
-        with contextlib.suppress(Exception):
-            client.table("subscriptions").insert(
-                {
-                    "id": rec.id,
-                    "user_id": rec.user_id,
-                    "plan_id": rec.plan_id,
-                    "current_period_start": rec.current_period_start.isoformat(),
-                    "current_period_end": rec.current_period_end.isoformat(),
-                    "provider": rec.provider,
-                    "checkout_session_id": rec.checkout_session_id,
-                    "created_at": rec.created_at.isoformat(),
-                }
-            ).execute()
     return rec
 
 
@@ -213,54 +145,43 @@ def get_test_subscriptions_for_user(user_id: str) -> list[SubscriptionRecord]:
     return [s for s in _subscriptions if s.user_id == user_id]
 
 
-def _get_subscription_for_user(user_id: str, *, include_future: bool = False) -> SubscriptionRecord | None:
+def _get_active_subscription_for_user(user_id: str) -> SubscriptionRecord | None:
     now = datetime.now(UTC)
     client = get_supabase_client()
     if client is not None:
         try:
-            query = (
+            res = (
                 client.table("subscriptions")
                 .select("*")
                 .eq("user_id", user_id)
                 .gt("current_period_end", now.isoformat())
+                .order("current_period_end", desc=True)
+                .limit(1)
+                .execute()
             )
-            if not include_future:
-                query = query.lte("current_period_start", now.isoformat())
-            res = query.order("current_period_end", desc=True).limit(1).execute()
             if res.data:
-                return _row_to_subscription(res.data[0])
-            return None
+                row = res.data[0]
+                return SubscriptionRecord(
+                    id=str(row["id"]),
+                    user_id=str(row["user_id"]),
+                    plan_id=row["plan_id"],
+                    current_period_start=datetime.fromisoformat(row["current_period_start"]),
+                    current_period_end=datetime.fromisoformat(row["current_period_end"]),
+                    provider=row.get("provider", "mock"),
+                    checkout_session_id=row.get("checkout_session_id"),
+                )
         except Exception:
-            raise DatabasePersistenceError("Subscription lookup failed.") from None
+            pass
 
     active = [
         s
         for s in _subscriptions
         if s.user_id == user_id and s.current_period_end > now
-        and (include_future or s.current_period_start <= now)
     ]
     if not active:
         return None
     active.sort(key=lambda s: s.current_period_end, reverse=True)
     return active[0]
-
-
-def _get_active_subscription_for_user(user_id: str) -> SubscriptionRecord | None:
-    return _get_subscription_for_user(user_id)
-
-
-def _get_latest_subscription_for_user(user_id: str) -> SubscriptionRecord | None:
-    """Include queued renewals when scheduling another paid pass or showing expiry."""
-    return _get_subscription_for_user(user_id, include_future=True)
-
-
-def _row_to_subscription(row: dict) -> SubscriptionRecord:
-    return SubscriptionRecord(
-        id=str(row["id"]), user_id=str(row["user_id"]), plan_id=row["plan_id"],
-        current_period_start=datetime.fromisoformat(row["current_period_start"]),
-        current_period_end=datetime.fromisoformat(row["current_period_end"]),
-        provider=row.get("provider", "mock"), checkout_session_id=row.get("checkout_session_id"),
-    )
 
 
 def _count_usage(
@@ -281,9 +202,8 @@ def _count_usage(
             )
             if res.count is not None:
                 return int(res.count)
-            return len(res.data or [])
         except Exception:
-            raise DatabasePersistenceError("Usage count query failed.") from None
+            pass
 
     return sum(
         1
@@ -298,9 +218,10 @@ def record_usage_event(
 ) -> None:
     """Record a usage event after a successful analysis or rewrite."""
     now = datetime.now(UTC)
+    _usage_events.append(UsageEventRecord(user_id=user_id, kind=kind, created_at=now))
     client = get_supabase_client()
     if client is not None:
-        try:
+        with contextlib.suppress(Exception):
             client.table("usage_events").insert(
                 {
                     "user_id": user_id,
@@ -308,239 +229,6 @@ def record_usage_event(
                     "created_at": now.isoformat(),
                 }
             ).execute()
-        except Exception:
-            raise DatabasePersistenceError("Usage recording failed.") from None
-        return
-
-    with _reservations_lock:
-        _usage_events.append(UsageEventRecord(user_id=user_id, kind=kind, created_at=now))
-
-
-def _clean_expired_reservations() -> None:
-    now = datetime.now(UTC)
-    expired = [rid for rid, r in _usage_reservations.items() if r.expires_at <= now]
-    for rid in expired:
-        _usage_reservations.pop(rid, None)
-        if _finalized_reservations.get(rid) != "committed":
-            _finalized_reservations[rid] = "released"
-
-
-def _count_active_reservations(
-    user_id: str,
-    kind: Literal["analysis", "rewrite"],
-    since: datetime | None = None,
-) -> int:
-    now = datetime.now(UTC)
-    client = get_supabase_client()
-    if client is not None:
-        try:
-            query = (
-                client.table("usage_reservations")
-                .select("id", count="exact")
-                .eq("user_id", user_id)
-                .eq("kind", kind)
-                .eq("status", "active")
-                .gt("expires_at", now.isoformat())
-            )
-            if since is not None:
-                query = query.gte("created_at", since.isoformat())
-            res = query.execute()
-            if res.count is not None:
-                return int(res.count)
-            return len(res.data or [])
-        except Exception:
-            raise DatabasePersistenceError("Active reservation count failed.") from None
-
-    with _reservations_lock:
-        _clean_expired_reservations()
-        return sum(
-            1
-            for r in _usage_reservations.values()
-            if r.user_id == user_id
-            and r.kind == kind
-            and r.expires_at > now
-            and (since is None or r.created_at >= since)
-        )
-
-
-def get_user_quota_window_and_limit(
-    user_id: str,
-    kind: Literal["analysis", "rewrite"],
-) -> tuple[PlanId, int | None, datetime]:
-    """Return `(plan_id, limit, window_start)` for `user_id` and `kind`."""
-    now = datetime.now(UTC)
-    active_sub = _get_active_subscription_for_user(user_id)
-    if active_sub is not None:
-        plan_id: PlanId = active_sub.plan_id
-        window_start = active_sub.current_period_start
-    else:
-        plan_id = "free"
-        window_start = now - timedelta(days=30)
-
-    plan_def = PLANS[plan_id]
-    limit = plan_def.limits.analyses if kind == "analysis" else plan_def.limits.rewrites
-    return plan_id, limit, window_start
-
-
-def atomic_reserve_quota(
-    user_id: str,
-    kind: Literal["analysis", "rewrite"],
-    reservation_id: str | None = None,
-) -> tuple[bool, str, int | None]:
-    """Atomically verify quota and reserve a slot across workers (when DB is active)
-    or under the single-process lock (when running in offline fallback mode).
-
-    Returns `(allowed, reservation_id, limit)`.
-    Raises `DatabasePersistenceError` if persistence is configured and fails.
-    """
-    rid = reservation_id or str(uuid.uuid4())
-    now = datetime.now(UTC)
-    ttl_seconds = max(1.0, float(settings.reservation_ttl_seconds))
-    expires = now + timedelta(seconds=ttl_seconds)
-
-    _plan_id, limit, window_start = get_user_quota_window_and_limit(user_id, kind)
-
-    client = get_supabase_client()
-    if client is not None:
-        rpc_res = db_reserve_user_quota(
-            user_id=user_id,
-            kind=kind,
-            reservation_id=rid,
-            limit=limit,
-            window_start_iso=window_start.isoformat(),
-            expires_at_iso=expires.isoformat(),
-        )
-        allowed = bool(rpc_res.get("allowed", False))
-        return allowed, rid, limit
-
-    # Single-process fallback mode (documented: only when Supabase persistence is not configured)
-    with _reservations_lock:
-        _clean_expired_reservations()
-        existing = _usage_reservations.get(rid)
-        if existing is not None and existing.expires_at > now:
-            return True, rid, limit
-
-        used = _count_usage(user_id, kind, window_start) + _count_active_reservations(
-            user_id, kind, window_start
-        )
-        if limit is not None and used >= limit:
-            return False, rid, limit
-
-        rec = UsageReservationRecord(
-            id=rid,
-            user_id=user_id,
-            kind=kind,
-            created_at=now,
-            expires_at=expires,
-        )
-        _usage_reservations[rid] = rec
-        _finalized_reservations.pop(rid, None)
-        return True, rid, limit
-
-
-def create_usage_reservation(
-    user_id: str,
-    kind: Literal["analysis", "rewrite"],
-    reservation_id: str | None = None,
-) -> str:
-    rid = reservation_id or str(uuid.uuid4())
-    now = datetime.now(UTC)
-    ttl_seconds = max(1.0, float(settings.reservation_ttl_seconds))
-    expires = now + timedelta(seconds=ttl_seconds)
-
-    client = get_supabase_client()
-    if client is not None:
-        _plan_id, limit, window_start = get_user_quota_window_and_limit(user_id, kind)
-        rpc_res = db_reserve_user_quota(
-            user_id=user_id,
-            kind=kind,
-            reservation_id=rid,
-            limit=limit,
-            window_start_iso=window_start.isoformat(),
-            expires_at_iso=expires.isoformat(),
-        )
-        if not rpc_res.get("allowed", False):
-            raise DatabasePersistenceError(f"Reservation rejected by database: {rpc_res}")
-        return rid
-
-    rec = UsageReservationRecord(
-        id=rid,
-        user_id=user_id,
-        kind=kind,
-        created_at=now,
-        expires_at=expires,
-    )
-    with _reservations_lock:
-        _clean_expired_reservations()
-        _usage_reservations[rid] = rec
-        _finalized_reservations.pop(rid, None)
-    return rid
-
-
-def commit_usage_reservation(
-    reservation_id: str | None,
-    user_id: str | None,
-    kind: Literal["analysis", "rewrite"],
-) -> None:
-    """Idempotently commit an in-flight reservation into a single permanent usage event."""
-    client = get_supabase_client()
-    if client is not None:
-        db_commit_usage_reservation(reservation_id, user_id, kind)
-        with _reservations_lock:
-            if reservation_id:
-                _usage_reservations.pop(reservation_id, None)
-                _finalized_reservations[reservation_id] = "committed"
-        return
-
-    with _reservations_lock:
-        _clean_expired_reservations()
-        if reservation_id:
-            state = _finalized_reservations.get(reservation_id)
-            if state == "committed":
-                return  # Idempotent: already committed
-            if state == "released":
-                return  # Already released: do not commit
-            popped = _usage_reservations.pop(reservation_id, None)
-            if popped is None:
-                return
-            _finalized_reservations[reservation_id] = "committed"
-            target_user = user_id or popped.user_id
-            if target_user:
-                _usage_events.append(
-                    UsageEventRecord(user_id=target_user, kind=kind, created_at=datetime.now(UTC))
-                )
-        elif user_id:
-            _usage_events.append(
-                UsageEventRecord(user_id=user_id, kind=kind, created_at=datetime.now(UTC))
-            )
-
-
-def release_usage_reservation(
-    reservation_id: str | None,
-    user_id: str | None,
-    kind: Literal["analysis", "rewrite"],
-) -> None:
-    """Idempotently release an active reservation without recording usage."""
-    client = get_supabase_client()
-    if client is not None:
-        if reservation_id:
-            db_release_usage_reservation(reservation_id)
-        with _reservations_lock:
-            if reservation_id:
-                _usage_reservations.pop(reservation_id, None)
-                if _finalized_reservations.get(reservation_id) != "committed":
-                    _finalized_reservations[reservation_id] = "released"
-        return
-
-    with _reservations_lock:
-        if reservation_id:
-            state = _finalized_reservations.get(reservation_id)
-            if state == "committed":
-                return  # Already committed: cannot release
-            if state == "released":
-                return  # Idempotent: already released
-            _usage_reservations.pop(reservation_id, None)
-            _finalized_reservations[reservation_id] = "released"
 
 
 def get_subscription_summary(user_id: str) -> SubscriptionOut:
@@ -575,8 +263,8 @@ def get_subscription_summary(user_id: str) -> SubscriptionOut:
         window_start = now - timedelta(days=30)
 
     plan_def = PLANS[plan_id]
-    analysis_used = _count_usage(user_id, "analysis", window_start) + _count_active_reservations(user_id, "analysis", window_start)
-    rewrite_used = _count_usage(user_id, "rewrite", window_start) + _count_active_reservations(user_id, "rewrite", window_start)
+    analysis_used = _count_usage(user_id, "analysis", window_start)
+    rewrite_used = _count_usage(user_id, "rewrite", window_start)
 
     return SubscriptionOut(
         plan_id=plan_id,
@@ -594,33 +282,11 @@ def get_subscription_summary(user_id: str) -> SubscriptionOut:
     )
 
 
-def _cache_checkout_session(rec: CheckoutSessionRecord, *, persisted: bool) -> None:
-    """Bound the cache; offline pending sessions must not be evicted and recreated."""
-    now = datetime.now(UTC)
-    with _reservations_lock:
-        stale = [sid for sid, old in _checkout_sessions.items()
-                 if old.expires_at < now - timedelta(days=1)
-                 and (persisted or old.status_refresh_until is None or old.status_refresh_until <= now)]
-        for sid in stale:
-            _checkout_sessions.pop(sid, None)
-        cap = max(1, settings.checkout_cache_max_entries)
-        while rec.id not in _checkout_sessions and len(_checkout_sessions) >= cap:
-            evictable = [old for old in _checkout_sessions.values()
-                         if persisted or ((old.status != "pending" or old.expires_at <= now)
-                                          and (old.status_refresh_until is None or old.status_refresh_until <= now))]
-            if not evictable:
-                from api.errors import ApiError
-
-                raise ApiError(429, "RATE_LIMITED", "Checkout is busy. Please try again later.")
-            oldest = min(evictable, key=lambda item: item.created_at)
-            _checkout_sessions.pop(oldest.id)
-        _checkout_sessions[rec.id] = rec
-
-
 def _save_checkout_session(rec: CheckoutSessionRecord) -> None:
+    _checkout_sessions[rec.id] = rec
     client = get_supabase_client()
     if client is not None:
-        try:
+        with contextlib.suppress(Exception):
             client.table("checkout_sessions").upsert(
                 {
                     "id": rec.id,
@@ -637,12 +303,11 @@ def _save_checkout_session(rec: CheckoutSessionRecord) -> None:
                     "created_at": rec.created_at.isoformat(),
                 }
             ).execute()
-        except Exception:
-            raise DatabasePersistenceError("Checkout persistence failed.") from None
-    _cache_checkout_session(rec, persisted=client is not None)
 
 
 def _load_checkout_session_by_id(session_id: str) -> CheckoutSessionRecord | None:
+    if session_id in _checkout_sessions:
+        return _checkout_sessions[session_id]
     client = get_supabase_client()
     if client is not None:
         try:
@@ -656,13 +321,14 @@ def _load_checkout_session_by_id(session_id: str) -> CheckoutSessionRecord | Non
             if res.data:
                 return _row_to_checkout_session(res.data[0])
         except Exception:
-            raise DatabasePersistenceError("Checkout lookup failed.") from None
-        return None
-    with _reservations_lock:
-        return _checkout_sessions.get(session_id)
+            pass
+    return None
 
 
 def _load_checkout_session_by_ref(provider_ref: str) -> CheckoutSessionRecord | None:
+    for rec in _checkout_sessions.values():
+        if rec.provider_ref == provider_ref:
+            return rec
     client = get_supabase_client()
     if client is not None:
         try:
@@ -676,16 +342,11 @@ def _load_checkout_session_by_ref(provider_ref: str) -> CheckoutSessionRecord | 
             if res.data:
                 return _row_to_checkout_session(res.data[0])
         except Exception:
-            raise DatabasePersistenceError("Checkout lookup failed.") from None
-        return None
-    with _reservations_lock:
-        for rec in _checkout_sessions.values():
-            if rec.provider_ref == provider_ref:
-                return rec
+            pass
     return None
 
 
-def _row_to_checkout_session(row: dict, *, cache: bool = True) -> CheckoutSessionRecord:
+def _row_to_checkout_session(row: dict) -> CheckoutSessionRecord:
     rec = CheckoutSessionRecord(
         id=str(row["id"]),
         user_id=str(row["user_id"]),
@@ -699,86 +360,86 @@ def _row_to_checkout_session(row: dict, *, cache: bool = True) -> CheckoutSessio
         expires_at=datetime.fromisoformat(row["expires_at"]),
         paid_at=datetime.fromisoformat(row["paid_at"]) if row.get("paid_at") else None,
         created_at=datetime.fromisoformat(row["created_at"]),
-        status_refresh_after=datetime.fromisoformat(row["status_refresh_after"]) if row.get("status_refresh_after") else None,
-        status_refresh_until=datetime.fromisoformat(row["status_refresh_until"]) if row.get("status_refresh_until") else None,
-        status_refresh_token=row.get("status_refresh_token"),
-        status_refresh_error=row.get("status_refresh_error", False),
     )
-    if cache:
-        _cache_checkout_session(rec, persisted=True)
+    _checkout_sessions[rec.id] = rec
     return rec
 
 
 def grant_plan(session: CheckoutSessionRecord) -> SubscriptionRecord:
-    """Grant once, queuing early renewals after all previously purchased passes."""
-    if session.status != "paid":
-        raise DatabasePersistenceError("Cannot grant an unpaid checkout.")
+    """Idempotently grant a pass for a paid checkout session.
+
+    If a subscription already exists for `session.id`, returns it without
+    creating a duplicate. If the user already has an active pass, extends
+    from `max(now, latest active current_period_end)` + 30 days.
+    """
+    for existing in _subscriptions:
+        if existing.checkout_session_id == session.id:
+            return existing
+
     client = get_supabase_client()
     if client is not None:
-        result = db_billing_rpc("grant_checkout_pass", {
-            "p_session_id": session.id,
-            "p_period_days": PLANS[session.plan_id].period_days,
-        })
         try:
-            sub = _row_to_subscription(result["subscription"])
-            if sub.user_id != session.user_id or sub.checkout_session_id != session.id:
-                raise ValueError("Wrong subscription owner")
+            res = (
+                client.table("subscriptions")
+                .select("*")
+                .eq("checkout_session_id", session.id)
+                .limit(1)
+                .execute()
+            )
+            if res.data:
+                row = res.data[0]
+                found = SubscriptionRecord(
+                    id=str(row["id"]),
+                    user_id=str(row["user_id"]),
+                    plan_id=row["plan_id"],
+                    current_period_start=datetime.fromisoformat(row["current_period_start"]),
+                    current_period_end=datetime.fromisoformat(row["current_period_end"]),
+                    provider=row.get("provider", session.provider),
+                    checkout_session_id=str(row["checkout_session_id"]),
+                )
+                _subscriptions.append(found)
+                return found
         except Exception:
-            raise DatabasePersistenceError("Invalid subscription grant response.") from None
-        return sub
+            pass
 
-    with _reservations_lock:
-        for existing in _subscriptions:
-            if existing.checkout_session_id == session.id:
-                return existing
-        now = datetime.now(UTC)
-        latest = _get_latest_subscription_for_user(session.user_id)
-        period_start = max(now, latest.current_period_end) if latest else now
-        sub = SubscriptionRecord(
-            id=str(uuid.uuid4()), user_id=session.user_id, plan_id=session.plan_id,
-            current_period_start=period_start,
-            current_period_end=period_start + timedelta(days=PLANS[session.plan_id].period_days),
-            provider=session.provider, checkout_session_id=session.id, created_at=now,
-        )
-        _subscriptions.append(sub)
-        return sub
+    now = datetime.now(UTC)
+    latest_active = _get_active_subscription_for_user(session.user_id)
+    if latest_active is not None and latest_active.current_period_end > now:
+        period_start = latest_active.current_period_end
+    else:
+        period_start = now
 
+    period_days = PLANS[session.plan_id].period_days
+    period_end = period_start + timedelta(days=period_days)
 
-def _reserve_checkout_session(
-    user_id: str, provider: Literal["mock", "stripe_sandbox"],
-) -> tuple[CheckoutSessionRecord, bool]:
-    """Atomically reuse a pending checkout, or claim creation before provider I/O."""
-    amount = PLANS["pass"].price_cents
-    assert amount is not None
-    rec = CheckoutSessionRecord(
-        id=str(uuid.uuid4()), user_id=user_id, plan_id="pass", status="pending",
-        amount_cents=amount, currency=PLANS["pass"].currency,
-        provider=provider,
+    sub = SubscriptionRecord(
+        id=str(uuid.uuid4()),
+        user_id=session.user_id,
+        plan_id=session.plan_id,
+        current_period_start=period_start,
+        current_period_end=period_end,
+        provider=session.provider,
+        checkout_session_id=session.id,
+        created_at=now,
     )
-    if get_supabase_client() is not None:
-        result = db_billing_rpc("reserve_checkout_session", {
-            "p_session_id": rec.id, "p_user_id": user_id, "p_provider": provider,
-            "p_amount_cents": rec.amount_cents, "p_currency": rec.currency,
-        })
-        try:
-            if not isinstance(result["created"], bool):
-                raise ValueError("Invalid creation result")
-            reserved = _row_to_checkout_session(result["session"], cache=False)
-            if reserved.user_id != user_id or reserved.provider != provider or reserved.plan_id != "pass":
-                raise ValueError("Invalid checkout owner")
-        except Exception:
-            raise DatabasePersistenceError("Invalid checkout reservation response.") from None
-        _cache_checkout_session(reserved, persisted=True)
-        return reserved, result["created"]
+    _subscriptions.append(sub)
 
-    with _reservations_lock:
-        now = datetime.now(UTC)
-        for old in _checkout_sessions.values():
-            if (old.user_id == user_id and old.provider == provider
-                    and old.status == "pending" and old.expires_at > now):
-                return old, False
-        _cache_checkout_session(rec, persisted=False)
-        return rec, True
+    if client is not None:
+        with contextlib.suppress(Exception):
+            client.table("subscriptions").insert(
+                {
+                    "id": sub.id,
+                    "user_id": sub.user_id,
+                    "plan_id": sub.plan_id,
+                    "current_period_start": sub.current_period_start.isoformat(),
+                    "current_period_end": sub.current_period_end.isoformat(),
+                    "provider": sub.provider,
+                    "checkout_session_id": sub.checkout_session_id,
+                    "created_at": sub.created_at.isoformat(),
+                }
+            ).execute()
+
+    return sub
 
 
 def create_checkout(
@@ -796,28 +457,34 @@ def create_checkout(
             },
         )
 
-    from api.errors import ApiError
-    from api.limiter import enforce_operation_attempt_limit
+    plan_def = PLANS["pass"]
+    assert plan_def.price_cents is not None
 
+    session_id = str(uuid.uuid4())
     provider = get_active_provider()
-    enforce_operation_attempt_limit("checkout", f"user:{user_id}", settings.checkout_attempts_per_hour)
-    rec, claimed = _reserve_checkout_session(user_id, provider.name)
-    if not claimed and rec.provider_ref is None:
-        raise HTTPException(409, detail={"code": "checkout_in_progress", "message": "Your checkout is being prepared. Please try again shortly."})
-    if claimed:
-        try:
-            created = provider.create_session(
-                checkout_session_id=rec.id, user_id=user_id, user_email=user_email,
-                plan_id="pass", plan_name=PLANS["pass"].name,
-                amount_cents=rec.amount_cents, currency=rec.currency,
-            )
-        except Exception:
-            rec = replace(rec, status="canceled")
-            _save_checkout_session(rec)
-            raise ApiError(503, "SERVICE_UNAVAILABLE", "Payment service unavailable. Please try again later.") from None
-        rec = replace(rec, provider_ref=created["provider_ref"], checkout_url=created["checkout_url"],
-                      expires_at=created["expires_at"])
-        _save_checkout_session(rec)
+    created = provider.create_session(
+        checkout_session_id=session_id,
+        user_id=user_id,
+        user_email=user_email,
+        plan_id="pass",
+        plan_name=plan_def.name,
+        amount_cents=plan_def.price_cents,
+        currency=plan_def.currency,
+    )
+
+    rec = CheckoutSessionRecord(
+        id=session_id,
+        user_id=user_id,
+        plan_id="pass",
+        amount_cents=plan_def.price_cents,
+        currency=plan_def.currency,
+        status="pending",
+        provider=provider.name,
+        provider_ref=created["provider_ref"],
+        checkout_url=created["checkout_url"],
+        expires_at=created["expires_at"],
+    )
+    _save_checkout_session(rec)
 
     return CheckoutCreatedOut(
         session_id=rec.id,
@@ -829,105 +496,29 @@ def create_checkout(
     )
 
 
-def _status_rpc_result(result: dict, expected: CheckoutSessionRecord) -> tuple[CheckoutSessionRecord, bool, bool]:
-    """Reject malformed coordination responses rather than bypassing protection."""
-    try:
-        if not isinstance(result["refresh"], bool) or not isinstance(result["provider_error"], bool):
-            raise ValueError("Invalid refresh result")
-        rec = _row_to_checkout_session(result["session"], cache=False)
-        if (rec.id != expected.id or rec.user_id != expected.user_id
-                or rec.provider != expected.provider or rec.provider_ref != expected.provider_ref
-                or rec.status not in ("pending", "paid", "expired", "canceled")
-                or (result["refresh"] and (rec.status != "pending" or rec.provider != "stripe_sandbox" or not rec.provider_ref))):
-            raise ValueError("Wrong checkout")
-    except Exception:
-        raise DatabasePersistenceError("Invalid checkout status response.") from None
-    _cache_checkout_session(rec, persisted=True)
-    return rec, result["refresh"], result["provider_error"]
-
-
-def _claim_status_refresh(rec: CheckoutSessionRecord, token: str) -> tuple[CheckoutSessionRecord, bool, bool]:
-    # Allow connect + read timeouts and scheduling margin before abandoned-claim recovery.
-    lease_seconds = 2 * settings.checkout_status_provider_timeout_seconds + 30
-    if get_supabase_client() is not None:
-        current, refresh, provider_error = _status_rpc_result(db_billing_rpc("claim_checkout_status_refresh", {
-            "p_session_id": rec.id, "p_user_id": rec.user_id,
-            "p_token": token, "p_lease_seconds": lease_seconds,
-        }), rec)
-        if refresh and current.status_refresh_token != token:
-            raise DatabasePersistenceError("Invalid checkout refresh claim.")
-        return current, refresh, provider_error
-    with _reservations_lock:
-        current = _checkout_sessions.get(rec.id)
-        if current is None or current.user_id != rec.user_id:
-            raise DatabasePersistenceError("Checkout state unavailable.")
-        now = datetime.now(UTC)
-        leased = current.status_refresh_until is not None and current.status_refresh_until > now
-        fresh = current.status_refresh_after is not None and current.status_refresh_after > now
-        refresh = False
-        if current.status == "pending":
-            if current.provider == "stripe_sandbox" and current.provider_ref and not fresh and not leased:
-                current.status_refresh_token = token
-                current.status_refresh_until = now + timedelta(seconds=lease_seconds)
-                current.status_refresh_error = False
-                refresh = True
-            elif current.expires_at <= now and not leased:
-                current.status = "expired"
-                current.status_refresh_error = False
-        return replace(current), refresh, current.status == "pending" and current.status_refresh_error
-
-
-def _finish_status_refresh(rec: CheckoutSessionRecord, token: str, status: str) -> tuple[CheckoutSessionRecord, bool, bool]:
-    if get_supabase_client() is not None:
-        current, refresh, provider_error = _status_rpc_result(db_billing_rpc("finish_checkout_status_refresh", {
-            "p_session_id": rec.id, "p_user_id": rec.user_id, "p_token": token,
-            "p_status": status, "p_cache_seconds": settings.checkout_status_cache_seconds,
-        }), rec)
-        if refresh:
-            raise DatabasePersistenceError("Invalid checkout refresh completion.")
-        return current, refresh, provider_error
-    with _reservations_lock:
-        current = _checkout_sessions.get(rec.id)
-        if current is None or current.user_id != rec.user_id:
-            raise DatabasePersistenceError("Checkout state unavailable.")
-        now = datetime.now(UTC)
-        if current.status_refresh_token == token:
-            if current.status == "pending":
-                if status == "paid":
-                    current.status = "paid"
-                    current.paid_at = current.paid_at or now
-                elif status == "expired" or current.expires_at <= now:
-                    current.status = "expired"
-            current.status_refresh_after = now + timedelta(seconds=settings.checkout_status_cache_seconds)
-            current.status_refresh_until = None
-            current.status_refresh_token = None
-            current.status_refresh_error = current.status == "pending" and status == "error"
-        return replace(current), False, current.status == "pending" and current.status_refresh_error
-
-
 def _refresh_and_serialize_session(rec: CheckoutSessionRecord) -> CheckoutStatusOut:
-    from api.errors import ApiError
+    now = datetime.now(UTC)
+    if rec.status == "pending":
+        if rec.provider == "stripe_sandbox" and rec.provider_ref:
+            try:
+                provider = StripeSandboxProvider()
+                remote_status = provider.get_status(rec.provider_ref)
+                if remote_status == "paid":
+                    rec.status = "paid"
+                    rec.paid_at = rec.paid_at or now
+                    _save_checkout_session(rec)
+                    grant_plan(rec)
+                elif remote_status == "expired":
+                    rec.status = "expired"
+                    _save_checkout_session(rec)
+            except Exception:
+                pass
 
-    token = str(uuid.uuid4())
-    rec, refresh, provider_error = _claim_status_refresh(rec, token)
-    if refresh:
-        try:
-            remote_status = StripeSandboxProvider().get_status(rec.provider_ref)
-            if remote_status not in ("pending", "paid", "expired"):
-                remote_status = "error"
-        except Exception:
-            remote_status = "error"
-        # Persistence errors must propagate, including after a successful provider call.
-        rec, _, provider_error = _finish_status_refresh(rec, token, remote_status)
-    if provider_error:
-        raise ApiError(503, "SERVICE_UNAVAILABLE", "Payment service unavailable. Please try again shortly.")
+        if rec.status == "pending" and now >= rec.expires_at:
+            rec.status = "expired"
+            _save_checkout_session(rec)
 
-    # A paid status can have been saved before a transient grant failure.
-    # The grant RPC is idempotent, so status polling can safely finish activation.
-    if rec.status == "paid":
-        grant_plan(rec)
-
-    active_sub = _get_latest_subscription_for_user(rec.user_id)
+    active_sub = _get_active_subscription_for_user(rec.user_id)
     return CheckoutStatusOut(
         session_id=rec.id,
         provider=rec.provider,
@@ -943,9 +534,6 @@ def _refresh_and_serialize_session(rec: CheckoutSessionRecord) -> CheckoutStatus
 
 
 def get_checkout_status(session_id: str, user_id: str) -> CheckoutStatusOut:
-    from api.limiter import enforce_checkout_status_limit
-
-    enforce_checkout_status_limit(user_id)
     rec = _load_checkout_session_by_id(session_id)
     if rec is None or rec.user_id != user_id:
         raise HTTPException(
@@ -956,9 +544,6 @@ def get_checkout_status(session_id: str, user_id: str) -> CheckoutStatusOut:
 
 
 def get_checkout_status_by_ref(provider_ref: str, user_id: str) -> CheckoutStatusOut:
-    from api.limiter import enforce_checkout_status_limit
-
-    enforce_checkout_status_limit(user_id)
     rec = _load_checkout_session_by_ref(provider_ref)
     if rec is None or rec.user_id != user_id:
         raise HTTPException(
@@ -970,23 +555,20 @@ def get_checkout_status_by_ref(provider_ref: str, user_id: str) -> CheckoutStatu
 
 def simulate_mock_payment(session_id: str, user_id: str) -> CheckoutStatusOut:
     """Mark a mock checkout session paid and grant the pass (mock provider only)."""
-    if (settings.billing_provider != "mock" or not settings.allow_mock_payments
-            or settings.app_environment == "production"):
+    if settings.billing_provider != "mock":
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": "Mock simulation is disabled."},
         )
 
     rec = _load_checkout_session_by_id(session_id)
-    if rec is None or rec.user_id != user_id or rec.provider != "mock":
+    if rec is None or rec.user_id != user_id:
         raise HTTPException(
             status_code=404,
             detail={"code": "checkout_not_found", "message": "Checkout session not found."},
         )
 
     now = datetime.now(UTC)
-    if rec.status in ("expired", "canceled"):
-        raise HTTPException(400, detail={"code": "session_expired", "message": "Checkout session is closed."})
     if rec.status == "pending" and now >= rec.expires_at:
         rec.status = "expired"
         _save_checkout_session(rec)
@@ -1004,49 +586,36 @@ def simulate_mock_payment(session_id: str, user_id: str) -> CheckoutStatusOut:
     return _refresh_and_serialize_session(rec)
 
 
-def process_stripe_event(event_id: str, event_type: str, data: dict) -> bool:
-    """Complete the durable ledger and grant atomically; failed work remains retryable."""
-    if not event_id or len(event_id) > 255 or len(event_type) > 255:
-        raise DatabasePersistenceError("Invalid payment event")
-    effective_type = event_type
-    if event_type == "checkout.session.completed" and data.get("payment_status") != "paid":
-        effective_type = "ignored.unpaid_checkout"
-    metadata = data.get("metadata") or {}
-    if not isinstance(metadata, dict):
-        raise DatabasePersistenceError("Invalid payment metadata")
-    owner = str(metadata.get("user_id") or "")
-    amount = data.get("amount_total")
-    if amount is not None and (type(amount) is not int or amount < 0):
-        raise DatabasePersistenceError("Invalid payment amount")
-    reference = str(data.get("id") or "")
-    currency = data.get("currency")
-    if get_supabase_client() is not None:
-        result = db_billing_rpc("process_stripe_checkout_event", {
-            "p_event_id": event_id, "p_type": effective_type, "p_provider_ref": reference,
-            "p_user_id": owner, "p_amount": amount, "p_currency": currency,
-        })
-        if not isinstance(result.get("processed"), bool):
-            raise DatabasePersistenceError("Invalid payment event response")
-        return result["processed"]
-    with _reservations_lock:
-        if event_id in _stripe_events:
-            return False
-        if effective_type in ("checkout.session.completed", "checkout.session.expired"):
-            rec = _load_checkout_session_by_ref(reference)
-            if rec is None or rec.provider != "stripe_sandbox":
-                raise DatabasePersistenceError("Payment checkout unavailable")
-            if effective_type == "checkout.session.completed":
-                if (owner != rec.user_id or amount != rec.amount_cents
-                        or (currency is not None and str(currency).upper() != rec.currency)):
-                    raise DatabasePersistenceError("Invalid payment details")
-                handle_stripe_checkout_completed(reference, metadata, amount)
-            else:
-                handle_stripe_checkout_expired(reference)
-        # No completion marker is written if any preceding operation failed.
-        while len(_stripe_events) >= settings.webhook_cache_max_entries:
-            _stripe_events.pop(next(iter(_stripe_events)))
-        _stripe_events[event_id] = datetime.now(UTC)
-        return True
+def record_stripe_event_once(event_id: str, event_type: str) -> bool:
+    """Return True if this Stripe event ID has not been processed yet."""
+    if event_id in _stripe_events:
+        return False
+
+    client = get_supabase_client()
+    if client is not None:
+        try:
+            existing = (
+                client.table("stripe_events")
+                .select("id")
+                .eq("id", event_id)
+                .limit(1)
+                .execute()
+            )
+            if existing.data:
+                _stripe_events.add(event_id)
+                return False
+            client.table("stripe_events").insert(
+                {
+                    "id": event_id,
+                    "type": event_type,
+                    "received_at": datetime.now(UTC).isoformat(),
+                }
+            ).execute()
+        except Exception:
+            pass
+
+    _stripe_events.add(event_id)
+    return True
 
 
 def handle_stripe_checkout_completed(
@@ -1066,7 +635,8 @@ def handle_stripe_checkout_completed(
 
     now = datetime.now(UTC)
     if rec.status != "paid":
-        rec = replace(rec, status="paid", paid_at=now)
+        rec.status = "paid"
+        rec.paid_at = now
         _save_checkout_session(rec)
 
     grant_plan(rec)

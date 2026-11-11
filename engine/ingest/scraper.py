@@ -10,31 +10,23 @@ import html as html_module
 import json
 import logging
 import re
-from urllib.parse import urlparse, urlsplit
+from urllib.parse import urlparse
 from urllib.robotparser import RobotFileParser
 
-from engine.ingest.url_safety import (
-    host_matches,
-    safe_http_get,
-    validate_and_resolve_url,
-    validate_url_syntax,
-)
+import httpx
 
 logger = logging.getLogger(__name__)
 
 
 def is_url_allowed_by_robots(url: str) -> bool:
     """Check if the URL path is allowed by the host's robots.txt."""
-    validated = validate_and_resolve_url(url)
     try:
-        parsed = urlsplit(validated.url)
+        parsed = urlparse(url)
         robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
-        resp = safe_http_get(robots_url, timeout=5.0)
         rfp = RobotFileParser()
-        rfp.parse(resp.text.splitlines())
-        return rfp.can_fetch("*", validated.url)
-    except ValueError:
-        raise
+        rfp.set_url(robots_url)
+        rfp.read()
+        return rfp.can_fetch("*", url)
     except Exception as err:
         logger.debug("Could not fetch robots.txt for %s: %s (defaulting to allow)", url, err)
         return True
@@ -61,12 +53,11 @@ def _clean_html_text(text: str) -> str:
 
 def scrape_camhr_job(url: str, timeout: float = 15.0) -> str:
     """Extract structured job description text from CamHR via their public REST API."""
-    validate_and_resolve_url(url)
     match = re.search(r"(?:/job/|/job-record/|[?&]id=|[?&]jobId=)(\d+)", url)
     if not match:
         match = re.search(r"/(\d{6,10})(?:[/?#]|$)", url)
     if not match:
-        raise ValueError("Could not identify a valid CamHR job ID in URL.")
+        raise ValueError(f"Could not identify a valid CamHR job ID in URL: {url}")
 
     job_id = match.group(1)
     api_url = f"https://api.camhr.com/v1.0.0/jobs/{job_id}"
@@ -77,15 +68,13 @@ def scrape_camhr_job(url: str, timeout: float = 15.0) -> str:
     }
 
     try:
-        resp = safe_http_get(api_url, headers=headers, timeout=timeout)
-        payload = resp.json()
-    except ValueError:
-        raise
+        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+            resp = client.get(api_url, headers=headers)
+            resp.raise_for_status()
+            payload = resp.json()
     except Exception as err:
         logger.error("CamHR API request failed for job ID %s: %s", job_id, err)
-        raise RuntimeError(
-            "Could not fetch CamHR job details. Please check the URL or paste the job description text directly."
-        ) from err
+        raise RuntimeError(f"Could not fetch CamHR job details ({err}). Please check the URL or paste the job description text directly.") from err
 
     job = payload.get("data")
     if not job or not isinstance(job, dict):
@@ -163,15 +152,13 @@ def scrape_jobnet_job(url: str, timeout: float = 15.0) -> str:
     }
 
     try:
-        resp = safe_http_get(url.strip(), headers=headers, timeout=timeout)
-        html_text = resp.text
-    except ValueError:
-        raise
+        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+            resp = client.get(url.strip(), headers=headers)
+            resp.raise_for_status()
+            html_text = resp.text
     except Exception as err:
         logger.error("JobNet request failed for URL %s: %s", url, err)
-        raise RuntimeError(
-            "Could not load JobNet webpage. Please check the URL or paste the job description text directly."
-        ) from err
+        raise RuntimeError(f"Could not load JobNet webpage ({err}). Please check the URL or paste the job description text directly.") from err
 
     # 1. Try to extract schema.org JSON-LD JobPosting
     json_ld_matches = re.finditer(
@@ -242,14 +229,14 @@ def scrape_jobify_job(url: str, timeout: float = 15.0) -> str:
     }
 
     try:
-        resp = safe_http_get(url.strip(), headers=headers, timeout=timeout)
-        html_text = resp.text
-    except ValueError:
-        raise
+        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+            resp = client.get(url.strip(), headers=headers)
+            resp.raise_for_status()
+            html_text = resp.text
     except Exception as err:
         logger.error("Jobify request failed for URL %s: %s", url, err)
         raise RuntimeError(
-            "Could not load Jobify webpage. "
+            f"Could not load Jobify webpage ({err}). "
             "Please copy and paste the job description text directly into the 'Paste text' tab."
         ) from err
 
@@ -602,37 +589,44 @@ def _extract_generic_html(html_text: str, url: str, fragment: str = "") -> str:
 
 def scrape_job_url(url: str) -> str:
     """Scrape job description text from a web URL, routing to specialized extractors when available."""
-    normalized_url, _, hostname, _ = validate_url_syntax(url)
     parsed = urlparse(url.strip())
+    domain = parsed.netloc.lower()
     fragment = parsed.fragment.strip()
+    fetch_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
 
-    if host_matches(hostname, ("camhr.com",)):
+    if "linkedin.com" in domain or "facebook.com" in domain:
+        raise ValueError(
+            "LinkedIn and Facebook require login to view job postings due to anti-scraping protections. "
+            "Please copy and paste the job description text directly into the 'Paste text' tab."
+        )
+
+    if "camhr.com" in domain:
         return scrape_camhr_job(url)
 
-    if host_matches(hostname, ("jobnet.com.kh",)):
-        return scrape_jobnet_job(normalized_url)
+    if "jobnet.com.kh" in domain:
+        return scrape_jobnet_job(url)
 
-    if host_matches(hostname, ("jobify.works", "jobify.com", "jobify-cambodia.com")) or hostname == "jobify-cambodia":
-        return scrape_jobify_job(normalized_url)
+    if "jobify.works" in domain or "jobify.com" in domain or "jobify-cambodia" in domain:
+        return scrape_jobify_job(url)
 
     # Generic webpage scraper (BongThom, ATS portals, greenhouse, lever, workday, etc.)
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9,km;q=0.8",
-        "Accept-Encoding": "gzip, deflate",
+        "Accept-Encoding": "gzip, deflate, br",
     }
 
     try:
-        resp = safe_http_get(normalized_url, headers=headers, timeout=15.0)
-        html_text = resp.text
-    except ValueError:
-        raise
+        with httpx.Client(timeout=15.0, follow_redirects=True) as client:
+            resp = client.get(fetch_url, headers=headers)
+            resp.raise_for_status()
+            html_text = resp.text
     except Exception as err:
         logger.error("HTTP request failed for URL %s: %s", url, err)
         raise RuntimeError(
-            "Could not load webpage. "
+            f"Could not load webpage ({err}). "
             "Please check the URL or paste the job description text directly."
         ) from err
 
-    return _extract_generic_html(html_text, normalized_url, fragment=fragment)
+    return _extract_generic_html(html_text, url, fragment=fragment)

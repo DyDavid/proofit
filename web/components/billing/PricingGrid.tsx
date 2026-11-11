@@ -36,64 +36,70 @@ export function PricingGrid({ onStartCheckout }: PricingGridProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [plans, setPlans] = useState<PlanDefinition[]>(DEFAULT_PLANS);
-  // undefined means the browser session is still being restored.
-  const [userId, setUserId] = useState<string | null | undefined>(undefined);
-  const authChecked = userId !== undefined;
-  const isLoggedIn = Boolean(userId);
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
+  const [authChecked, setAuthChecked] = useState<boolean>(false);
   const [subscription, setSubscription] = useState<SubscriptionSummary | null>(
     null,
   );
   const [checkoutPlan, setCheckoutPlan] = useState<PlanDefinition | null>(null);
   const [campusModalOpen, setCampusModalOpen] = useState<boolean>(false);
   const [autoTriggered, setAutoTriggered] = useState<boolean>(false);
-  const [subscriptionVersion, setSubscriptionVersion] = useState(0);
+
+  const reloadSubscription = useCallback(async () => {
+    const sub = await fetchSubscription();
+    if (sub) {
+      setSubscription(sub);
+    }
+  }, []);
 
   useEffect(() => {
     let mounted = true;
 
-    void fetchPlans().then((loadedPlans) => {
-      if (mounted) setPlans(loadedPlans);
-    });
-    return () => {
-      mounted = false;
-    };
-  }, []);
+    async function load() {
+      const [loadedPlans, supabase] = await Promise.all([
+        fetchPlans(),
+        Promise.resolve(createClient()),
+      ]);
+      if (!mounted) return;
+      setPlans(loadedPlans);
 
-  useEffect(() => {
-    const supabase = createClient();
-    if (!supabase) {
-      setUserId(null);
-      return;
-    }
-
-    // INITIAL_SESSION arrives after session restoration; later events keep
-    // pricing in sync with sign-in, sign-out, and token refresh across tabs.
-    const {
-      data: { subscription: authSubscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUserId(session?.user.id ?? null);
-      if (!session) {
-        setCheckoutPlan(null);
-        setAutoTriggered(false);
+      if (!supabase) {
+        setIsLoggedIn(false);
+        setAuthChecked(true);
+        return;
       }
-    });
 
-    return () => authSubscription.unsubscribe();
-  }, []);
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!mounted) return;
 
-  useEffect(() => {
-    let mounted = true;
-    setSubscription(null);
-    if (userId) {
-      // Keep network/auth calls outside the auth event callback.
-      void fetchSubscription().then((sub) => {
-        if (mounted) setSubscription(sub);
-      });
+      if (user) {
+        setIsLoggedIn(true);
+        const sub = await fetchSubscription();
+        if (!mounted) return;
+        setSubscription(
+          sub ?? {
+            plan_id: "free",
+            active_until: null,
+            usage: {
+              analysis: { used: 0, limit: 3 },
+              rewrite: { used: 0, limit: 1 },
+            },
+          },
+        );
+      } else {
+        setIsLoggedIn(false);
+        setSubscription(null);
+      }
+      setAuthChecked(true);
     }
+
+    void load();
     return () => {
       mounted = false;
     };
-  }, [userId, subscriptionVersion]);
+  }, []);
 
   const startPassCheckout = useCallback(
     (passPlan: PlanDefinition) => {
@@ -148,16 +154,6 @@ export function PricingGrid({ onStartCheckout }: PricingGridProps) {
       };
     }
 
-    if (!authChecked) {
-      return {
-        ctaLabel: "Checking account…",
-        disabled: true,
-        showArrow: false,
-        activeUntilText: null,
-        onAction: () => {},
-      };
-    }
-
     if (plan.id === "free") {
       if (!isLoggedIn) {
         return {
@@ -204,21 +200,14 @@ export function PricingGrid({ onStartCheckout }: PricingGridProps) {
     }
 
     if (isPassActive) {
-      const daysLeft = subscription?.active_until
-        ? Math.max(
-            0,
-            Math.ceil(
-              (new Date(subscription.active_until).getTime() - Date.now()) /
-                (1000 * 60 * 60 * 24),
-            ),
-          )
-        : 30;
       return {
-        ctaLabel: `Active · ${daysLeft} ${daysLeft === 1 ? "day" : "days"} left`,
-        disabled: true,
-        showArrow: false,
+        ctaLabel: "Extend pass",
+        disabled: false,
+        showArrow: true,
         activeUntilText: formatActiveUntil(subscription?.active_until),
-        onAction: () => {},
+        onAction: () => {
+          startPassCheckout(plan);
+        },
       };
     }
 
@@ -259,7 +248,7 @@ export function PricingGrid({ onStartCheckout }: PricingGridProps) {
           isExtending={isPassActive}
           onClose={() => setCheckoutPlan(null)}
           onCompleted={() => {
-            setSubscriptionVersion((version) => version + 1);
+            void reloadSubscription();
           }}
         />
       )}

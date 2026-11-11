@@ -63,19 +63,14 @@ def fetch_jd(url: str) -> str:
 
     from .cache import get_cached_text, save_cached_text
     from .scraper import scrape_job_url
-    from .url_safety import validate_and_resolve_url, validate_url_syntax
 
-    validate_url_syntax(url)
-
-    # 1. Check cache first (after validating destination safety)
+    # 1. Check cache first
     cached = get_cached_text(url)
     if cached:
-        validate_and_resolve_url(url)
         return cached
 
     # 2. Mock mode check
     if os.getenv("ENGINE_MODE") == "mock":
-        validate_and_resolve_url(url)
         golden_text = (
             "Junior Web Developer at Angkor Digital Co., Ltd.\n"
             "Requirements:\n"

@@ -16,12 +16,7 @@ class StripeSandboxProvider:
 
     def _api_key(self) -> str:
         validate_billing_config(settings)
-        key = (settings.stripe_secret_key or "").strip()
-        # Historical Stripe checkouts may still be polled after billing is disabled.
-        # Fail before constructing a client when no test credentials are available.
-        if not key.startswith(("sk_test_", "rk_test_")):
-            raise RuntimeError("Stripe test credentials are unavailable.")
-        return key
+        return (settings.stripe_secret_key or "").strip()
 
     def create_session(
         self,
@@ -40,7 +35,6 @@ class StripeSandboxProvider:
 
         create_kwargs: dict[str, object] = {
             "api_key": api_key,
-            "idempotency_key": f"checkout:{checkout_session_id}",
             "mode": "payment",
             "line_items": [
                 {
@@ -77,13 +71,7 @@ class StripeSandboxProvider:
 
     def get_status(self, provider_ref: str) -> CheckoutStatus:
         api_key = self._api_key()
-        # Bound network work inside the distributed refresh lease; no SDK retries.
-        client = stripe.StripeClient(
-            api_key,
-            http_client=stripe.RequestsClient(timeout=settings.checkout_status_provider_timeout_seconds),
-            max_network_retries=0,
-        )
-        session = client.checkout.sessions.retrieve(provider_ref)
+        session = stripe.checkout.Session.retrieve(provider_ref, api_key=api_key)
         payment_status = getattr(session, "payment_status", None)
         status = getattr(session, "status", None)
         if payment_status == "paid":

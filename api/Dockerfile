@@ -29,8 +29,7 @@ COPY engine ./engine
 
 # `api` extra: fastapi, uvicorn, pydantic-settings, anthropic, supabase, httpx.
 # `parse` extra: pdfminer.six, python-docx — resume/JD text extraction.
-RUN python -m pip install --no-cache-dir --upgrade "pip>=26.3" \
- && pip install --no-cache-dir ".[api,parse]"
+RUN pip install --no-cache-dir ".[api,parse]"
 
 # The FastAPI application itself. Not pip-installed — see header comment.
 COPY api ./api
@@ -53,6 +52,4 @@ EXPOSE 8000
 # Shell form deliberately: Render injects $PORT at runtime and the exec form
 # cannot expand it. Falls back to 8000 so a bare `docker run` (no PORT set)
 # still works, matching docker-compose.yml's explicit PORT=8000.
-# --no-proxy-headers ensures uvicorn does not rewrite scope["client"] before
-# api/auth.py validates the connection peer against TRUSTED_PROXIES.
-CMD ["sh", "-c", "uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000} --no-proxy-headers"]
+CMD ["sh", "-c", "uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

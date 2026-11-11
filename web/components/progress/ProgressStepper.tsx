@@ -5,7 +5,7 @@ import * as React from "react";
 
 import { Button } from "@/components/ui/Button";
 import { useRouter } from "next/navigation";
-import { ApiError, getAnalysis, retryAnalysis } from "@/lib/api";
+import { getAnalysis, retryAnalysis } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const STAGES = [
@@ -122,17 +122,7 @@ export function ProgressStepper({ analysisId }: ProgressStepperProps) {
       const { analysis_id } = await retryAnalysis(currentId);
       setCurrentId(analysis_id);
       setServerError(null);
-    } catch (err: unknown) {
-      if (err instanceof ApiError) {
-        if (err.code === "quota_exceeded" || err.status === 402) {
-          router.push("/pricing");
-          return;
-        }
-        if (err.code === "GUEST_LIMIT_REACHED" || err.status === 429) {
-          router.push("/auth/signin?next=" + encodeURIComponent("/analyze"));
-          return;
-        }
-      }
+    } catch {
       // Retry itself failed (e.g. the original analysis is gone server-side
       // after a restart). Say so instead of silently reverting the spinner —
       // the card's "Back" link is then the way out.

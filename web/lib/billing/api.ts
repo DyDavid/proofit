@@ -1,5 +1,4 @@
 import { createClient } from "@/lib/supabase/client";
-import { getDemoEntitlement } from "./entitlement";
 
 export type PlanId = "free" | "pass" | "campus";
 export type BillingProviderName = "stripe_sandbox" | "mock";
@@ -193,25 +192,6 @@ export async function fetchPlans(): Promise<PlanDefinition[]> {
 }
 
 export async function fetchSubscription(): Promise<SubscriptionSummary | null> {
-  // If a mock Job Hunt Pass entitlement is active in demo mode, overlay it
-  const demo = getDemoEntitlement();
-  if (demo) {
-    return {
-      plan_id: "pass",
-      active_until: demo.expiresAt,
-      usage: {
-        analysis: {
-          used: Math.max(0, demo.analysesLimit - demo.analysesRemaining),
-          limit: demo.analysesLimit,
-        },
-        rewrite: {
-          used: Math.max(0, demo.rewritesLimit - demo.rewritesRemaining),
-          limit: demo.rewritesLimit,
-        },
-      },
-    };
-  }
-
   try {
     const headers = await getBearerHeaders();
     if (!headers.Authorization) return null;

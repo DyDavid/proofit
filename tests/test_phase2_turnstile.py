@@ -86,7 +86,6 @@ def test_guest_analysis_succeeds_with_valid_turnstile_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(settings, "turnstile_secret_key", "1x0000000000000000000000000000000AA")
-    monkeypatch.setattr(settings, "trusted_proxies", "127.0.0.1")
     captured: dict[str, str] = {}
 
     async def _fake_post(_self: object, _url: str, data: dict[str, str]) -> _FakeHttpxResponse:

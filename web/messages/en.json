@@ -268,8 +268,6 @@
     "ANALYSIS_NOT_FOUND": "We couldn't find this analysis. Results aren't saved permanently yet — start a new analysis to see fresh results.",
     "ANALYSIS_NOT_READY": "This analysis isn't finished yet. Wait for it to complete before asking for rewrite suggestions.",
     "COUNTRY_RULES_NOT_FOUND": "We don't have format rules for this destination yet.",
-    "UNAUTHORIZED": "Sign in to generate AI rewrites.",
-    "SERVICE_UNAVAILABLE": "The rewrite service is temporarily busy. Please try again in a few moments.",
     "ENGINE_FAILED": "The analysis didn't finish. Try again — if it keeps failing, send us this error id.",
     "RATE_LIMITED": "Too many requests right now. Wait about a minute and try again.",
     "INTERNAL": "Something went wrong on our side. Try again — if it keeps happening, send us this error id."

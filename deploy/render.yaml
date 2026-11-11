@@ -53,33 +53,18 @@ services:
 
     envVars:
       # ── Engine ───────────────────────────────────────────────────────────
-      # Production coordination must use the database across every worker.
-      # Local mock/offline demonstrations use the separate development config.
+      # Phase 1 ships mock mode: analyses return data/fixtures/*.json after an
+      # artificial delay. Flip to "live" in the Render dashboard at CP2
+      # (PERSON_B_PLAN_v2.md §5 Phase 2 task 7) — not by editing this file, so a
+      # rollback is a dashboard toggle rather than a redeploy.
       - key: ENGINE_MODE
-        value: live
-      - key: PERSISTENCE_MODE
-        value: required
-      - key: APP_ENVIRONMENT
-        value: production
-      - key: ALLOW_MOCK_PAYMENTS
-        value: "false"
-      - key: BILLING_PROVIDER
-        value: disabled
-      # To enable Stripe test checkout later, set BILLING_PROVIDER=stripe_sandbox
-      # and add STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET in Render's environment.
-      # One 192 MiB parser plus the API must fit this 512 MiB instance.
-      - key: MAX_CONCURRENT_PARSES
-        value: "1"
-      - key: PARSER_MEMORY_LIMIT_MB
-        value: "192"
+        value: mock
 
       # ── Secrets — prompted in the dashboard, never stored in git ──────────
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL
-        sync: false
-      - key: GEMINI_EMBEDDING_MODEL
-        sync: false
+        value: gemini-3.1-flash-lite
       - key: SUPABASE_URL
         sync: false
       # Service-role key: full database access. It is safe here ONLY because it
@@ -87,20 +72,6 @@ services:
       # talks to this service, and only this service talks to Supabase.
       - key: SUPABASE_SERVICE_KEY
         sync: false
-      - key: GUEST_IP_SALT
-        sync: false
-
-      # ── Proxy Trust (Phase 4) ────────────────────────────────────────────
-      # Comma-separated IPs or CIDRs of trusted reverse proxies.
-      # Default is "" (trust no forwarding headers; use connection peer IP).
-      # Unverified deployment facts:
-      #   • Render does not guarantee static internal proxy CIDRs on free tier,
-      #     nor is it verified that Render strips client-sent X-Forwarded-For.
-      #   • Vercel Next.js rewrites proxy /api/* server-side, adding an extra hop.
-      # Only populate TRUSTED_PROXIES in Render dashboard after verifying the
-      # exact proxy CIDRs in your environment.
-      - key: TRUSTED_PROXIES
-        value: ""
 
       # ── HTTP ─────────────────────────────────────────────────────────────
       # Comma-separated allowed browser origins. Replace the first entry with the

@@ -8,7 +8,6 @@ import { ResumeDropzone } from "@/components/analyze/ResumeDropzone";
 import { TurnstileWidget } from "@/components/auth/TurnstileWidget";
 import { UpgradePrompt } from "@/components/billing/UpgradePrompt";
 import { UsageMeter } from "@/components/billing/UsageMeter";
-import { consumeDemoAnalysis, getDemoEntitlement } from "@/lib/billing/entitlement";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import Link from "next/link";
@@ -87,39 +86,11 @@ export function AnalyzeForm() {
   );
 
   React.useEffect(() => {
-    const local = loadRememberedResume();
-    if (local) {
-      setRememberedResume(local);
-    }
+    setRememberedResume(loadRememberedResume());
     const supabase = createClient();
     if (supabase) {
-      supabase.auth.getUser().then(async ({ data }) => {
-        const user = data.user;
-        setIsGuest(!user);
-        if (user) {
-          // If the user is logged in, fetch their latest saved resume from the database
-          // so they don't have to re-upload to run multiple analyses.
-          try {
-            const { data: savedResumes } = await supabase
-              .from("resumes")
-              .select("id, filename, size_bytes")
-              .eq("user_id", user.id)
-              .order("created_at", { ascending: false })
-              .limit(1);
-            if (savedResumes && savedResumes.length > 0) {
-              const latest = savedResumes[0];
-              const rec = {
-                id: latest.id,
-                filename: latest.filename,
-                size: latest.size_bytes ?? 0,
-              };
-              saveRememberedResume(rec);
-              setRememberedResume(rec);
-            }
-          } catch {
-            // Ignore error restoring saved resume
-          }
-        }
+      supabase.auth.getUser().then(({ data }) => {
+        setIsGuest(!data.user);
       });
     }
   }, []);
@@ -148,45 +119,14 @@ export function AnalyzeForm() {
     setFormError(null);
     setGuestLimitHit(false);
     setQuotaError(null);
-
-    const demo = getDemoEntitlement();
-    if (demo && demo.analysesRemaining <= 0) {
-      setQuotaError(
-        "You have used all analysis credits included in your Job Hunt Pass. Upgrade on Pricing to continue.",
-      );
-      setSubmitting(false);
-      return;
-    }
-
     try {
       let resumeId: string;
       if (file) {
-        // If the selected file has the same filename as their already saved resume, reuse it
-        if (rememberedResume && rememberedResume.filename === file.name) {
-          resumeId = rememberedResume.id;
-          setFile(null);
-        } else {
-          try {
-            const uploaded = await uploadResume(file);
-            resumeId = uploaded.resume_id;
-            const remembered = { id: resumeId, filename: file.name, size: file.size };
-            saveRememberedResume(remembered);
-            setRememberedResume(remembered);
-            setFile(null);
-          } catch (uploadErr) {
-            // If upload failed because of saved_resumes limit and user already has a saved resume, fallback to it
-            if (
-              uploadErr instanceof ApiError &&
-              uploadErr.code === "quota_exceeded" &&
-              rememberedResume
-            ) {
-              resumeId = rememberedResume.id;
-              setFile(null);
-            } else {
-              throw uploadErr;
-            }
-          }
-        }
+        const uploaded = await uploadResume(file);
+        resumeId = uploaded.resume_id;
+        const remembered = { id: resumeId, filename: file.name, size: file.size };
+        saveRememberedResume(remembered);
+        setRememberedResume(remembered);
       } else {
         // canSubmit guarantees rememberedResume is set when file is not.
         resumeId = rememberedResume!.id;
@@ -200,7 +140,6 @@ export function AnalyzeForm() {
         country,
         turnstile_token: turnstileToken ?? undefined,
       });
-      consumeDemoAnalysis();
       setTurnstileReset((n) => n + 1);
       router.push(`/progress?id=${analysis_id}${cached ? "&cached=1" : ""}`);
     } catch (err) {
