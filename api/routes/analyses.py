@@ -13,7 +13,7 @@ import asyncio
 import logging
 import time
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, Response
 from pydantic import BaseModel, ValidationError
 
 from api.auth import CurrentUser, get_client_ip, get_optional_user, hash_guest_ip
@@ -139,6 +139,7 @@ async def _run_live_analysis(analysis_id: str) -> None:
             fut_res = executor.submit(_do_norm_resume)
             fut_job = executor.submit(_do_norm_jd)
             resume = fut_res.result()
+            store.update_analysis(analysis_id, stage="reading_job")
             job = fut_job.result()
 
         res_rec.normalized = resume
@@ -151,42 +152,46 @@ async def _run_live_analysis(analysis_id: str) -> None:
         # Stage 3: matching_requirements
         store.update_analysis(analysis_id, stage="matching_requirements")
         match = run_match(job, resume)
-        baseline = run_baseline(job, resume)
 
         # Stage 4: checking_realism
         store.update_analysis(analysis_id, stage="checking_realism")
+        baseline = run_baseline(job, resume)
         match.job = job
         match.resume = resume
 
         store.update_analysis(analysis_id, status="done", match=match, baseline=baseline)
         record_usage(record.user_id, "analysis")
 
-        # Parallel pgvector embeddings persistence in background (non-blocking)
+        # Parallel pgvector embeddings persistence in detached background thread (non-blocking)
         if get_supabase_client():
             try:
                 def _fetch_all_embeddings():
-                    with ThreadPoolExecutor(max_workers=8) as emb_exec:
-                        ev_futures = {ev.id: emb_exec.submit(get_embedding, ev.source_line) for ev in resume.evidence}
-                        req_futures = {req.id: emb_exec.submit(get_embedding, req.text) for req in job.requirements}
-                        ev_vectors = {eid: fut.result() for eid, fut in ev_futures.items()}
-                        req_vectors = {rid: fut.result() for rid, fut in req_futures.items()}
+                    try:
+                        with ThreadPoolExecutor(max_workers=8) as emb_exec:
+                            ev_futures = {ev.id: emb_exec.submit(get_embedding, ev.source_line) for ev in resume.evidence}
+                            req_futures = {req.id: emb_exec.submit(get_embedding, req.text) for req in job.requirements}
+                            ev_vectors = {eid: fut.result() for eid, fut in ev_futures.items()}
+                            req_vectors = {rid: fut.result() for rid, fut in req_futures.items()}
 
-                    db_save_resume_evidence(
-                        res_rec.id,
-                        [ev.model_dump(mode="json") for ev in resume.evidence],
-                        ev_vectors,
-                    )
-                    db_save_jd_requirements(
-                        job_rec.id,
-                        job.content_hash,
-                        [req.model_dump(mode="json") for req in job.requirements],
-                        req_vectors,
-                    )
+                        db_save_resume_evidence(
+                            res_rec.id,
+                            [ev.model_dump(mode="json") for ev in resume.evidence],
+                            ev_vectors,
+                        )
+                        db_save_jd_requirements(
+                            job_rec.id,
+                            job.content_hash,
+                            [req.model_dump(mode="json") for req in job.requirements],
+                            req_vectors,
+                        )
+                    except Exception as bg_err:
+                        logger.warning("Could not persist pgvector embeddings in background: %s", bg_err)
 
-                with ThreadPoolExecutor(max_workers=1) as bg_writer:
-                    bg_writer.submit(_fetch_all_embeddings)
+                import threading
+                bg_thread = threading.Thread(target=_fetch_all_embeddings, daemon=True)
+                bg_thread.start()
             except Exception as emb_err:
-                logger.warning("Could not persist pgvector embeddings: %s", emb_err)
+                logger.warning("Could not spawn pgvector persistence thread: %s", emb_err)
 
     except Exception as err:
         logger.exception("Live analysis failed (%s). Generating fallback match.", err)
@@ -295,8 +300,11 @@ async def create_analysis(
 @router.get("/analyses/{analysis_id}")
 async def get_analysis(
     analysis_id: str,
+    response: Response,
     user: CurrentUser | None = Depends(get_optional_user),  # noqa: B008
 ) -> dict:
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
     record = store.get_analysis(analysis_id)
     if record is None:
         raise ApiError(

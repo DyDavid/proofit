@@ -55,7 +55,14 @@ export function ResultsById({ id }: ResultsByIdProps) {
         const userRes = supabase ? await supabase.auth.getUser() : null;
         const isLoggedOut = !userRes?.data?.user;
 
-        const res = await getAnalysis(id);
+        let res = await getAnalysis(id);
+        let retries = 0;
+        while (!cancelled && res.status !== "done" && res.status !== "failed" && retries < 3) {
+          await new Promise((resolve) => setTimeout(resolve, 800));
+          if (cancelled) return;
+          res = await getAnalysis(id);
+          retries++;
+        }
         if (cancelled) return;
         if (res.status === "done" && res.match) {
           setMatch(res.match);

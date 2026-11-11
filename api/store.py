@@ -500,37 +500,59 @@ class Store:
         return record
 
     def get_analysis(self, analysis_id: str) -> AnalysisRecord | None:
-        if analysis_id in self.analyses:
-            return self.analyses[analysis_id]
+        rec = self.analyses.get(analysis_id)
+        if rec is not None and rec.status == "done":
+            return rec
 
         if get_supabase_client():
             row = db_get_analysis(analysis_id)
             if row:
-                match_obj = Match.model_validate(row["match"]) if row.get("match") else None
-                baseline_obj: BaselineMatch | None = None
-                if match_obj and match_obj.job and match_obj.resume:
-                    try:
-                        from engine.match import run_baseline
+                if row.get("status") == "done":
+                    match_obj = Match.model_validate(row["match"]) if row.get("match") else None
+                    baseline_obj: BaselineMatch | None = None
+                    if match_obj and match_obj.job and match_obj.resume:
+                        try:
+                            from engine.match import run_baseline
 
-                        baseline_obj = run_baseline(match_obj.job, match_obj.resume)
-                    except Exception:
-                        baseline_obj = None
-                rec = AnalysisRecord(
-                    id=row["id"],
-                    resume_id=row.get("resume_id") or "",
-                    job_id=row.get("job_id") or "",
-                    country=row.get("country", "KH"),
-                    status=row.get("status", "done"),
-                    stage=row.get("stage"),
-                    match=match_obj,
-                    baseline=baseline_obj,
-                    error_message=row.get("error_message"),
-                    user_id=row.get("user_id"),
-                    is_guest=False,
-                )
-                self.analyses[rec.id] = rec
-                return rec
-        return None
+                            baseline_obj = run_baseline(match_obj.job, match_obj.resume)
+                        except Exception:
+                            baseline_obj = None
+                    rec = AnalysisRecord(
+                        id=row["id"],
+                        resume_id=row.get("resume_id") or "",
+                        job_id=row.get("job_id") or "",
+                        country=row.get("country", "KH"),
+                        status=row.get("status", "done"),
+                        stage=row.get("stage"),
+                        match=match_obj,
+                        baseline=baseline_obj,
+                        error_message=row.get("error_message"),
+                        user_id=row.get("user_id"),
+                        is_guest=False,
+                    )
+                    self.analyses[rec.id] = rec
+                    return rec
+                elif rec is not None:
+                    if row.get("stage"):
+                        rec.stage = row["stage"]
+                    if row.get("status"):
+                        rec.status = row["status"]
+                    return rec
+                else:
+                    rec = AnalysisRecord(
+                        id=row["id"],
+                        resume_id=row.get("resume_id") or "",
+                        job_id=row.get("job_id") or "",
+                        country=row.get("country", "KH"),
+                        status=row.get("status", "queued"),
+                        stage=row.get("stage"),
+                        user_id=row.get("user_id"),
+                        is_guest=False,
+                    )
+                    self.analyses[rec.id] = rec
+                    return rec
+
+        return rec
 
     def pick_fixture_name(self, job_id: str) -> str:
         """The fixture name `pick_fixture`/`pick_baseline` would each pick —

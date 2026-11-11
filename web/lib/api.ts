@@ -166,7 +166,10 @@ export interface AnalysisStatusResponse {
 
 export async function getAnalysis(id: string): Promise<AnalysisStatusResponse> {
   const headers = await authHeaders();
-  const res = await fetch(`/api/analyses/${id}`, { headers });
+  const res = await fetch(`/api/analyses/${id}`, {
+    headers,
+    cache: "no-store",
+  });
   if (!res.ok) throw await toApiError(res);
   return res.json();
 }
