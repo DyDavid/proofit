@@ -1,6 +1,5 @@
 import { useTranslations } from "@/lib/copy";
 
-import { HiddenStrengths } from "@/components/results/HiddenStrengths";
 import { ResultsInteractive } from "@/components/results/ResultsInteractive";
 import { CoverageStat, type CoverageTile } from "@/components/results/CoverageStat";
 import { CoverageRing } from "@/components/results/CoverageRing";
@@ -38,9 +37,6 @@ function formatDate(iso: string): string {
 export interface ResultsViewProps {
   match: Match;
   baseline?: BaselineMatch | null;
-  /** Undefined on the static "try a sample" path — there is no analysis to
-   * run rewrites against, so `HiddenStrengths` hides its run button and
-   * renders `match.hidden_strengths` as-is. */
   analysisId?: string;
 }
 
@@ -50,7 +46,7 @@ export interface ResultsViewProps {
  * real-analysis path (`ResultsById.tsx`, fetched by `?id=`). `useTranslations`
  * from `@/lib/copy` works identically from a Server or a Client Component.
  */
-export function ResultsView({ match, baseline, analysisId }: ResultsViewProps) {
+export function ResultsView({ match, baseline }: ResultsViewProps) {
   const t = useTranslations("results");
   const job = match.job;
 
@@ -121,9 +117,6 @@ export function ResultsView({ match, baseline, analysisId }: ResultsViewProps) {
       </div>
 
       <ResultsInteractive match={match} baseline={baseline} />
-
-      <HiddenStrengths match={match} analysisId={analysisId} />
-
     </div>
   );
 }
