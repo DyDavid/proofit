@@ -550,7 +550,20 @@ class Store:
             row = db_get_analysis(analysis_id)
             if row:
                 if row.get("status") == "done":
-                    match_obj = Match.model_validate(row["match"]) if row.get("match") else None
+                    match_obj: Match | None = None
+                    if row.get("match"):
+                        try:
+                            if isinstance(row["match"], str):
+                                match_obj = Match.model_validate_json(row["match"])
+                            elif isinstance(row["match"], dict):
+                                match_obj = Match.model_validate(row["match"])
+                        except Exception as val_err:
+                            logger.warning("Match validation failed, using model_construct: %s", val_err)
+                            try:
+                                match_obj = Match.model_construct(**row["match"])
+                            except Exception:
+                                match_obj = None
+
                     baseline_obj: BaselineMatch | None = None
                     if match_obj and match_obj.job and match_obj.resume:
                         try:

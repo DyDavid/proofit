@@ -128,19 +128,14 @@ async def verify_bearer_token(token: str) -> CurrentUser:
         try:
             payload = await anyio.to_thread.run_sync(_decode_with_jwks, token, supabase_url)
             sub = payload.get("sub")
-            if not sub:
-                raise ValueError("Token missing sub claim")
-            email = payload.get("email") or (payload.get("user_metadata") or {}).get("email")
-            user = CurrentUser(id=str(sub), email=email)
-            register_user_email(user.id, user.email)
-            _verified_token_cache[cache_key] = (now_mono, user)
-            return user
+            if sub:
+                email = payload.get("email") or (payload.get("user_metadata") or {}).get("email")
+                user = CurrentUser(id=str(sub), email=email)
+                register_user_email(user.id, user.email)
+                _verified_token_cache[cache_key] = (now_mono, user)
+                return user
         except Exception as err:
-            raise ApiError(
-                status_code=401,
-                code="UNAUTHORIZED",
-                message="Invalid or expired authentication token.",
-            ) from err
+            logger.debug("JWKS decode failed (%s). Falling back to auth.get_user.", err)
 
     # 3. Fallback to Supabase Auth API `auth.get_user(token)` if client is available
     client = get_supabase_client()

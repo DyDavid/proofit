@@ -45,6 +45,8 @@ export function ResultsById({ id }: ResultsByIdProps) {
   const [isGuestResult, setIsGuestResult] = React.useState(false);
   const [notFound, setNotFound] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const hasMatchRef = React.useRef(false);
+  hasMatchRef.current = Boolean(match);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -118,7 +120,7 @@ export function ResultsById({ id }: ResultsByIdProps) {
         if (cancelled) return;
         if (err instanceof ApiError && err.code === "ANALYSIS_NOT_FOUND") {
           setNotFound(true);
-        } else {
+        } else if (!hasMatchRef.current) {
           setError(t("error.generic"));
         }
       }
@@ -141,7 +143,7 @@ export function ResultsById({ id }: ResultsByIdProps) {
     );
   }
 
-  if (error) {
+  if (error && !match) {
     return <div className="mx-auto max-w-xl px-4 py-24 text-center text-ink-2">{error}</div>;
   }
 

@@ -240,7 +240,7 @@ def _assert_analysis_access(record, user: CurrentUser | None) -> None:
                 code="UNAUTHORIZED",
                 message="Sign in to view this analysis.",
             )
-        if user.id != record.user_id:
+        if user.id != record.user_id and not user.is_admin:
             raise ApiError(
                 status_code=403,
                 code="FORBIDDEN",
