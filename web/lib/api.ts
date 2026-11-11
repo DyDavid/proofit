@@ -147,12 +147,40 @@ export interface CreateRewritesResponse {
  * so this is only ever invoked from a direct button press, never on mount.
  * `POST /api/analyses/{id}/rewrites` takes no body — `analysis_id` in the
  * path is the whole request, same shape as `retryAnalysis` above.
+ * Uses an AbortController with an 18-second timeout to avoid exhausting
+ * browser connection pools or locking up page navigation if the backend is slow.
  */
-export async function createRewrites(id: string): Promise<CreateRewritesResponse> {
+export async function createRewrites(
+  id: string,
+  signal?: AbortSignal,
+): Promise<CreateRewritesResponse> {
   const headers = await authHeaders();
-  const res = await fetch(`/api/analyses/${id}/rewrites`, { method: "POST", headers });
-  if (!res.ok) throw await toApiError(res);
-  return res.json();
+  const controller = new AbortController();
+
+  const timeoutId = setTimeout(() => controller.abort(), 18000);
+  if (signal) {
+    signal.addEventListener("abort", () => controller.abort(), { once: true });
+  }
+
+  try {
+    const res = await fetch(`/api/analyses/${id}/rewrites`, {
+      method: "POST",
+      headers,
+      signal: controller.signal,
+    });
+    if (!res.ok) throw await toApiError(res);
+    return res.json();
+  } catch (err: unknown) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new ApiError(
+        "The rewrite request timed out. Please try again.",
+        "RATE_LIMITED",
+      );
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 export interface AnalysisStatusResponse {

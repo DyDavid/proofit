@@ -97,11 +97,10 @@ export function UsageMeter() {
       <div className="flex flex-col gap-3 border-b border-rule pb-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap items-center gap-2.5">
           <span
-            className={`inline-flex items-center rounded-pill px-3 py-1 font-mono text-xs font-semibold uppercase tracking-wider ${
-              isPass
+            className={`inline-flex items-center rounded-pill px-3 py-1 font-mono text-xs font-semibold uppercase tracking-wider ${isPass
                 ? "bg-accent-tint text-accent"
                 : "bg-paper-2 text-ink"
-            }`}
+              }`}
           >
             {sub.plan_id === "pass"
               ? "Job Hunt Pass"

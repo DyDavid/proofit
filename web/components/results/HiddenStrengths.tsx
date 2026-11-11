@@ -228,6 +228,17 @@ export function HiddenStrengths({ match, analysisId }: HiddenStrengthsProps) {
   const [errorCode, setErrorCode] = React.useState<string | null>(null);
   const [dismissed, setDismissed] = React.useState<Set<string>>(new Set());
   const [liveMessage, setLiveMessage] = React.useState("");
+  const abortControllerRef = React.useRef<AbortController | null>(null);
+  const inFlightRef = React.useRef(false);
+
+  // Clean up any pending abort controller on unmount or page navigation
+  React.useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   const evidenceById = React.useMemo(() => {
     const map = new Map<string, Evidence>();
@@ -238,11 +249,16 @@ export function HiddenStrengths({ match, analysisId }: HiddenStrengthsProps) {
   const visible = strengths.filter((h) => !dismissed.has(itemKey(h)));
 
   async function run() {
-    if (!analysisId) return;
+    if (!analysisId || inFlightRef.current || loading) return;
+    inFlightRef.current = true;
     setLoading(true);
     setErrorCode(null);
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     try {
-      const res = await createRewrites(analysisId);
+      const res = await createRewrites(analysisId, controller.signal);
       setStrengths(res.hidden_strengths);
       setRejectedCount(res.rejected_count);
     } catch (err) {
@@ -263,6 +279,8 @@ export function HiddenStrengths({ match, analysisId }: HiddenStrengthsProps) {
         setErrorCode("INTERNAL");
       }
     } finally {
+      inFlightRef.current = false;
+      abortControllerRef.current = null;
       setLoading(false);
     }
   }
@@ -292,6 +310,7 @@ export function HiddenStrengths({ match, analysisId }: HiddenStrengthsProps) {
             size="sm"
             onClick={run}
             loading={loading}
+            disabled={loading}
           >
             {loading ? t("running") : t("run")}
           </Button>

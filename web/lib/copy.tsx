@@ -77,7 +77,15 @@ export interface Translator {
   ) => ReactNode;
 }
 
+const translatorCache = new Map<string, Translator>();
+
 function makeTranslator(namespace?: string): Translator {
+  const cacheKey = namespace ?? "";
+  const cached = translatorCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
   const withNamespace = (key: string) =>
     namespace ? `${namespace}.${key}` : key;
 
@@ -86,6 +94,7 @@ function makeTranslator(namespace?: string): Translator {
 
   t.rich = (key, tags) => renderRich(requireString(withNamespace(key)), tags);
 
+  translatorCache.set(cacheKey, t);
   return t;
 }
 

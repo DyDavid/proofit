@@ -46,10 +46,10 @@ export function ResultsById({ id }: ResultsByIdProps) {
   const [notFound, setNotFound] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const hasMatchRef = React.useRef(false);
-  hasMatchRef.current = Boolean(match);
 
   React.useEffect(() => {
     let cancelled = false;
+    hasMatchRef.current = false;
     const cacheKey = `proofit:analysis:${id}`;
 
     try {
@@ -61,6 +61,7 @@ export function ResultsById({ id }: ResultsByIdProps) {
           isGuest: boolean;
         };
         if (parsed?.match) {
+          hasMatchRef.current = true;
           setMatch(parsed.match);
           setBaseline(parsed.baseline);
           setIsGuestResult(Boolean(parsed.isGuest));
@@ -87,6 +88,7 @@ export function ResultsById({ id }: ResultsByIdProps) {
         if (cancelled) return;
         if (res.status === "done" && res.match) {
           const isGuest = Boolean(res.is_guest || isLoggedOut);
+          hasMatchRef.current = true;
           setMatch(res.match);
           setBaseline(res.baseline);
           setIsGuestResult(isGuest);

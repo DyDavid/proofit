@@ -441,6 +441,12 @@ def create_rewrites(
         )
 
     match = record.match
+    if match.hidden_strengths:
+        return {
+            "hidden_strengths": [h.model_dump(mode="json") for h in match.hidden_strengths],
+            "rejected_count": 0,
+        }
+
     resume = match.resume
     if resume is None or match.job is None:
         return {
