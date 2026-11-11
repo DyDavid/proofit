@@ -87,11 +87,39 @@ export function AnalyzeForm() {
   );
 
   React.useEffect(() => {
-    setRememberedResume(loadRememberedResume());
+    const local = loadRememberedResume();
+    if (local) {
+      setRememberedResume(local);
+    }
     const supabase = createClient();
     if (supabase) {
-      supabase.auth.getUser().then(({ data }) => {
-        setIsGuest(!data.user);
+      supabase.auth.getUser().then(async ({ data }) => {
+        const user = data.user;
+        setIsGuest(!user);
+        if (user) {
+          // If the user is logged in, fetch their latest saved resume from the database
+          // so they don't have to re-upload to run multiple analyses.
+          try {
+            const { data: savedResumes } = await supabase
+              .from("resumes")
+              .select("id, filename, size_bytes")
+              .eq("user_id", user.id)
+              .order("created_at", { ascending: false })
+              .limit(1);
+            if (savedResumes && savedResumes.length > 0) {
+              const latest = savedResumes[0];
+              const rec = {
+                id: latest.id,
+                filename: latest.filename,
+                size: latest.size_bytes ?? 0,
+              };
+              saveRememberedResume(rec);
+              setRememberedResume(rec);
+            }
+          } catch {
+            // Ignore error restoring saved resume
+          }
+        }
       });
     }
   }, []);
@@ -133,11 +161,32 @@ export function AnalyzeForm() {
     try {
       let resumeId: string;
       if (file) {
-        const uploaded = await uploadResume(file);
-        resumeId = uploaded.resume_id;
-        const remembered = { id: resumeId, filename: file.name, size: file.size };
-        saveRememberedResume(remembered);
-        setRememberedResume(remembered);
+        // If the selected file has the same filename as their already saved resume, reuse it
+        if (rememberedResume && rememberedResume.filename === file.name) {
+          resumeId = rememberedResume.id;
+          setFile(null);
+        } else {
+          try {
+            const uploaded = await uploadResume(file);
+            resumeId = uploaded.resume_id;
+            const remembered = { id: resumeId, filename: file.name, size: file.size };
+            saveRememberedResume(remembered);
+            setRememberedResume(remembered);
+            setFile(null);
+          } catch (uploadErr) {
+            // If upload failed because of saved_resumes limit and user already has a saved resume, fallback to it
+            if (
+              uploadErr instanceof ApiError &&
+              uploadErr.code === "quota_exceeded" &&
+              rememberedResume
+            ) {
+              resumeId = rememberedResume.id;
+              setFile(null);
+            } else {
+              throw uploadErr;
+            }
+          }
+        }
       } else {
         // canSubmit guarantees rememberedResume is set when file is not.
         resumeId = rememberedResume!.id;
