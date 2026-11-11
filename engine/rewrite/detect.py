@@ -18,6 +18,7 @@ from engine.rewrite.models import HiddenStrengthCandidate
 __all__ = ["detect_hidden_strengths"]
 
 _CANDIDATE_VERDICTS = ("partial", "missing")
+MAX_DETECT_CHECKS = 3
 
 
 def detect_hidden_strengths(match: Match, resume: Resume) -> list[HiddenStrengthCandidate]:
@@ -45,9 +46,13 @@ def detect_hidden_strengths(match: Match, resume: Resume) -> list[HiddenStrength
     evidence_lines = [prompts.format_evidence_line(e) for e in resume.evidence]
 
     candidates: list[HiddenStrengthCandidate] = []
-    for result in match.results:
-        if result.verdict not in _CANDIDATE_VERDICTS:
-            continue
+    # Filter candidates and prioritize "partial" (which already has some evidence)
+    # over "missing", capped to MAX_DETECT_CHECKS to ensure quick response and avoid rate limits.
+    candidate_results = [r for r in match.results if r.verdict in _CANDIDATE_VERDICTS]
+    candidate_results.sort(key=lambda r: 0 if r.verdict == "partial" else 1)
+    candidate_results = candidate_results[:MAX_DETECT_CHECKS]
+
+    for result in candidate_results:
         requirement = next((r for r in match.job.requirements if r.id == result.requirement_id), None)
         if requirement is None:
             continue

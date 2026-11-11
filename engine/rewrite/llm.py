@@ -36,7 +36,13 @@ class RateLimitedError(RuntimeError):
 
 def get_model() -> str:
     """`GEMINI_REWRITE_MODEL` if set, otherwise the engine's default Gemini model."""
-    return os.getenv("GEMINI_REWRITE_MODEL") or get_default_gemini_model()
+    raw = os.getenv("GEMINI_REWRITE_MODEL") or get_default_gemini_model()
+    try:
+        from engine.gemini_client import _MODEL_MAP
+
+        return _MODEL_MAP.get(raw, raw)
+    except Exception:
+        return raw
 
 
 def _get_client() -> Any:
@@ -75,17 +81,36 @@ def call_structured(
     from google.genai import errors, types
 
     client = _get_client()
-    config = types.GenerateContentConfig(
-        system_instruction=f"{system}\n\n{tool_description}".strip(),
-        response_mime_type="application/json",
-        response_json_schema=tool_schema,
-        temperature=DEFAULT_TEMPERATURE if temperature is None else temperature,
-        max_output_tokens=max_tokens,
-    )
+
+    thinking_config = None
+    try:
+        from engine.gemini_client import _build_thinking_config
+
+        thinking_config = _build_thinking_config(types, thinking_budget=0)
+    except Exception:
+        pass
+
+    config_kwargs: dict[str, Any] = {
+        "system_instruction": f"{system}\n\n{tool_description}".strip(),
+        "response_mime_type": "application/json",
+        "response_json_schema": tool_schema,
+        "temperature": DEFAULT_TEMPERATURE if temperature is None else temperature,
+        "max_output_tokens": max_tokens,
+    }
+    if thinking_config is not None:
+        config_kwargs["thinking_config"] = thinking_config
+
+    config = types.GenerateContentConfig(**config_kwargs)
     try:
         response = client.models.generate_content(model=get_model(), contents=user, config=config)
     except errors.APIError as err:
-        if getattr(err, "code", None) == 429:
+        err_str = str(err).lower()
+        if getattr(err, "code", None) == 429 or "429" in err_str or "resource_exhausted" in err_str or "quota" in err_str:
+            raise RateLimitedError("The model provider rate-limited this request.") from err
+        raise
+    except Exception as err:
+        err_str = str(err).lower()
+        if "429" in err_str or "resource_exhausted" in err_str or "quota" in err_str or "rate limit" in err_str:
             raise RateLimitedError("The model provider rate-limited this request.") from err
         raise
 

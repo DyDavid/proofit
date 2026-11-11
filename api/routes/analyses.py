@@ -13,7 +13,7 @@ import asyncio
 import logging
 import time
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ValidationError
 
 from api.auth import CurrentUser, get_client_ip, get_optional_user, hash_guest_ip
@@ -462,9 +462,10 @@ def create_rewrites(
     tone_notes = country_rules.tone_notes if country_rules else None
 
     rejected_count = 0
+    initial_strengths_count = len(match.hidden_strengths)
     try:
         candidates = detect_hidden_strengths(match, resume)
-        for candidate in candidates:
+        for candidate in candidates[:2]:
             requirement = requirements_by_id.get(candidate.requirement_id)
             anchor = evidence_by_id.get(candidate.evidence_id)
             if requirement is None or anchor is None:
@@ -540,7 +541,17 @@ def create_rewrites(
             code="RATE_LIMITED",
             message="The rewrite service is busy. Try again in a minute.",
         ) from exc
+    except (ApiError, HTTPException):
+        raise
     except Exception as exc:
+        err_msg = str(exc).lower()
+        if "429" in err_msg or "resource_exhausted" in err_msg or "rate limit" in err_msg or "quota" in err_msg:
+            logger.warning("Rewrite rate-limited in catch-all: %s", exc)
+            raise ApiError(
+                status_code=429,
+                code="RATE_LIMITED",
+                message="The rewrite service is busy. Try again in a minute.",
+            ) from exc
         # Generic on purpose: provider errors can echo keys or URLs, and this
         # message is returned to the browser. The real error is in the log.
         logger.exception("Rewrite generation failed")
@@ -551,7 +562,8 @@ def create_rewrites(
         ) from exc
 
     store.update_analysis(analysis_id, match=match)
-    if candidates:
+    newly_added = len(match.hidden_strengths) - initial_strengths_count
+    if newly_added > 0:
         record_usage(user.id if user else record.user_id, "rewrite")
     return {
         "hidden_strengths": [h.model_dump(mode="json") for h in match.hidden_strengths],

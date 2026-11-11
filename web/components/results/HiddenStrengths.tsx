@@ -246,7 +246,22 @@ export function HiddenStrengths({ match, analysisId }: HiddenStrengthsProps) {
       setStrengths(res.hidden_strengths);
       setRejectedCount(res.rejected_count);
     } catch (err) {
-      setErrorCode(err instanceof ApiError && err.code ? err.code : "INTERNAL");
+      if (err instanceof ApiError) {
+        if (err.code === "quota_exceeded" || err.message?.toLowerCase().includes("quota")) {
+          setErrorCode("quota_exceeded");
+        } else if (
+          err.code === "RATE_LIMITED" ||
+          err.message?.includes("429") ||
+          err.message?.includes("504") ||
+          err.message?.includes("timeout")
+        ) {
+          setErrorCode("RATE_LIMITED");
+        } else {
+          setErrorCode(err.code || "INTERNAL");
+        }
+      } else {
+        setErrorCode("INTERNAL");
+      }
     } finally {
       setLoading(false);
     }
