@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 
 from api.auth import CurrentUser, get_optional_user
 from api.config import settings
@@ -30,6 +30,7 @@ ACCEPTED_CONTENT_TYPES = {
 @router.post("/resumes")
 async def upload_resume(
     file: UploadFile = File(...),  # noqa: B008 (FastAPI DI convention)
+    replace: bool = Query(default=False),
     user: CurrentUser | None = Depends(get_optional_user),  # noqa: B008
 ) -> dict:
     if file.content_type not in ACCEPTED_CONTENT_TYPES:
@@ -47,9 +48,6 @@ async def upload_resume(
             message=f"Upload exceeds {settings.max_upload_bytes} bytes.",
         )
 
-    if user is not None:
-        check_saved_resumes_quota(user.id, store.count_user_resumes(user.id))
-
     from engine.normalize.parser import parse_resume_bytes
 
     try:
@@ -58,13 +56,34 @@ async def upload_resume(
         logger.warning("Resume text extraction failed: %s", err)
         raw_text = None
 
+    existing_resume = None
+    if user is not None:
+        existing_resume = store.find_user_resume(
+            user.id, filename=file.filename or "resume"
+        )
+        if existing_resume is None and replace:
+            existing_resume = store.find_user_resume(user.id)
+        if existing_resume is None and not user.is_admin:
+            check_saved_resumes_quota(user.id, store.count_user_resumes(user.id))
+
+    preserved_normalized = None
+    if (
+        existing_resume is not None
+        and existing_resume.normalized is not None
+        and raw_text
+        and existing_resume.raw_text == raw_text
+    ):
+        preserved_normalized = existing_resume.normalized
+
     record = store.add_resume(
         filename=file.filename or "resume",
         content_type=file.content_type,
         size=len(body),
         data=body,
         raw_text=raw_text,
+        normalized=preserved_normalized,
         user_id=user.id if user else None,
+        existing_id=existing_resume.id if existing_resume else None,
     )
     return {"resume_id": record.id}
 

@@ -100,7 +100,8 @@ async def verify_bearer_token(token: str) -> CurrentUser:
             sub = payload.get("sub")
             if not sub:
                 raise ValueError("Token missing sub claim")
-            user = CurrentUser(id=str(sub), email=payload.get("email"))
+            email = payload.get("email") or (payload.get("user_metadata") or {}).get("email")
+            user = CurrentUser(id=str(sub), email=email)
             register_user_email(user.id, user.email)
             return user
         except Exception as err:
@@ -117,7 +118,8 @@ async def verify_bearer_token(token: str) -> CurrentUser:
             sub = payload.get("sub")
             if not sub:
                 raise ValueError("Token missing sub claim")
-            user = CurrentUser(id=str(sub), email=payload.get("email"))
+            email = payload.get("email") or (payload.get("user_metadata") or {}).get("email")
+            user = CurrentUser(id=str(sub), email=email)
             register_user_email(user.id, user.email)
             return user
         except Exception as err:

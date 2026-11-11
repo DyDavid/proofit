@@ -7,6 +7,7 @@ When offline or in mock mode without credentials, gracefully falls back to the i
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
@@ -166,9 +167,10 @@ class Store:
         raw_text: str | None = None,
         normalized: Resume | None = None,
         user_id: str | None = None,
+        existing_id: str | None = None,
     ) -> ResumeRecord:
         record = ResumeRecord(
-            id=_new_id("res"),
+            id=existing_id or _new_id("res"),
             filename=filename,
             content_type=content_type,
             size=size,
@@ -193,6 +195,46 @@ class Store:
             )
 
         return record
+
+    def find_user_resume(
+        self,
+        user_id: str,
+        filename: str | None = None,
+    ) -> ResumeRecord | None:
+        """Find an existing resume for `user_id` (optionally matching `filename`)."""
+        target_name = filename.strip().lower() if filename else None
+        for r in reversed(list(self.resumes.values())):
+            if r.user_id == user_id and (
+                target_name is None or r.filename.strip().lower() == target_name
+            ):
+                return r
+
+        client = get_supabase_client()
+        if client is not None:
+            with contextlib.suppress(Exception):
+                query = client.table("resumes").select("*").eq("user_id", user_id)
+                if filename:
+                    query = query.eq("filename", filename)
+                res = query.limit(1).execute()
+                if res.data:
+                    row = res.data[0]
+                    norm_obj = (
+                        Resume.model_validate(row["normalized"])
+                        if row.get("normalized")
+                        else None
+                    )
+                    rec = ResumeRecord(
+                        id=row["id"],
+                        filename=row.get("filename", "resume"),
+                        content_type=row.get("content_type", "application/pdf"),
+                        size=row.get("size_bytes", 0),
+                        raw_text=row.get("raw_text"),
+                        normalized=norm_obj,
+                        user_id=row.get("user_id"),
+                    )
+                    self.resumes[rec.id] = rec
+                    return rec
+        return None
 
     def count_user_resumes(self, user_id: str) -> int:
         client = get_supabase_client()

