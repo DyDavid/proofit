@@ -8,6 +8,7 @@ and dynamic model fallback when rate limits or quotas (429) are reached.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import importlib.util
 import logging
@@ -91,10 +92,8 @@ def _build_thinking_config(types_module: Any, thinking_budget: int | None = None
 
     eff_budget = thinking_budget
     if env_budget:
-        try:
+        with contextlib.suppress(ValueError):
             eff_budget = int(env_budget.strip())
-        except ValueError:
-            pass
 
     # If thinking_level was set, do not pass conflicting budget unless explicitly given
     if eff_budget is not None and eff_budget > 0:
