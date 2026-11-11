@@ -12,7 +12,7 @@ import hashlib
 import importlib.util
 import logging
 import os
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from dotenv import load_dotenv
 from pydantic import BaseModel
@@ -67,6 +67,46 @@ def get_analysis_model() -> str:
     return os.getenv("GEMINI_ANALYSIS_MODEL") or get_default_gemini_model()
 
 
+def _build_thinking_config(types_module: Any, thinking_budget: int | None = None) -> Any | None:
+    """Build ThinkingConfig respecting thinking_level or budget from env or argument.
+
+    Supports:
+    - GEMINI_THINKING_LEVEL=low|minimal|medium|high
+    - GEMINI_THINKING_BUDGET=<tokens>
+    """
+    env_level = (os.getenv("GEMINI_THINKING_LEVEL") or "").strip().upper()
+    env_budget = os.getenv("GEMINI_THINKING_BUDGET")
+
+    kwargs: dict[str, Any] = {}
+
+    if env_level and hasattr(types_module, "ThinkingLevel"):
+        level_map = {
+            "MINIMAL": types_module.ThinkingLevel.MINIMAL,
+            "LOW": types_module.ThinkingLevel.LOW,
+            "MEDIUM": types_module.ThinkingLevel.MEDIUM,
+            "HIGH": types_module.ThinkingLevel.HIGH,
+        }
+        if env_level in level_map:
+            kwargs["thinking_level"] = level_map[env_level]
+
+    eff_budget = thinking_budget
+    if env_budget:
+        try:
+            eff_budget = int(env_budget.strip())
+        except ValueError:
+            pass
+
+    # If thinking_level was set, do not pass conflicting budget unless explicitly given
+    if eff_budget is not None and eff_budget > 0:
+        kwargs["thinking_budget"] = eff_budget
+    elif eff_budget == 0 and "thinking_level" not in kwargs:
+        kwargs["thinking_budget"] = 0
+
+    if kwargs:
+        return types_module.ThinkingConfig(**kwargs)
+    return None
+
+
 def generate_structured_json(  # noqa: UP047
     prompt: str,
     response_schema: type[T],
@@ -109,8 +149,9 @@ def generate_structured_json(  # noqa: UP047
                     }
                     if system_instruction:
                         config["system_instruction"] = system_instruction
-                    if thinking_budget is not None and thinking_budget > 0:
-                        config["thinking_config"] = types.ThinkingConfig(thinking_budget=thinking_budget)
+                    thinking_cfg = _build_thinking_config(types, thinking_budget)
+                    if thinking_cfg is not None:
+                        config["thinking_config"] = thinking_cfg
 
                     response = client.models.generate_content(
                         model=target_model,
@@ -182,8 +223,9 @@ def generate_gemini_text(
                         config["response_mime_type"] = "application/json"
                     if system_instruction:
                         config["system_instruction"] = system_instruction
-                    if thinking_budget is not None and thinking_budget > 0:
-                        config["thinking_config"] = types.ThinkingConfig(thinking_budget=thinking_budget)
+                    thinking_cfg = _build_thinking_config(types, thinking_budget)
+                    if thinking_cfg is not None:
+                        config["thinking_config"] = thinking_cfg
 
                     response = client.models.generate_content(
                         model=target_model,
