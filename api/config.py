@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Literal
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -37,6 +38,13 @@ class Settings(BaseSettings):
     site_url: str = "http://localhost:3000"
     enforce_quotas: bool = True
     admin_emails: str = "dydavid168@gmail.com"
+
+    @field_validator("billing_provider", mode="before")
+    @classmethod
+    def _normalize_billing_provider(cls, value: object) -> object:
+        if isinstance(value, str) and value.strip().lower() == "disabled":
+            return "mock"
+        return value
 
 
 def is_admin_email(email: str | None) -> bool:
