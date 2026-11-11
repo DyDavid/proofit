@@ -15,7 +15,8 @@ const STAGES = [
   "checking_realism",
 ] as const;
 
-const POLL_INTERVAL_MS = 2000;
+const POLL_INTERVAL_MS = 1000;
+const STEP_ADVANCE_MS = 250;
 const TIMEOUT_MS = 120_000;
 
 export interface ProgressStepperProps {
@@ -28,16 +29,9 @@ interface ServerErrorState {
 }
 
 /**
- * Polls `GET /api/analyses/{id}` every 2s and drives the stepper from the
- * real `stage` field. Three terminal states beyond "still going":
- *  - `timedOut`: 120s client ceiling reached while still queued/running, or
- *    a network hiccup that never resolved within that ceiling. Not a server
- *    error — the analysis may still finish — so the recovery action resumes
- *    polling rather than discarding anything (docs/errors.md §3).
- *  - `serverError`: the API reported `status: "failed"` with a typed error.
- *    Offers Retry (re-runs with the same resume_id/job_id, no re-upload),
- *    a copyable error_id (docs/errors.md §2 ENGINE_FAILED), and a link back
- *    to /analyze so a retry that itself fails is never a dead end.
+ * Polls `GET /api/analyses/{id}` every 1s and drives the stepper from the
+ * real `stage` field, smoothly stepping through intermediate stages so every
+ * checkmark is visibly completed in sequence before navigating to `/results`.
  */
 export function ProgressStepper({ analysisId }: ProgressStepperProps) {
   const t = useTranslations("progress");
@@ -46,17 +40,31 @@ export function ProgressStepper({ analysisId }: ProgressStepperProps) {
   const router = useRouter();
   const [currentId, setCurrentId] = React.useState(analysisId);
   const [activeIndex, setActiveIndex] = React.useState(0);
+  const [targetIndex, setTargetIndex] = React.useState(0);
+  const [isFinished, setIsFinished] = React.useState(false);
   const [timedOut, setTimedOut] = React.useState(false);
   const [serverError, setServerError] = React.useState<ServerErrorState | null>(null);
   const [retrying, setRetrying] = React.useState(false);
   const [retryFailed, setRetryFailed] = React.useState(false);
   const [copied, setCopied] = React.useState(false);
   const startedAtRef = React.useRef<number | null>(null);
-  // Holds the current `poll` closure so `keepWaiting` can resume the same
-  // polling chain in place — the chain terminates (no further `setTimeout`)
-  // once it hits the timeout branch, and `timedOut` isn't an effect
-  // dependency, so nothing would otherwise restart it.
   const pollRef = React.useRef<() => void>(() => {});
+
+  // Smoothly advance `activeIndex` one step at a time up to `targetIndex`
+  React.useEffect(() => {
+    if (activeIndex < targetIndex) {
+      const timer = setTimeout(() => {
+        setActiveIndex((prev) => Math.min(prev + 1, targetIndex));
+      }, STEP_ADVANCE_MS);
+      return () => clearTimeout(timer);
+    }
+    if (isFinished && activeIndex >= STAGES.length) {
+      const timer = setTimeout(() => {
+        router.push(`/results?id=${currentId}`);
+      }, 200);
+      return () => clearTimeout(timer);
+    }
+  }, [activeIndex, targetIndex, isFinished, currentId, router]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -65,6 +73,8 @@ export function ProgressStepper({ analysisId }: ProgressStepperProps) {
     setServerError(null);
     setRetryFailed(false);
     setActiveIndex(0);
+    setTargetIndex(0);
+    setIsFinished(false);
 
     async function poll() {
       const elapsed = Date.now() - (startedAtRef.current ?? Date.now());
@@ -73,8 +83,8 @@ export function ProgressStepper({ analysisId }: ProgressStepperProps) {
         if (cancelled) return;
 
         if (res.status === "done") {
-          setActiveIndex(STAGES.length);
-          router.push(`/results?id=${currentId}`);
+          setTargetIndex(STAGES.length);
+          setIsFinished(true);
           return;
         }
         if (res.status === "failed") {
@@ -90,7 +100,9 @@ export function ProgressStepper({ analysisId }: ProgressStepperProps) {
         }
 
         const index = STAGES.indexOf(res.stage as (typeof STAGES)[number]);
-        setActiveIndex(index >= 0 ? index : 0);
+        if (index >= 0) {
+          setTargetIndex((prev) => Math.max(prev, index));
+        }
         setTimeout(poll, POLL_INTERVAL_MS);
       } catch {
         if (cancelled) return;

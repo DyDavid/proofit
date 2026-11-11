@@ -96,10 +96,10 @@ async def _run_mock_analysis(analysis_id: str) -> None:
 
 
 async def _run_live_analysis(analysis_id: str) -> None:
-    record = store.get_analysis(analysis_id)
+    record = await asyncio.to_thread(store.get_analysis, analysis_id)
     if not record:
         return
-    store.update_analysis(analysis_id, status="running")
+    await asyncio.to_thread(store.update_analysis, analysis_id, status="running")
 
     job = None
     resume = None
@@ -111,16 +111,16 @@ async def _run_live_analysis(analysis_id: str) -> None:
         from engine.match import run_baseline, run_match
         from engine.normalize import normalize_jd, normalize_resume
 
-        res_rec = store.get_resume(record.resume_id)
+        res_rec = await asyncio.to_thread(store.get_resume, record.resume_id)
         if not res_rec:
             raise ValueError(f"Resume {record.resume_id} not found.")
 
-        job_rec = store.get_job(record.job_id)
+        job_rec = await asyncio.to_thread(store.get_job, record.job_id)
         if not job_rec:
             raise ValueError(f"Job {record.job_id} not found.")
 
-        # Stage 1 & 2: Normalize resume and job concurrently in parallel threads
-        store.update_analysis(analysis_id, stage="reading_resume")
+        # Stage 1 & 2: Normalize resume and job concurrently in worker threads
+        await asyncio.to_thread(store.update_analysis, analysis_id, stage="reading_resume")
 
         def _do_norm_resume():
             if res_rec.normalized is not None:
@@ -128,39 +128,47 @@ async def _run_live_analysis(analysis_id: str) -> None:
             data_bytes = res_rec.data or (res_rec.raw_text.encode("utf-8") if res_rec.raw_text else b"")
             return normalize_resume(data_bytes, res_rec.filename)
 
-
         def _do_norm_jd():
             if job_rec.normalized is not None:
                 return job_rec.normalized
             raw_jd = fetch_jd(job_rec.raw) if job_rec.source == "url" else job_rec.raw
             return normalize_jd(raw_jd)
 
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            fut_res = executor.submit(_do_norm_resume)
-            fut_job = executor.submit(_do_norm_jd)
-            resume = fut_res.result()
-            store.update_analysis(analysis_id, stage="reading_job")
-            job = fut_job.result()
+        task_res = asyncio.create_task(asyncio.to_thread(_do_norm_resume))
+        task_job = asyncio.create_task(asyncio.to_thread(_do_norm_jd))
+
+        resume = await task_res
+        await asyncio.to_thread(store.update_analysis, analysis_id, stage="reading_job")
+        if task_job.done():
+            await asyncio.sleep(0.6)
+        job = await task_job
 
         res_rec.normalized = resume
         job_rec.normalized = job
 
         # Save normalized structures to existing records & Supabase
-        store.save_normalized_resume(res_rec.id, resume)
-        store.save_normalized_job(job_rec.id, job)
+        await asyncio.to_thread(store.save_normalized_resume, res_rec.id, resume)
+        await asyncio.to_thread(store.save_normalized_job, job_rec.id, job)
 
         # Stage 3: matching_requirements
-        store.update_analysis(analysis_id, stage="matching_requirements")
-        match = run_match(job, resume)
+        await asyncio.to_thread(store.update_analysis, analysis_id, stage="matching_requirements")
+        match = await asyncio.to_thread(run_match, job, resume)
 
         # Stage 4: checking_realism
-        store.update_analysis(analysis_id, stage="checking_realism")
-        baseline = run_baseline(job, resume)
+        await asyncio.to_thread(store.update_analysis, analysis_id, stage="checking_realism")
+        baseline = await asyncio.to_thread(run_baseline, job, resume)
+        await asyncio.sleep(0.6)
         match.job = job
         match.resume = resume
 
-        store.update_analysis(analysis_id, status="done", match=match, baseline=baseline)
-        record_usage(record.user_id, "analysis")
+        await asyncio.to_thread(
+            store.update_analysis,
+            analysis_id,
+            status="done",
+            match=match,
+            baseline=baseline,
+        )
+        await asyncio.to_thread(record_usage, record.user_id, "analysis")
 
         # Parallel pgvector embeddings persistence in detached background thread (non-blocking)
         if get_supabase_client():
