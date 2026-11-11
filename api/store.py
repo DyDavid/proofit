@@ -441,6 +441,37 @@ class Store:
             raise DatabasePersistenceError("Saved resume count unavailable.")
         return sum(1 for r in self.resumes.values() if r.user_id == user_id)
 
+    def prune_user_resumes_for_slot(self, user_id: str, limit: int) -> None:
+        """If user has reached or exceeded their saved resume limit, remove oldest resume to allow replacement."""
+        client = get_supabase_client()
+        if client is not None:
+            try:
+                res = (
+                    client.table("resumes")
+                    .select("id")
+                    .eq("user_id", user_id)
+                    .order("created_at", desc=False)
+                    .execute()
+                )
+                rows = res.data or []
+                if len(rows) >= limit:
+                    to_remove = len(rows) - limit + 1
+                    for r in rows[:to_remove]:
+                        client.table("resumes").delete().eq("id", r["id"]).execute()
+                        with self._lock:
+                            self.resumes.pop(r["id"], None)
+            except Exception:
+                pass
+        with self._lock:
+            user_resumes = sorted(
+                [r for r in self.resumes.values() if r.user_id == user_id],
+                key=lambda r: r.created_at or utcnow(),
+            )
+            if len(user_resumes) >= limit:
+                to_remove = len(user_resumes) - limit + 1
+                for r in user_resumes[:to_remove]:
+                    self.resumes.pop(r.id, None)
+
     def get_resume(self, resume_id: str) -> ResumeRecord | None:
         if resume_id in self.resumes:
             return self.resumes[resume_id]

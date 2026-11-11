@@ -63,6 +63,7 @@ async def upload_resume(
     request: Request,
     file: UploadFile = File(...),  # noqa: B008 (FastAPI DI convention)
     user: CurrentUser | None = Depends(get_optional_user),  # noqa: B008
+    replace: bool = False,
 ) -> dict:
     enforce_endpoint_rate_limit(
         request,
@@ -79,7 +80,7 @@ async def upload_resume(
 
     body = await _read_upload_bounded(file, settings.max_upload_bytes)
 
-    slot_id = await asyncio.to_thread(reserve_saved_resume_slot, user) if user else None
+    slot_id = await asyncio.to_thread(reserve_saved_resume_slot, user, replace) if user else None
     saved = False
     try:
         result = await _parse_and_save(file, body, user, slot_id)

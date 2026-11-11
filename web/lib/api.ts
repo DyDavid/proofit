@@ -73,11 +73,15 @@ async function toApiError(res: Response): Promise<ApiError> {
   );
 }
 
-export async function uploadResume(file: File): Promise<{ resume_id: string }> {
+export async function uploadResume(
+  file: File,
+  replace: boolean = true,
+): Promise<{ resume_id: string }> {
   const form = new FormData();
   form.append("file", file);
   const headers = await authHeaders();
-  const res = await fetch("/api/resumes", { method: "POST", headers, body: form });
+  const url = replace ? "/api/resumes?replace=true" : "/api/resumes";
+  const res = await fetch(url, { method: "POST", headers, body: form });
   if (!res.ok) throw await toApiError(res);
   return res.json();
 }

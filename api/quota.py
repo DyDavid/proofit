@@ -115,7 +115,7 @@ def check_saved_resumes_quota(user_id: str, existing_count: int) -> None:
         )
 
 
-def reserve_saved_resume_slot(user: CurrentUser) -> str | None:
+def reserve_saved_resume_slot(user: CurrentUser, replace: bool = False) -> str | None:
     """Enforce saved-resume quota before parsing, including in-flight uploads."""
     if not settings.enforce_quotas or user.is_admin:
         return None
@@ -127,6 +127,8 @@ def reserve_saved_resume_slot(user: CurrentUser) -> str | None:
         limit = plan.limits.saved_resumes
         if limit is None:
             return None
+        if replace:
+            store.prune_user_resumes_for_slot(user.id, limit)
         slot_id = store.reserve_resume_slot(user.id, limit)
     except DatabasePersistenceError as exc:
         _raise_persistence_unavailable(exc)
