@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Archivo, Geist, Geist_Mono, Newsreader } from "next/font/google";
+import { Archivo, Geist_Mono, Newsreader, Poppins } from "next/font/google";
 import type { ReactNode } from "react";
 import Footer from "@/components/layout/Footer";
 import Header from "@/components/layout/Header";
@@ -7,10 +7,11 @@ import { getTranslations } from "@/lib/copy";
 import { getSiteUrl } from "@/lib/seo";
 import "./globals.css";
 
-/** Geist is the single UI font (variable font supports 100-900). */
-const geist = Geist({
+/** Poppins is the single UI font (static font, so weights are listed). */
+const poppins = Poppins({
   subsets: ["latin"],
-  variable: "--font-geist",
+  weight: ["300", "400", "500", "600", "700", "800"],
+  variable: "--font-poppins",
   display: "swap",
 });
 
@@ -82,11 +83,11 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html
       lang="en"
-      className={`${geist.variable} ${archivo.variable} ${newsreader.variable} ${geistMono.variable}`}
+      className={`${poppins.variable} ${archivo.variable} ${newsreader.variable} ${geistMono.variable}`}
       data-scroll-behavior="smooth"
     >
       <body
-        className={`${geist.className} flex min-h-screen flex-col bg-paper leading-[1.7] text-ink antialiased`}
+        className={`${poppins.className} flex min-h-screen flex-col bg-paper leading-[1.7] text-ink antialiased`}
       >
         <Header />
         <main id="main" className="flex-1">

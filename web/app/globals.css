@@ -86,7 +86,7 @@
   --font-serif:
     var(--font-archivo), "Archivo", ui-sans-serif, system-ui, sans-serif;
   --font-sans:
-    var(--font-geist), "Geist", ui-sans-serif, system-ui, -apple-system,
+    var(--font-poppins), "Poppins", ui-sans-serif, system-ui, -apple-system,
     "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono:
     var(--font-geist-mono), "Geist Mono", "SFMono-Regular", Menlo, Consolas,
